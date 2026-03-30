@@ -1,0 +1,24 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Cursor / local temp
+.cursor/
+.vite/
+
+# Frontend build/deps
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+
+# Logs / env
+*.log
+.env
+.env.*
+
+# Office temporary lock files
+~$*.docx
+~$*.doc

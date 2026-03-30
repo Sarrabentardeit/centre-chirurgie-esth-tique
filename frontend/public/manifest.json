@@ -1,0 +1,19 @@
+{
+  "name": "Dr. Chennoufi — Espace Patients",
+  "short_name": "Chennoufi",
+  "description": "Plateforme de gestion patients — Chirurgie Esthétique",
+  "theme_color": "#c44828",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

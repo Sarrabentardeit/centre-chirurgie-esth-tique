@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar, MessageSquare,
   Bell, Settings, LogOut, Heart, ClipboardList, FileCheck,
@@ -55,6 +55,7 @@ interface SidebarProps {
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, logout } = useAuthStore()
   const location = useLocation()
+  const navigate = useNavigate()
 
   if (!user) return null
 
@@ -171,7 +172,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           <button
             onClick={() => {
               logout()
-              window.location.href = '/login'
+              navigate('/login', { replace: true })
             }}
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-all"
           >

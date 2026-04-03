@@ -1,7 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar, MessageSquare,
-  Bell, Settings, LogOut, Heart, ClipboardList, FileCheck,
+  Bell, LogOut, Heart, ClipboardList, FileCheck,
   Package, TrendingUp, Camera, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -92,11 +92,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
       >
         {/* Logo Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 shadow-sm">
-              <Heart className="h-5 w-5 text-white" />
-            </div>
+        <div className="flex items-center justify-between px-4 py-4 border-b border-border bg-white">
+          <div className="flex items-center gap-2">
+            <img
+              src="/brand-logo-teal.png"
+              alt="Logo Dr. Mehdi Chennoufi"
+              className="h-16 w-40 rounded-xl object-contain"
+            />
             <div>
               <p className="text-sm font-bold text-foreground leading-none">Dr. Mehdi Chennoufi</p>
               <p className="text-xs text-muted-foreground mt-0.5">Chirurgie Esthétique</p>
@@ -162,17 +164,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* Footer */}
         <div className="px-3 py-4 border-t border-border space-y-1">
-          <NavLink
-            to="/parametres"
-            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
-          >
-            <Settings className="h-4 w-4" />
-            Paramètres
-          </NavLink>
           <button
             onClick={() => {
+              const redirectPath = user.role === 'patient' ? '/acces-patient' : '/login'
               logout()
-              navigate('/login', { replace: true })
+              navigate(redirectPath, { replace: true })
             }}
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-all"
           >

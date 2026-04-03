@@ -110,10 +110,16 @@ export default function ChatPage() {
   }
 
   const getSenderName = (msg: MessageChat) => {
+    const own = isOwnMessage(msg)
     if (msg.expediteurRole === 'bot') return 'Assistant'
     if (msg.expediteurRole === 'medecin') return 'Dr. Mehdi Chennoufi'
     if (msg.expediteurRole === 'gestionnaire') return 'Gestionnaire'
-    return 'Vous'
+    if (msg.expediteurRole === 'patient') {
+      if (own) return 'Vous'
+      if (!isPatientRole && activePatient) return `${activePatient.prenom} ${activePatient.nom}`
+      return 'Patient'
+    }
+    return own ? 'Vous' : 'Utilisateur'
   }
 
   const isOwnMessage = (msg: MessageChat) => msg.expediteurId === user?.id

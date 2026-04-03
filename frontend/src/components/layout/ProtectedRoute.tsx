@@ -12,7 +12,9 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   const location = useLocation()
 
   if (!isAuthenticated || !user) {
-    return <Navigate to="/login" state={{ from: location }} replace />
+    const isPatientArea = location.pathname.startsWith('/patient')
+    const loginPath = isPatientArea ? '/acces-patient' : '/login'
+    return <Navigate to={loginPath} state={{ from: location }} replace />
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {

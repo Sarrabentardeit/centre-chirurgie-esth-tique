@@ -8,6 +8,7 @@ import { ProtectedRoute } from './components/layout/ProtectedRoute'
 // Auth
 import LoginPage from './pages/auth/LoginPage'
 import InscriptionPage from './pages/auth/InscriptionPage'
+import PatientAccessPage from './pages/auth/PatientAccessPage'
 
 // Patient pages
 import DossierPage from './pages/patient/DossierPage'
@@ -21,6 +22,8 @@ import PostOpPage from './pages/patient/PostOpPage'
 import DashboardMedecinPage from './pages/medecin/DashboardMedecinPage'
 import PatientsPage from './pages/medecin/PatientsPage'
 import DossierPatientPage from './pages/medecin/DossierPatientPage'
+import RapportsPage from './pages/medecin/RapportsPage'
+import AgendaMedecinPage from './pages/medecin/AgendaMedecinPage'
 
 // Gestionnaire pages
 import DashboardGestionnairePage from './pages/gestionnaire/DashboardGestionnairePage'
@@ -28,6 +31,8 @@ import DevisGestionnairePage from './pages/gestionnaire/DevisGestionnairePage'
 import LogistiquePage from './pages/gestionnaire/LogistiquePage'
 import NotificationsPage from './pages/gestionnaire/NotificationsPage'
 import CommunicationPage from './pages/gestionnaire/CommunicationPage'
+import AnalyticsPage from './pages/gestionnaire/AnalyticsPage'
+import NotFoundPage from './pages/NotFoundPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,8 +50,10 @@ export default function App() {
         <Routes>
           {/* Public */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/acces-patient" element={<PatientAccessPage />} />
           <Route path="/inscription" element={<InscriptionPage />} />
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/formulaire" element={<FormulairePage />} />
+          <Route path="/" element={<Navigate to="/formulaire" replace />} />
 
           {/* Protected App Shell */}
           <Route
@@ -135,7 +142,7 @@ export default function App() {
               path="/medecin/rapports"
               element={
                 <ProtectedRoute allowedRoles={['medecin']}>
-                  <PatientsPage />
+                  <RapportsPage />
                 </ProtectedRoute>
               }
             />
@@ -143,7 +150,7 @@ export default function App() {
               path="/medecin/agenda"
               element={
                 <ProtectedRoute allowedRoles={['medecin']}>
-                  <AgendaPage />
+                  <AgendaMedecinPage />
                 </ProtectedRoute>
               }
             />
@@ -233,14 +240,14 @@ export default function App() {
               path="/gestionnaire/analytics"
               element={
                 <ProtectedRoute allowedRoles={['gestionnaire']}>
-                  <DashboardGestionnairePage />
+                  <AnalyticsPage />
                 </ProtectedRoute>
               }
             />
           </Route>
 
           {/* 404 fallback */}
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

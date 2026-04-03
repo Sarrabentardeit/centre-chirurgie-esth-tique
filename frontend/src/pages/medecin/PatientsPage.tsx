@@ -211,7 +211,7 @@ export default function PatientsPage() {
                   if (user?.role === 'medecin') {
                     navigate(`/medecin/patients/${created.id}`)
                   } else {
-                    navigate('/gestionnaire/devis')
+                    navigate(`/gestionnaire/devis/${created.id}`)
                   }
                 }}
               >
@@ -271,7 +271,7 @@ export default function PatientsPage() {
                 if (user?.role === 'medecin') {
                   navigate(`/medecin/patients/${patient.id}`)
                 } else {
-                  navigate('/gestionnaire/devis')
+                  navigate(`/gestionnaire/devis/${patient.id}`)
                 }
               }}
             >

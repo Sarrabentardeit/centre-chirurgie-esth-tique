@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { useAuthStore } from '@/store/authStore'
 import { useDemoStore } from '@/store/demoStore'
+import { useParams } from 'react-router-dom'
 
 interface LigneDevisForm {
   description: string
@@ -24,6 +25,7 @@ interface LigneDevisForm {
 }
 
 export default function DevisGestionnairePage() {
+  const { id: patientIdFromUrl } = useParams<{ id?: string }>()
   const patients = useDemoStore((s) => s.patients)
   const currency = useDemoStore((s) => s.currency)
   const setCurrency = useDemoStore((s) => s.setCurrency)
@@ -52,10 +54,14 @@ export default function DevisGestionnairePage() {
   const gestionnaireRefuseDevis = useDemoStore((s) => s.gestionnaireRefuseDevis)
 
   useEffect(() => {
+    if (patientIdFromUrl && patientsAvecRapport.some((p) => p.id === patientIdFromUrl)) {
+      setSelectedPatient(patientIdFromUrl)
+      return
+    }
     if (!selectedPatient && patientsAvecRapport.length > 0) {
       setSelectedPatient(patientsAvecRapport[0].id)
     }
-  }, [patientsAvecRapport, selectedPatient])
+  }, [patientIdFromUrl, patientsAvecRapport, selectedPatient])
 
   useEffect(() => {
     setIsEditingExisting(false)

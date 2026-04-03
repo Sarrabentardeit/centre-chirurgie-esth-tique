@@ -5,11 +5,14 @@ import { useDemoStore } from '@/store/demoStore'
 
 export default function RapportsPage() {
   const patients = useDemoStore((s) => s.patients)
+  const rapports = useDemoStore((s) => s.rapports)
 
-  const patientsWithReport = useMemo(
-    () => patients.filter((p) => Boolean(p.rapportMedical)),
-    [patients]
-  )
+  const patientsWithReport = useMemo(() => {
+    const byPatientId = new Map(rapports.map((r) => [r.patientId, r]))
+    return patients
+      .filter((p) => byPatientId.has(p.id))
+      .map((p) => ({ patient: p, rapport: byPatientId.get(p.id)! }))
+  }, [patients, rapports])
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
@@ -28,7 +31,7 @@ export default function RapportsPage() {
           {patientsWithReport.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucun rapport disponible pour le moment.</p>
           ) : (
-            patientsWithReport.map((patient) => (
+            patientsWithReport.map(({ patient, rapport }) => (
               <div
                 key={patient.id}
                 className="flex items-center gap-3 rounded-lg border border-border bg-white px-3 py-2.5"
@@ -41,7 +44,7 @@ export default function RapportsPage() {
                     {patient.prenom} {patient.nom}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {patient.rapportMedical?.resume || 'Rapport médical généré'}
+                    {rapport.diagnostic?.trim() || 'Rapport médical généré'}
                   </p>
                 </div>
               </div>

@@ -214,14 +214,17 @@ export default function PatientAccessPage() {
           </div>
 
           <p className="mt-6 text-center text-sm text-[#8d847f]">
-            Première visite ?{' '}
+            Première visite sans compte ?{' '}
             <button
               type="button"
               onClick={() => navigate('/formulaire')}
               className="font-medium text-[#81572d] hover:underline"
             >
-              Compléter le formulaire
+              Remplir le formulaire
             </button>
+          </p>
+          <p className="mt-2 text-center text-xs text-[#aaa49e]">
+            Si votre compte a été créé par la clinique, connectez-vous avec les identifiants reçus.
           </p>
           </div>
         </div>

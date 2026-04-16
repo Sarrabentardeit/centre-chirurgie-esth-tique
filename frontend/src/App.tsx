@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 // Layouts
 import { AppLayout } from './components/layout/AppLayout'
 import { ProtectedRoute } from './components/layout/ProtectedRoute'
+import { ScrollToTop } from './components/layout/ScrollToTop'
 
 // Auth
 import LoginPage from './pages/auth/LoginPage'
@@ -13,6 +14,7 @@ import PatientAccessPage from './pages/auth/PatientAccessPage'
 // Patient pages
 import DossierPage from './pages/patient/DossierPage'
 import FormulairePage from './pages/patient/FormulairePage'
+import FormulaireRecapPage from './pages/patient/FormulaireRecapPage'
 import DevisPage from './pages/patient/DevisPage'
 import AgendaPage from './pages/patient/AgendaPage'
 import ChatPage from './pages/patient/ChatPage'
@@ -24,6 +26,7 @@ import PatientsPage from './pages/medecin/PatientsPage'
 import DossierPatientPage from './pages/medecin/DossierPatientPage'
 import RapportsPage from './pages/medecin/RapportsPage'
 import AgendaMedecinPage from './pages/medecin/AgendaMedecinPage'
+import NouveauPatientPage from './pages/medecin/NouveauPatientPage'
 
 // Gestionnaire pages
 import DashboardGestionnairePage from './pages/gestionnaire/DashboardGestionnairePage'
@@ -32,6 +35,8 @@ import LogistiquePage from './pages/gestionnaire/LogistiquePage'
 import NotificationsPage from './pages/gestionnaire/NotificationsPage'
 import CommunicationPage from './pages/gestionnaire/CommunicationPage'
 import AnalyticsPage from './pages/gestionnaire/AnalyticsPage'
+import UsersManagementPage from './pages/gestionnaire/UsersManagementPage'
+import AgendaGestionnairePage from './pages/gestionnaire/AgendaGestionnairePage'
 import NotFoundPage from './pages/NotFoundPage'
 
 const queryClient = new QueryClient({
@@ -47,6 +52,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <ScrollToTop />
         <Routes>
           {/* Public */}
           <Route path="/login" element={<LoginPage />} />
@@ -76,7 +82,7 @@ export default function App() {
               path="/patient/formulaire"
               element={
                 <ProtectedRoute allowedRoles={['patient']}>
-                  <FormulairePage />
+                  <FormulaireRecapPage />
                 </ProtectedRoute>
               }
             />
@@ -127,6 +133,14 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['medecin']}>
                   <PatientsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/medecin/patients/nouveau"
+              element={
+                <ProtectedRoute allowedRoles={['medecin']}>
+                  <NouveauPatientPage />
                 </ProtectedRoute>
               }
             />
@@ -185,6 +199,22 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['gestionnaire']}>
                   <PatientsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/gestionnaire/users"
+              element={
+                <ProtectedRoute allowedRoles={['gestionnaire']}>
+                  <UsersManagementPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/gestionnaire/agenda"
+              element={
+                <ProtectedRoute allowedRoles={['gestionnaire']}>
+                  <AgendaGestionnairePage />
                 </ProtectedRoute>
               }
             />

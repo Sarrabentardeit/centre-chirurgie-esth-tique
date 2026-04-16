@@ -1,14 +1,12 @@
-import { Bell, CheckCheck, Info, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Bell, CheckCheck, Info, AlertCircle, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useAuthStore } from '@/store/authStore'
-import { formatRelative } from '@/lib/utils'
-import { cn } from '@/lib/utils'
+import { formatRelative, cn } from '@/lib/utils'
 import type { Notification } from '@/types'
-import { useDemoStore } from '@/store/demoStore'
-import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { gestionnaireApi, type GestionnaireNotificationRow } from '@/lib/api'
 
 const TYPE_ICONS: Record<Notification['type'], React.ElementType> = {
   info: Info,
@@ -24,30 +22,66 @@ const ICON_COLORS: Record<Notification['type'], string> = {
   urgent: 'text-red-600',
 }
 
-export default function NotificationsPage() {
-  const { user } = useAuthStore()
-  const notificationsStore = useDemoStore((s) => s.notifications)
-  const markNotificationRead = useDemoStore((s) => s.markNotificationRead)
-  const markAllNotificationsReadForUser = useDemoStore((s) => s.markAllNotificationsReadForUser)
-  const navigate = useNavigate()
+function mapApiType(t: string): Notification['type'] {
+  if (t === 'error') return 'urgent'
+  if (t === 'success') return 'success'
+  if (t === 'warning') return 'warning'
+  return 'info'
+}
 
-  const allNotifs = useMemo(() => {
-    if (!user) return []
-    return notificationsStore.filter((n) => n.userId === user.id)
-  }, [notificationsStore, user?.id])
+type UiNotif = Omit<GestionnaireNotificationRow, 'type'> & { type: Notification['type'] }
+
+export default function NotificationsPage() {
+  const navigate = useNavigate()
+  const [rows, setRows] = useState<GestionnaireNotificationRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await gestionnaireApi.getNotifications()
+      setRows(res.notifications)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur de chargement.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const allNotifs: UiNotif[] = useMemo(
+    () => rows.map((n) => ({ ...n, type: mapApiType(n.type) })),
+    [rows]
+  )
 
   const unreadCount = useMemo(() => allNotifs.filter((n) => !n.lu).length, [allNotifs])
 
-  const markAllRead = () => {
-    if (!user) return
-    markAllNotificationsReadForUser(user.id)
+  const markAllRead = async () => {
+    try {
+      await gestionnaireApi.markAllNotificationsRead()
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Action impossible.')
+    }
   }
 
-  const markRead = (id: string) => markNotificationRead(id)
+  const markRead = async (id: string) => {
+    try {
+      await gestionnaireApi.markNotificationRead(id)
+      setRows((prev) => prev.map((n) => (n.id === id ? { ...n, lu: true } : n)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Action impossible.')
+    }
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">
             Notifications
@@ -57,15 +91,26 @@ export default function NotificationsPage() {
           </h2>
           <p className="text-sm text-muted-foreground">{allNotifs.length} notifications</p>
         </div>
-        {unreadCount > 0 && (
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={markAllRead}>
-            <CheckCheck className="h-4 w-4" />
-            Tout marquer comme lu
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           </Button>
-        )}
+          {unreadCount > 0 && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void markAllRead()}>
+              <CheckCheck className="h-4 w-4" />
+              Tout marquer comme lu
+            </Button>
+          )}
+        </div>
       </div>
 
-      {allNotifs.length === 0 ? (
+      {error && (
+        <p className="text-sm text-destructive">{error}</p>
+      )}
+
+      {loading && allNotifs.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">Chargement…</p>
+      ) : allNotifs.length === 0 ? (
         <div className="text-center py-12">
           <Bell className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
           <p className="text-muted-foreground text-sm">Aucune notification.</p>
@@ -86,7 +131,7 @@ export default function NotificationsPage() {
                   notif.type === 'warning' && !isRead && 'border-l-amber-500',
                   notif.type === 'urgent' && !isRead && 'border-l-red-500',
                 )}
-                onClick={() => markRead(notif.id)}
+                onClick={() => void markRead(notif.id)}
               >
                 <CardContent className="pt-4 pb-4">
                   <div className="flex items-start gap-3">

@@ -23,7 +23,9 @@ const ROUTE_TITLES: Record<string, string> = {
   '/medecin/post-op': 'Suivi Post-Op',
   '/medecin/chat': 'Messages',
   '/gestionnaire/dashboard': 'Tableau de Bord',
+  '/gestionnaire/users': 'Comptes Utilisateurs',
   '/gestionnaire/patients': 'Patients',
+  '/gestionnaire/agenda': 'Agenda Médecin',
   '/gestionnaire/devis': 'Gestion Devis',
   '/gestionnaire/chat': 'Messages',
   '/gestionnaire/communications': 'Communication & Templates',
@@ -94,7 +96,7 @@ export function AppLayout() {
   }, [messagesStore, patient?.id])
 
   const getChatPath = () => {
-    if (!user) return '/login'
+    if (!user) return '/acces-patient'
     if (user.role === 'patient') return '/patient/chat'
     if (user.role === 'medecin') return '/medecin/chat'
     return '/gestionnaire/chat'

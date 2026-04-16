@@ -80,17 +80,24 @@ export function getStepIndex(status: DossierStatus): number {
 }
 
 export type CurrencyUnit = 'TND' | 'EUR' | 'DZD'
+export const APP_CURRENCY: CurrencyUnit = 'TND'
 
-export function formatCurrency(amount: number, currency: CurrencyUnit = 'DZD'): string {
-  const localeByCurrency: Record<CurrencyUnit, string> = {
-    DZD: 'fr-DZ',
-    TND: 'fr-TN',
-    EUR: 'fr-FR',
-  }
-
-  return new Intl.NumberFormat(localeByCurrency[currency], {
+export function formatCurrency(amount: number, _currency: CurrencyUnit | string = APP_CURRENCY): string {
+  // Normalisation globale: toute l'application affiche en TND.
+  return new Intl.NumberFormat('fr-TN', {
     style: 'currency',
-    currency,
+    currency: APP_CURRENCY,
     minimumFractionDigits: 0,
   }).format(amount)
+}
+
+export function getPatientDossierNumber(patient: {
+  numeroDossier?: string
+  id: string
+  dateCreation?: string
+}): string {
+  if (patient.numeroDossier?.trim()) return patient.numeroDossier
+  const year = patient.dateCreation?.slice(0, 4) || String(new Date().getFullYear())
+  const suffix = patient.id.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase().padStart(5, '0')
+  return `DOS-${year}-${suffix}`
 }

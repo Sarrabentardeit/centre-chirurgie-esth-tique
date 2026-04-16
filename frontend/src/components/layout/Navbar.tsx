@@ -4,8 +4,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuthStore } from '@/store/authStore'
 import { useDemoStore } from '@/store/demoStore'
 import { formatRelative } from '@/lib/utils'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { gestionnaireApi, type GestionnaireNotificationRow } from '@/lib/api'
 
 interface NavbarProps {
   onMenuClick: () => void
@@ -17,22 +18,56 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
   const navigate = useNavigate()
   const [openNotif, setOpenNotif] = useState(false)
   const notifRef = useRef<HTMLDivElement | null>(null)
+  const [gestionnaireNotifs, setGestionnaireNotifs] = useState<GestionnaireNotificationRow[]>([])
 
   const notifications = useDemoStore((s) => s.notifications)
   const markNotificationRead = useDemoStore((s) => s.markNotificationRead)
   const markAllNotificationsReadForUser = useDemoStore((s) => s.markAllNotificationsReadForUser)
+
+  const loadGestionnaireNotifications = useCallback(async () => {
+    if (user?.role !== 'gestionnaire') return
+    try {
+      const res = await gestionnaireApi.getNotifications()
+      setGestionnaireNotifs(res.notifications)
+    } catch {
+      // Silent fallback: keep current UI state.
+    }
+  }, [user?.role])
+
+  useEffect(() => {
+    if (user?.role !== 'gestionnaire') {
+      setGestionnaireNotifs([])
+      return
+    }
+    void loadGestionnaireNotifications()
+    const id = window.setInterval(() => {
+      void loadGestionnaireNotifications()
+    }, 15000)
+    return () => window.clearInterval(id)
+  }, [user?.role, loadGestionnaireNotifications])
+
   const unreadCount = useMemo(() => {
     if (!user) return 0
+    if (user.role === 'gestionnaire') {
+      return gestionnaireNotifs.filter((n) => !n.lu).length
+    }
     return notifications.filter((n) => n.userId === user.id && !n.lu).length
-  }, [notifications, user?.id])
+  }, [gestionnaireNotifs, notifications, user])
+
   const userNotifications = useMemo(() => {
     if (!user) return []
+    if (user.role === 'gestionnaire') {
+      return gestionnaireNotifs
+        .slice()
+        .sort((a, b) => new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime())
+        .slice(0, 6)
+    }
     return notifications
       .filter((n) => n.userId === user.id)
       .slice()
       .sort((a, b) => new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime())
       .slice(0, 6)
-  }, [notifications, user?.id])
+  }, [gestionnaireNotifs, notifications, user])
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
@@ -75,17 +110,19 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
         <h1 className="text-lg font-semibold text-foreground hidden sm:block">{title}</h1>
       )}
 
-      {/* Search bar */}
-      <div className="flex-1 max-w-md hidden md:block">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="search"
-            placeholder="Rechercher un patient, dossier..."
-            className="w-full h-9 pl-9 pr-4 rounded-lg border border-input bg-muted/50 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background transition-colors"
-          />
+      {/* Search bar — backoffice uniquement */}
+      {user?.role !== 'patient' && (
+        <div className="flex-1 max-w-md hidden md:block">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="search"
+              placeholder="Rechercher un patient, dossier..."
+              className="w-full h-9 pl-9 pr-4 rounded-lg border border-input bg-muted/50 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background transition-colors"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="ml-auto flex items-center gap-2">
         {/* Notifications */}
@@ -112,7 +149,18 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
                 {user && unreadCount > 0 && (
                   <button
                     className="text-xs text-brand-600 hover:underline"
-                    onClick={() => markAllNotificationsReadForUser(user.id)}
+                    onClick={async () => {
+                      if (user.role === 'gestionnaire') {
+                        try {
+                          await gestionnaireApi.markAllNotificationsRead()
+                          setGestionnaireNotifs((prev) => prev.map((n) => ({ ...n, lu: true })))
+                        } catch {
+                          // Silent fallback.
+                        }
+                        return
+                      }
+                      markAllNotificationsReadForUser(user.id)
+                    }}
                   >
                     Tout marquer lu
                   </button>
@@ -128,8 +176,19 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
                       <button
                         key={n.id}
                         className="w-full rounded-lg border border-border p-2.5 text-left hover:bg-muted/50 transition-colors"
-                        onClick={() => {
-                          if (!n.lu) markNotificationRead(n.id)
+                        onClick={async () => {
+                          if (!n.lu && user?.role === 'gestionnaire') {
+                            try {
+                              await gestionnaireApi.markNotificationRead(n.id)
+                              setGestionnaireNotifs((prev) =>
+                                prev.map((row) => (row.id === n.id ? { ...row, lu: true } : row))
+                              )
+                            } catch {
+                              // Silent fallback.
+                            }
+                          } else if (!n.lu) {
+                            markNotificationRead(n.id)
+                          }
                           if (n.lienAction) navigate(n.lienAction)
                           setOpenNotif(false)
                         }}

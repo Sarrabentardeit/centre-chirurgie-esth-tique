@@ -27,6 +27,7 @@ export type DossierStatus =
 export interface Patient {
   id: string
   userId: string
+  numeroDossier?: string
   nom: string
   prenom: string
   email: string
@@ -87,6 +88,7 @@ export interface RapportMedical {
   interventionsRecommandees: string[]
   notes: string
   valeurMedicale: string
+  forfaitPropose?: number
   statut: 'brouillon' | 'finalise'
 }
 

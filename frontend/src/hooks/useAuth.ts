@@ -1,12 +1,29 @@
+import { useEffect } from 'react'
 import { useAuthStore, getDashboardPath } from '@/store/authStore'
-import { mockLogin } from '@/mocks/auth'
+import { authApi, ApiRequestError } from '@/lib/api'
 import { useLocation, useNavigate } from 'react-router-dom'
-import type { UserRole } from '@/types'
+import type { User, UserRole } from '@/types'
 
 export function useAuth() {
   const { user, isAuthenticated, isLoading, login, logout, setLoading } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
+
+  // Écoute l'événement auth:logout émis lors d'un 401 non-récupérable
+  useEffect(() => {
+    const handler = () => {
+      const currentRole = useAuthStore.getState().user?.role
+      logout()
+      // Règle absolue : les patients ne vont JAMAIS sur /login (backoffice)
+      if (currentRole === 'medecin' || currentRole === 'gestionnaire') {
+        navigate('/login')
+      } else {
+        navigate('/acces-patient')
+      }
+    }
+    window.addEventListener('auth:logout', handler)
+    return () => window.removeEventListener('auth:logout', handler)
+  }, [logout, navigate])
 
   const handleLogin = async (
     email: string,
@@ -14,33 +31,60 @@ export function useAuth() {
     allowedRoles?: UserRole[]
   ) => {
     setLoading(true)
-    const result = await mockLogin(email, password)
-    if (result.success && result.user && result.token) {
-      if (allowedRoles && !allowedRoles.includes(result.user.role)) {
+    try {
+      const result = await authApi.login({ email, password })
+      const userRole = result.user.role as UserRole
+
+      if (allowedRoles && !allowedRoles.includes(userRole)) {
         setLoading(false)
+        if (userRole === 'patient') {
+          return {
+            success: false,
+            error: 'Cet espace est réservé au backoffice. Les patientes accèdent via l\'espace patient.',
+          }
+        }
         return {
           success: false,
-          error: 'Espace réservé au backoffice. Les patientes accèdent via le lien formulaire direct.',
+          error: 'Accès non autorisé pour ce rôle.',
         }
       }
-      login(result.user, result.token)
+
+      const user: User = {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name,
+        role: userRole,
+      }
+      login(user, result.accessToken, result.refreshToken)
+
       const fromPath =
         (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
       const canUseFromPath = Boolean(
         fromPath &&
-          ((result.user.role === 'patient' && fromPath.startsWith('/patient')) ||
-            (result.user.role === 'medecin' && fromPath.startsWith('/medecin')) ||
-            (result.user.role === 'gestionnaire' && fromPath.startsWith('/gestionnaire')))
+          ((userRole === 'patient' && fromPath.startsWith('/patient')) ||
+            (userRole === 'medecin' && fromPath.startsWith('/medecin')) ||
+            (userRole === 'gestionnaire' && fromPath.startsWith('/gestionnaire')))
       )
-      navigate(canUseFromPath ? (fromPath as string) : getDashboardPath(result.user.role))
+      navigate(canUseFromPath ? (fromPath as string) : getDashboardPath(userRole))
       return { success: true }
+    } catch (err) {
+      setLoading(false)
+      if (err instanceof ApiRequestError) {
+        if (err.code === 'INVALID_CREDENTIALS' || err.status === 401) {
+          return { success: false, error: 'Email ou mot de passe incorrect.' }
+        }
+        return { success: false, error: err.message }
+      }
+      return { success: false, error: 'Erreur de connexion. Vérifiez votre réseau.' }
     }
-    setLoading(false)
-    return { success: false, error: result.error }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     const redirectPath = user?.role === 'patient' ? '/acces-patient' : '/login'
+    const { refreshToken } = useAuthStore.getState()
+    try {
+      if (refreshToken) await authApi.logout(refreshToken)
+    } catch { /* on déconnecte quand même */ }
     logout()
     navigate(redirectPath)
   }

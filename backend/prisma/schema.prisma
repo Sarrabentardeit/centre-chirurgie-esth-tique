@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUM
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  patient
+  medecin
+  gestionnaire
+}
+
+enum DossierStatus {
+  nouveau
+  formulaire_en_cours
+  formulaire_complete
+  en_analyse
+  rapport_genere
+  devis_preparation
+  devis_envoye
+  devis_accepte
+  date_reservee
+  logistique
+  intervention
+  post_op
+  suivi_termine
+}
+
+enum FormulaireStatus {
+  draft
+  submitted
+}
+
+enum DevisStatut {
+  brouillon
+  envoye
+  accepte
+  refuse
+}
+
+enum RdvStatut {
+  planifie
+  confirme
+  annule
+}
+
+enum AgendaEventType {
+  rdv
+  blocage
+  vacances
+}
+
+enum NotifType {
+  info
+  warning
+  success
+  error
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  status_change
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH & UTILISATEURS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         UserRole
+  fullName     String   @map("full_name")
+  avatar       String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  patient      Patient?
+  sessions     Session[]
+  messages     Message[]
+  notifications Notification[]
+  agendaEvents  AgendaEvent[]
+
+  @@map("users")
+}
+
+model Session {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  refreshTokenHash String   @map("refresh_token_hash")
+  userAgent        String?  @map("user_agent")
+  ipAddress        String?  @map("ip_address")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATIENT & DOSSIER
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Patient {
+  id             String        @id @default(uuid())
+  userId         String        @unique @map("user_id")
+  dossierNumber  String        @unique @map("dossier_number")
+  phone          String?
+  dateNaissance  DateTime?     @map("date_naissance") @db.Date
+  nationalite    String?
+  ville          String?
+  pays           String?
+  sourceContact  String?       @map("source_contact")
+  status         DossierStatus @default(nouveau)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  formulaires   Formulaire[]
+  files         File[]
+  rapports      Rapport[]
+  devis         Devis[]
+  agendaEvents  AgendaEvent[]
+  suiviPostOp   SuiviPostOp?
+  messages      Message[]
+
+  @@map("patients")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMULAIRE MÉDICAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Formulaire {
+  id          String           @id @default(uuid())
+  patientId   String           @map("patient_id")
+  status      FormulaireStatus @default(draft)
+  payload     Json             @default("{}")
+  submittedAt DateTime?        @map("submitted_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  files   File[]
+
+  @@map("formulaires")
+}
+
+model File {
+  id           String   @id @default(uuid())
+  patientId    String   @map("patient_id")
+  formulaireId String?  @map("formulaire_id")
+  filename     String
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  sizeBytes    Int      @map("size_bytes")
+  path         String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  patient     Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  formulaire  Formulaire? @relation(fields: [formulaireId], references: [id], onDelete: SetNull)
+
+  @@map("files")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RAPPORT MÉDICAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Rapport {
+  id                       String   @id @default(uuid())
+  patientId                String   @map("patient_id")
+  medecinId                String   @map("medecin_id")
+  diagnostic               String?
+  interventionsRecommandees String[] @map("interventions_recommandees")
+  valeurMedicale           String?  @map("valeur_medicale")
+  forfaitPropose           Float?   @map("forfait_propose")
+  notes                    String?
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("rapports")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEVIS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Devis {
+  id             String      @id @default(uuid())
+  patientId      String      @map("patient_id")
+  gestionnaireId String      @map("gestionnaire_id")
+  statut         DevisStatut @default(brouillon)
+  version        Int         @default(1)
+  lignes         Json        @default("[]")
+  total          Float       @default(0)
+  currency       String      @default("EUR")
+  planningMedical String?    @map("planning_medical")
+  notesSejour    String?     @map("notes_sejour")
+  dateValidite   DateTime?   @map("date_validite")
+  dateCreation   DateTime    @default(now()) @map("date_creation")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("devis")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENDA MÉDECIN (RDV / blocages / vacances)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AgendaEvent {
+  id          String          @id @default(uuid())
+  medecinId   String          @map("medecin_id")
+  type        AgendaEventType
+  title       String?
+  motif       String?
+  dateDebut   DateTime        @map("date_debut")
+  dateFin     DateTime        @map("date_fin")
+  allDay      Boolean         @default(false) @map("all_day")
+  patientId   String?         @map("patient_id")
+  statut      RdvStatut?
+  notes       String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  medecin User     @relation(fields: [medecinId], references: [id], onDelete: Cascade)
+  patient Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+
+  @@map("agenda_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUIVI POST-OP
+// ─────────────────────────────────────────────────────────────────────────────
+
+model SuiviPostOp {
+  id                DateTime @id @default(now()) @map("id")
+  patientId         String   @unique @map("patient_id")
+  dateIntervention  DateTime @map("date_intervention") @db.Date
+  compteRendu       String?  @map("compte_rendu")
+  photos            Json     @default("[]")
+  questionnaire     Json?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("suivi_post_op")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MESSAGERIE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Message {
+  id           String   @id @default(uuid())
+  patientId    String   @map("patient_id")
+  expediteurId String   @map("expediteur_id")
+  expediteurRole String @map("expediteur_role")
+  contenu      String
+  lu           Boolean  @default(false)
+  dateEnvoi    DateTime @default(now()) @map("date_envoi")
+
+  patient    Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  expediteur User    @relation(fields: [expediteurId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  type       NotifType @default(info)
+  titre      String
+  message    String
+  lu         Boolean   @default(false)
+  lienAction String?   @map("lien_action")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT & VERSIONING
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  actorId   String      @map("actor_id")
+  actorRole UserRole    @map("actor_role")
+  action    AuditAction
+  entity    String
+  entityId  String      @map("entity_id")
+  before    Json?       @map("before_data")
+  after     Json?       @map("after_data")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  @@index([entity, entityId])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+model RapportVersion {
+  id        String   @id @default(uuid())
+  rapportId String   @map("rapport_id")
+  patientId String   @map("patient_id")
+  medecinId String   @map("medecin_id")
+  snapshot  Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([rapportId, createdAt])
+  @@index([patientId, createdAt])
+  @@map("rapport_versions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGISTIQUE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Logistique {
+  id               String   @id @default(uuid())
+  patientId        String   @unique @map("patient_id")
+  dateArrivee      DateTime? @map("date_arrivee") @db.Date
+  dateDepart       DateTime? @map("date_depart") @db.Date
+  hebergement      String?
+  transport        String?
+  accompagnateur   String?
+  notesClinique    String?  @map("notes_clinique")
+  notesLogistiques String?  @map("notes_logistiques")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("logistique")
+}

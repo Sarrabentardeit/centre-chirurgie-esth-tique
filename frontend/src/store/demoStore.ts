@@ -15,6 +15,7 @@ import type {
   User,
 } from '@/types'
 import type { CurrencyUnit } from '@/lib/utils'
+import { getPatientDossierNumber } from '@/lib/utils'
 
 type CommunicationTemplateKey = 'formulaireAck' | 'devisSent' | 'refus'
 type CommunicationTemplateChannel = 'chat' | 'notification' | 'both'
@@ -60,7 +61,7 @@ type DemoState = {
   }) => Patient
   submitMedicalForm: (
     patientUserId: string,
-    form: Omit<FormulaireMedical, 'id' | 'patientId' | 'dateCompletion'>
+    form: Omit<FormulaireMedical, 'id' | 'patientId' | 'dateCompletion'> & { dateNaissance?: string }
   ) => void
   doctorFinalizeRapport: (patientId: string, medecinUserId: string, rapport: Omit<RapportMedical, 'id' | 'patientId' | 'medecinId' | 'dateCreation' | 'statut'>) => void
   gestionnaireSendDevis: (patientId: string, gestionnaireUserId: string, devisPayload: Omit<Devis, 'id' | 'patientId' | 'gestionnaireId' | 'dateCreation' | 'version' | 'statut'>) => void
@@ -168,7 +169,7 @@ export const useDemoStore = create<DemoState>()(persist((set, get) => ({
   formulaires: [],
   rapports: [...MOCK_RAPPORTS],
   devis: [...MOCK_DEVIS],
-  currency: 'EUR',
+  currency: 'TND',
   communicationTemplates: {
     formulaireAck: { ...DEFAULT_COMMUNICATION_TEMPLATES.formulaireAck },
     devisSent: { ...DEFAULT_COMMUNICATION_TEMPLATES.devisSent },
@@ -192,6 +193,7 @@ export const useDemoStore = create<DemoState>()(persist((set, get) => ({
     const patient: Patient = {
       id: nextId('p'),
       userId: user.id,
+      numeroDossier: '',
       prenom: prenomMaybe ?? 'Patient',
       nom: nomMaybe ?? '',
       email: user.email,
@@ -206,6 +208,7 @@ export const useDemoStore = create<DemoState>()(persist((set, get) => ({
       derniereActivite: nowIso().slice(0, 10),
       avatar: user.avatar ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${initialsFromName(user.name)}`,
     }
+    patient.numeroDossier = getPatientDossierNumber(patient)
 
     set((s) => ({ patients: [...s.patients, patient] }))
 
@@ -233,6 +236,7 @@ export const useDemoStore = create<DemoState>()(persist((set, get) => ({
     const patient: Patient = {
       id: nextId('p'),
       userId: nextId('u_local'),
+      numeroDossier: '',
       prenom: payload.prenom.trim(),
       nom: payload.nom.trim(),
       email: payload.email?.trim() || `local.${Date.now()}@no-email.local`,
@@ -247,6 +251,7 @@ export const useDemoStore = create<DemoState>()(persist((set, get) => ({
       derniereActivite: nowIso().slice(0, 10),
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${initialsFromName(`${payload.prenom} ${payload.nom}`)}`,
     }
+    patient.numeroDossier = getPatientDossierNumber(patient)
 
     set((s) => ({
       patients: [patient, ...s.patients],
@@ -293,11 +298,17 @@ export const useDemoStore = create<DemoState>()(persist((set, get) => ({
   submitMedicalForm: (patientUserId, form) => {
     const patient = get().getPatientByUserId(patientUserId)
     if (!patient) return
+    const { dateNaissance, ...medicalForm } = form
 
     set((s) => {
       const patients = s.patients.map((p) =>
         p.id === patient.id
-          ? { ...p, status: 'formulaire_complete' as DossierStatus, derniereActivite: nowIso().slice(0, 10) }
+          ? {
+              ...p,
+              dateNaissance: dateNaissance ?? p.dateNaissance,
+              status: 'formulaire_complete' as DossierStatus,
+              derniereActivite: nowIso().slice(0, 10),
+            }
           : p
       )
 
@@ -331,14 +342,14 @@ export const useDemoStore = create<DemoState>()(persist((set, get) => ({
       const newFormulaire: FormulaireMedical = existingForm
         ? {
             ...existingForm,
-            ...form,
+            ...medicalForm,
             patientId: patient.id,
             dateCompletion: nowIso().slice(0, 10),
           }
         : {
             id: nextId('f'),
             patientId: patient.id,
-            ...form,
+            ...medicalForm,
             dateCompletion: nowIso().slice(0, 10),
           }
 

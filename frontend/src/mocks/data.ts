@@ -35,6 +35,7 @@ export const MOCK_PATIENTS: Patient[] = [
   {
     id: 'p1',
     userId: 'u1',
+    numeroDossier: 'DOS-2026-00001',
     nom: 'Benali',
     prenom: 'Amira',
     email: 'patient@demo.com',
@@ -51,6 +52,7 @@ export const MOCK_PATIENTS: Patient[] = [
   {
     id: 'p2',
     userId: 'u_ext2',
+    numeroDossier: 'DOS-2026-00002',
     nom: 'Mansouri',
     prenom: 'Sara',
     email: 'sara.mansouri@email.com',
@@ -67,6 +69,7 @@ export const MOCK_PATIENTS: Patient[] = [
   {
     id: 'p3',
     userId: 'u_ext3',
+    numeroDossier: 'DOS-2026-00003',
     nom: 'Touati',
     prenom: 'Leila',
     email: 'leila.touati@email.com',
@@ -83,6 +86,7 @@ export const MOCK_PATIENTS: Patient[] = [
   {
     id: 'p4',
     userId: 'u_ext4',
+    numeroDossier: 'DOS-2026-00004',
     nom: 'Khelifi',
     prenom: 'Rania',
     email: 'rania.khelifi@email.com',
@@ -99,6 +103,7 @@ export const MOCK_PATIENTS: Patient[] = [
   {
     id: 'p5',
     userId: 'u_ext5',
+    numeroDossier: 'DOS-2025-00005',
     nom: 'Aissaoui',
     prenom: 'Fatima',
     email: 'fatima.aissaoui@email.com',
@@ -115,6 +120,7 @@ export const MOCK_PATIENTS: Patient[] = [
   {
     id: 'p6',
     userId: 'u_ext6',
+    numeroDossier: 'DOS-2026-00006',
     nom: 'Bouzidi',
     prenom: 'Meriem',
     email: 'meriem.bouzidi@email.com',
@@ -140,6 +146,7 @@ export const MOCK_RAPPORTS: RapportMedical[] = [
     interventionsRecommandees: ['Rhinoplastie', 'Blepharoplastie supérieure'],
     notes: 'Aucun antécédent médical contre-indiquant l\'intervention. Bilan pré-opératoire standard requis.',
     valeurMedicale: 'Rhinoplastie : correction de la bosse nasale et affinement de la pointe. Blepharoplastie : correction du ptosis palpébral léger.',
+    forfaitPropose: 4200,
     statut: 'finalise',
   },
   {
@@ -151,6 +158,7 @@ export const MOCK_RAPPORTS: RapportMedical[] = [
     interventionsRecommandees: ['Liposuccion abdominale'],
     notes: 'IMC optimal. Peau avec bonne élasticité.',
     valeurMedicale: 'Liposuccion circonférentielle abdomen et flancs.',
+    forfaitPropose: 2600,
     statut: 'finalise',
   },
 ]

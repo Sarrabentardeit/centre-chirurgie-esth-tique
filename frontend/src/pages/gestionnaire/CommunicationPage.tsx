@@ -1,20 +1,65 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
-import { useDemoStore } from '@/store/demoStore'
 import { Button } from '@/components/ui/button'
-import { useAuthStore } from '@/store/authStore'
 import { Badge } from '@/components/ui/badge'
 import { formatDateTime } from '@/lib/utils'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useEffect, useMemo, useState } from 'react'
+import { gestionnaireApi, type GestionnaireTemplate } from '@/lib/api'
+import { RefreshCw } from 'lucide-react'
 
 export default function CommunicationPage() {
-  const { user } = useAuthStore()
-  const communicationTemplates = useDemoStore((s) => s.communicationTemplates)
-  const setCommunicationTemplateContent = useDemoStore((s) => s.setCommunicationTemplateContent)
-  const setCommunicationTemplateChannel = useDemoStore((s) => s.setCommunicationTemplateChannel)
-  const toggleCommunicationTemplate = useDemoStore((s) => s.toggleCommunicationTemplate)
-  const resetCommunicationTemplate = useDemoStore((s) => s.resetCommunicationTemplate)
-  const resetAllCommunicationTemplates = useDemoStore((s) => s.resetAllCommunicationTemplates)
+  const [templates, setTemplates] = useState<GestionnaireTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await gestionnaireApi.getCommunicationTemplates()
+      setTemplates(res.templates)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur de chargement.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  const map = useMemo(() => {
+    const m = new Map<string, GestionnaireTemplate>()
+    templates.forEach((t) => m.set(t.key, t))
+    return m
+  }, [templates])
+
+  const ordered: Array<'formulaireAck' | 'devisSent' | 'refus'> = ['formulaireAck', 'devisSent', 'refus']
+
+  const patchTemplate = async (
+    key: 'formulaireAck' | 'devisSent' | 'refus',
+    patch: Partial<Pick<GestionnaireTemplate, 'content' | 'channel' | 'active'>>
+  ) => {
+    const tpl = map.get(key)
+    if (!tpl) return
+    setSavingKey(key)
+    setError(null)
+    try {
+      await gestionnaireApi.updateCommunicationTemplate(key, {
+        content: patch.content ?? tpl.content,
+        channel: patch.channel ?? tpl.channel,
+        active: patch.active ?? tpl.active,
+      })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Enregistrement impossible.')
+    } finally {
+      setSavingKey(null)
+    }
+  }
 
   const preview = (content: string) =>
     content
@@ -33,13 +78,17 @@ export default function CommunicationPage() {
         </div>
         <Button
           variant="outline"
-          onClick={() => {
-            resetAllCommunicationTemplates(user?.name ?? 'Gestionnaire')
-          }}
+          onClick={() => void gestionnaireApi.resetAllCommunicationTemplates().then(load).catch(() => setError('Reset impossible.'))}
         >
           Réinitialiser défaut
         </Button>
       </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" /> Chargement des templates...
+        </div>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -49,11 +98,10 @@ export default function CommunicationPage() {
           <p className="text-xs text-muted-foreground">
             Variables disponibles: {'{prenom}'}, {'{nom}'}, {'{reason}'}.
           </p>
-          {([
-            ['formulaireAck', communicationTemplates.formulaireAck],
-            ['devisSent', communicationTemplates.devisSent],
-            ['refus', communicationTemplates.refus],
-          ] as const).map(([key, tpl]) => (
+          {ordered.map((key) => {
+            const tpl = map.get(key)
+            if (!tpl) return null
+            return (
             <div key={key} className="rounded-lg border p-3 space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <label className="text-sm font-semibold">{tpl.title}</label>
@@ -64,7 +112,8 @@ export default function CommunicationPage() {
                   <Button
                     size="sm"
                     variant={tpl.active ? 'outline' : 'brand-outline'}
-                    onClick={() => toggleCommunicationTemplate(key, !tpl.active, user?.name ?? 'Gestionnaire')}
+                    disabled={savingKey === key}
+                    onClick={() => void patchTemplate(key, { active: !tpl.active })}
                   >
                     {tpl.active ? 'Désactiver' : 'Activer'}
                   </Button>
@@ -76,7 +125,7 @@ export default function CommunicationPage() {
                   <p className="text-xs text-muted-foreground mb-1">Canal d'envoi</p>
                   <Select
                     value={tpl.channel}
-                    onValueChange={(v) => setCommunicationTemplateChannel(key, v as 'chat' | 'notification' | 'both', user?.name ?? 'Gestionnaire')}
+                    onValueChange={(v) => void patchTemplate(key, { channel: v as 'chat' | 'notification' | 'both' })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -92,7 +141,8 @@ export default function CommunicationPage() {
                   <Button
                     variant="outline"
                     className="w-full"
-                    onClick={() => resetCommunicationTemplate(key, user?.name ?? 'Gestionnaire')}
+                    disabled={savingKey === key}
+                    onClick={() => void gestionnaireApi.resetCommunicationTemplate(key).then(load).catch(() => setError('Reset impossible.'))}
                   >
                     Reset ce template
                   </Button>
@@ -102,8 +152,16 @@ export default function CommunicationPage() {
               <Textarea
                 rows={4}
                 value={tpl.content}
-                onChange={(e) => setCommunicationTemplateContent(key, e.target.value, user?.name ?? 'Gestionnaire')}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setTemplates((prev) => prev.map((t) => (t.key === key ? { ...t, content: value } : t)))
+                }}
               />
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" disabled={savingKey === key} onClick={() => void patchTemplate(key, { content: tpl.content })}>
+                  Enregistrer ce texte
+                </Button>
+              </div>
 
               <div className="rounded-md bg-muted/60 border p-2">
                 <p className="text-xs font-medium mb-1">Aperçu</p>
@@ -114,7 +172,7 @@ export default function CommunicationPage() {
                 Dernière modification: {formatDateTime(tpl.updatedAt)} par {tpl.updatedBy}
               </p>
             </div>
-          ))}
+          )})}
         </CardContent>
       </Card>
     </div>

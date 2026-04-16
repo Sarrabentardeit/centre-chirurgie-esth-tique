@@ -17,6 +17,9 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>
 
+/** Boutons médecin / gestionnaire démo : visibles uniquement en développement (masqués au `vite build`). */
+const SHOW_DEMO_QUICK_LOGIN = import.meta.env.DEV
+
 const DEMO_ACCOUNTS = [
   {
     role: 'Médecin',
@@ -184,8 +187,19 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
-                {error}
+              <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive space-y-1">
+                <p>{error}</p>
+                {error.toLowerCase().includes('patient') && (
+                  <p className="text-xs">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/acces-patient')}
+                      className="font-semibold underline text-[#81572d]"
+                    >
+                      → Aller à l'espace patient
+                    </button>
+                  </p>
+                )}
               </div>
             )}
 
@@ -212,49 +226,53 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-[#e4c8bd]" />
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="rounded-full border border-[#ead6ca] bg-white px-3 py-1 text-[#8e8580]">Accès rapide démo</span>
-            </div>
-          </div>
+          {SHOW_DEMO_QUICK_LOGIN && (
+            <>
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-[#e4c8bd]" />
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="rounded-full border border-[#ead6ca] bg-white px-3 py-1 text-[#8e8580]">Accès rapide démo</span>
+                </div>
+              </div>
 
-          <div className="space-y-2.5">
-            {DEMO_ACCOUNTS.map((account) => {
-              const RoleIcon = account.icon
-              return (
-              <button
-                key={account.email}
-                type="button"
-                onClick={() => fillDemo(account.email)}
-                className={cn(
-                  'w-full flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium transition-all hover:shadow-md',
-                  account.color
-                )}
-              >
-                <span className="inline-flex items-center gap-2">
-                  <RoleIcon className="h-4 w-4" />
-                  {account.role}
-                </span>
-                <span className="font-normal opacity-75 text-xs">{account.email}</span>
-              </button>
-            )})}
-            <div className="rounded-lg border border-[#e7d8ce] bg-[#fcf8f5] px-3 py-2 text-center text-xs text-[#8d847f]">
-              Mot de passe démo :{' '}
-              <button
-                type="button"
-                onClick={() => setShowDemoPassword((v) => !v)}
-                className="font-medium text-[#81572d] hover:underline"
-              >
-                {showDemoPassword ? 'Masquer' : 'Voir le mot de passe'}
-              </button>
-              {showDemoPassword && (
-                <code className="ml-2 rounded bg-[#f3ece6] px-1 py-0.5 text-[#282727]">demo1234</code>
-              )}
-            </div>
-          </div>
+              <div className="space-y-2.5">
+                {DEMO_ACCOUNTS.map((account) => {
+                  const RoleIcon = account.icon
+                  return (
+                  <button
+                    key={account.email}
+                    type="button"
+                    onClick={() => fillDemo(account.email)}
+                    className={cn(
+                      'w-full flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium transition-all hover:shadow-md',
+                      account.color
+                    )}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <RoleIcon className="h-4 w-4" />
+                      {account.role}
+                    </span>
+                    <span className="font-normal opacity-75 text-xs">{account.email}</span>
+                  </button>
+                )})}
+                <div className="rounded-lg border border-[#e7d8ce] bg-[#fcf8f5] px-3 py-2 text-center text-xs text-[#8d847f]">
+                  Mot de passe démo :{' '}
+                  <button
+                    type="button"
+                    onClick={() => setShowDemoPassword((v) => !v)}
+                    className="font-medium text-[#81572d] hover:underline"
+                  >
+                    {showDemoPassword ? 'Masquer' : 'Voir le mot de passe'}
+                  </button>
+                  {showDemoPassword && (
+                    <code className="ml-2 rounded bg-[#f3ece6] px-1 py-0.5 text-[#282727]">demo1234</code>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
 
           <p className="mt-6 text-center text-sm text-[#8d847f]">
             Pour les patientes, accès direct au formulaire:{' '}

@@ -12,8 +12,11 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   const location = useLocation()
 
   if (!isAuthenticated || !user) {
-    const isPatientArea = location.pathname.startsWith('/patient')
-    const loginPath = isPatientArea ? '/acces-patient' : '/login'
+    // Règle absolue : les patients ne voient jamais le backoffice
+    const isBackofficeArea =
+      location.pathname.startsWith('/medecin') ||
+      location.pathname.startsWith('/gestionnaire')
+    const loginPath = isBackofficeArea ? '/login' : '/acces-patient'
     return <Navigate to={loginPath} state={{ from: location }} replace />
   }
 

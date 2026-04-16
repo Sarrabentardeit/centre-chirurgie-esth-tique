@@ -2,20 +2,23 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar, MessageSquare,
   Bell, LogOut, Heart, ClipboardList, FileCheck,
-  Package, TrendingUp, Camera, X,
+  Package, TrendingUp, Camera, X, UserPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
+import { useDemoStore } from '@/store/demoStore'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useEffect, useMemo, useState } from 'react'
 import type { UserRole } from '@/types'
+import { gestionnaireApi } from '@/lib/api'
 
 interface NavItem {
   label: string
   href: string
   icon: React.ElementType
-  badge?: number
+  badgeKey?: 'chat' | 'notifications'
 }
 
 const NAV_ITEMS: Record<UserRole, NavItem[]> = {
@@ -25,7 +28,7 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
     { label: 'Mes Devis', href: '/patient/devis', icon: FileCheck },
     { label: 'Mon Agenda', href: '/patient/agenda', icon: Calendar },
     { label: 'Suivi Post-Op', href: '/patient/post-op', icon: Camera },
-    { label: 'Chat', href: '/patient/chat', icon: MessageSquare, badge: 2 },
+    { label: 'Chat', href: '/patient/chat', icon: MessageSquare, badgeKey: 'chat' },
   ],
   medecin: [
     { label: 'Tableau de bord', href: '/medecin/dashboard', icon: LayoutDashboard },
@@ -33,16 +36,18 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
     { label: 'Rapports Médicaux', href: '/medecin/rapports', icon: FileText },
     { label: 'Agenda', href: '/medecin/agenda', icon: Calendar },
     { label: 'Suivi Post-Op', href: '/medecin/post-op', icon: Heart },
-    { label: 'Chat', href: '/medecin/chat', icon: MessageSquare, badge: 3 },
+    { label: 'Chat', href: '/medecin/chat', icon: MessageSquare, badgeKey: 'chat' },
   ],
   gestionnaire: [
     { label: 'Tableau de bord', href: '/gestionnaire/dashboard', icon: LayoutDashboard },
+    { label: 'Comptes', href: '/gestionnaire/users', icon: UserPlus },
     { label: 'Patients', href: '/gestionnaire/patients', icon: Users },
+    { label: 'Agenda', href: '/gestionnaire/agenda', icon: Calendar },
     { label: 'Devis', href: '/gestionnaire/devis', icon: FileCheck },
-    { label: 'Chat', href: '/gestionnaire/chat', icon: MessageSquare, badge: 2 },
+    { label: 'Chat', href: '/gestionnaire/chat', icon: MessageSquare, badgeKey: 'chat' },
     { label: 'Communication', href: '/gestionnaire/communications', icon: MessageSquare },
     { label: 'Logistique', href: '/gestionnaire/logistique', icon: Package },
-    { label: 'Notifications', href: '/gestionnaire/notifications', icon: Bell, badge: 5 },
+    { label: 'Notifications', href: '/gestionnaire/notifications', icon: Bell, badgeKey: 'notifications' },
     { label: 'Analytics', href: '/gestionnaire/analytics', icon: TrendingUp },
   ],
 }
@@ -56,6 +61,56 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, logout } = useAuthStore()
   const location = useLocation()
   const navigate = useNavigate()
+
+  const messagesStore = useDemoStore((s) => s.messages)
+  const notificationsStore = useDemoStore((s) => s.notifications)
+  const patients = useDemoStore((s) => s.patients)
+  const [gestionnaireNotifUnread, setGestionnaireNotifUnread] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (user?.role !== 'gestionnaire') {
+      setGestionnaireNotifUnread(null)
+      return
+    }
+    let cancelled = false
+    void gestionnaireApi
+      .getDashboard()
+      .then((r) => {
+        if (!cancelled) setGestionnaireNotifUnread(r.stats.notifications)
+      })
+      .catch(() => {
+        if (!cancelled) setGestionnaireNotifUnread(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.role, location.pathname])
+
+  const badges = useMemo(() => {
+    if (!user) return { chat: 0, notifications: 0 }
+
+    let chatCount = 0
+    if (user.role === 'patient') {
+      const ownPatient = patients.find((p) => p.userId === user.id)
+      if (ownPatient) {
+        chatCount = messagesStore.filter(
+          (m) => m.dossierPatientId === ownPatient.id && !m.lu && m.expediteurId !== user.id
+        ).length
+      }
+    } else {
+      // For medecin/gestionnaire: unread messages sent by patients
+      chatCount = messagesStore.filter(
+        (m) => !m.lu && m.expediteurId !== user.id && m.expediteurRole === 'patient'
+      ).length
+    }
+
+    const notifCount =
+      user.role === 'gestionnaire' && gestionnaireNotifUnread !== null
+        ? gestionnaireNotifUnread
+        : notificationsStore.filter((n) => n.userId === user.id && !n.lu).length
+
+    return { chat: chatCount, notifications: notifCount }
+  }, [user, messagesStore, notificationsStore, patients, gestionnaireNotifUnread])
 
   if (!user) return null
 
@@ -138,6 +193,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             const Icon = item.icon
             const isActive = location.pathname === item.href ||
               (item.href !== '/' && location.pathname.startsWith(item.href))
+            const badgeCount = item.badgeKey ? badges[item.badgeKey] : 0
             return (
               <NavLink
                 key={item.href}
@@ -152,9 +208,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               >
                 <Icon className={cn('h-4 w-4 shrink-0', isActive ? 'text-brand-600' : '')} />
                 <span className="flex-1">{item.label}</span>
-                {item.badge && (
+                {badgeCount > 0 && (
                   <Badge className="h-5 min-w-5 px-1.5 text-xs bg-brand-600 text-white border-0">
-                    {item.badge}
+                    {badgeCount}
                   </Badge>
                 )}
               </NavLink>

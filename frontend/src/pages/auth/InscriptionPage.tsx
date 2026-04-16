@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  Eye, EyeOff, Heart, User, Mail, Phone, Lock,
+  Eye, EyeOff, Heart, User as UserIcon, Mail, Phone, Lock,
   ArrowRight, CheckCircle2, Instagram, MessageCircle, Search,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
-import { registerMockAccount } from '@/mocks/auth'
+import { authApi } from '@/lib/api'
+import type { User } from '@/types'
 
 const inscriptionSchema = z.object({
   prenom: z.string().min(2, 'Prénom requis (min. 2 caractères)'),
@@ -38,7 +39,7 @@ const SOURCES = [
   { key: 'instagram', label: 'Instagram', icon: Instagram, color: 'border-pink-300 bg-pink-50 text-pink-700' },
   { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle, color: 'border-emerald-300 bg-emerald-50 text-emerald-700' },
   { key: 'google', label: 'Google', icon: Search, color: 'border-blue-300 bg-blue-50 text-blue-700' },
-  { key: 'direct', label: 'Recommandation', icon: User, color: 'border-purple-300 bg-purple-50 text-purple-700' },
+  { key: 'direct', label: 'Recommandation', icon: UserIcon, color: 'border-purple-300 bg-purple-50 text-purple-700' },
 ] as const
 
 const STEPS = [
@@ -86,30 +87,27 @@ export default function InscriptionPage() {
   const onSubmit = async (data: InscriptionForm) => {
     setSubmitError(null)
     setIsLoading(true)
-    await new Promise((r) => setTimeout(r, 1200))
-
-    // Mock: créer le compte et connecter directement
-    const newUser = {
-      id: `u_new_${Date.now()}`,
-      email: data.email,
-      name: `${data.prenom} ${data.nom}`,
-      role: 'patient' as const,
-      phone: data.phone,
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.prenom}`,
-    }
-
-    const registration = registerMockAccount(newUser, data.password)
-    if (!registration.success) {
+    try {
+      const result = await authApi.register({
+        email: data.email,
+        password: data.password,
+        fullName: `${data.prenom} ${data.nom}`,
+        phone: data.phone,
+      })
+      const user: User = {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name,
+        role: 'patient',
+      }
+      login(user, result.accessToken, result.refreshToken)
       setIsLoading(false)
-      setSubmitError(registration.error ?? 'Impossible de créer le compte.')
-      return
+      setDone(true)
+      setTimeout(() => navigate('/patient/formulaire'), 2500)
+    } catch (err) {
+      setIsLoading(false)
+      setSubmitError(err instanceof Error ? err.message : 'Impossible de créer le compte.')
     }
-
-    login(newUser, `mock-token-${newUser.id}`)
-    setIsLoading(false)
-    setDone(true)
-
-    setTimeout(() => navigate('/patient/formulaire'), 2500)
   }
 
   if (done) {
@@ -254,7 +252,7 @@ export default function InscriptionPage() {
                   <div className="space-y-1.5">
                     <Label htmlFor="prenom">Prénom <span className="text-destructive">*</span></Label>
                     <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="prenom"
                         placeholder="Amira"
@@ -476,7 +474,7 @@ export default function InscriptionPage() {
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Déjà un compte ?{' '}
             <button
-              onClick={() => navigate('/login')}
+              onClick={() => navigate('/acces-patient')}
               className="font-medium text-brand-600 hover:underline"
             >
               Se connecter

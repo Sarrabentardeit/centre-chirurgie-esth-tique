@@ -70,6 +70,10 @@ volumes:
   postgres_data:
   uploads_data:
 
+# Réseau Docker sur lequel écoute Traefik (déjà créé par votre autre stack).
+# Trouvez le nom exact : docker network ls
+# Puis dans .env.prod : TRAEFIK_DOCKER_NETWORK=nom_du_reseau
 networks:
   traefik:
     external: true
+    name: ${TRAEFIK_DOCKER_NETWORK:-traefik}

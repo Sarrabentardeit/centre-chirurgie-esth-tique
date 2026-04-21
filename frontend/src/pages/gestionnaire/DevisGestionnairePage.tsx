@@ -16,6 +16,37 @@ interface LigneDevisForm {
   prixUnitaire: number
 }
 
+type TypeSejour = 'clinique' | 'hotel' | ''
+
+const TYPE_SEJOUR_PREFIX = 'TYPE_SEJOUR:'
+const DELAIS_CONVALESCENCE_PREFIX = 'DELAIS_CONVALESCENCE:'
+
+function parseSejourMeta(notes: string | null | undefined) {
+  const lines = (notes ?? '').split('\n')
+  const typeLine = lines.find((l) => l.startsWith(TYPE_SEJOUR_PREFIX))
+  const delaiLine = lines.find((l) => l.startsWith(DELAIS_CONVALESCENCE_PREFIX))
+
+  const typeSejourRaw = typeLine?.replace(TYPE_SEJOUR_PREFIX, '').trim().toLowerCase()
+  const typeSejour: TypeSejour = typeSejourRaw === 'clinique' || typeSejourRaw === 'hotel' ? typeSejourRaw : ''
+  const delaisConvalescence = delaiLine?.replace(DELAIS_CONVALESCENCE_PREFIX, '').trim() ?? ''
+
+  const cleaned = lines
+    .filter((l) => !l.startsWith(TYPE_SEJOUR_PREFIX) && !l.startsWith(DELAIS_CONVALESCENCE_PREFIX))
+    .join('\n')
+    .trim()
+
+  return { typeSejour, delaisConvalescence, noteSejour: cleaned }
+}
+
+function buildSejourNotes(input: { noteSejour: string; typeSejour: TypeSejour; delaisConvalescence: string }) {
+  const parts = [
+    input.typeSejour ? `${TYPE_SEJOUR_PREFIX}${input.typeSejour}` : '',
+    input.delaisConvalescence.trim() ? `${DELAIS_CONVALESCENCE_PREFIX}${input.delaisConvalescence.trim()}` : '',
+    input.noteSejour.trim(),
+  ].filter(Boolean)
+  return parts.join('\n')
+}
+
 function initials(name: string) {
   const p = name.trim().split(/\s+/).filter(Boolean)
   if (p.length === 0) return '?'
@@ -37,8 +68,9 @@ export default function DevisGestionnairePage() {
   const [patientDetail, setPatientDetail]       = useState<GestionnairePatientDetail | null>(null)
 
   const [lignes, setLignes]               = useState<LigneDevisForm[]>([{ description: '', quantite: 1, prixUnitaire: 0 }])
-  const [planning, setPlanning]           = useState('')
   const [notesSejour, setNotesSejour]     = useState('')
+  const [typeSejour, setTypeSejour]       = useState<TypeSejour>('')
+  const [delaisConvalescence, setDelaisConvalescence] = useState('')
   const [sent, setSent]                   = useState(false)
   const [savedDraft, setSavedDraft]       = useState(false)
   const [isEditingExisting, setIsEditingExisting] = useState(false)
@@ -139,13 +171,16 @@ export default function DevisGestionnairePage() {
     const draft = patientDetail.devis?.find((d) => d.statut === 'brouillon')
     if (draft) {
       setLignes(draft.lignes.map((l) => ({ description: l.description, quantite: l.quantite, prixUnitaire: l.prixUnitaire })))
-      setPlanning(draft.planningMedical ?? '')
-      setNotesSejour(draft.notesSejour ?? '')
+      const parsed = parseSejourMeta(draft.notesSejour ?? draft.planningMedical ?? '')
+      setNotesSejour(parsed.noteSejour)
+      setTypeSejour(parsed.typeSejour)
+      setDelaisConvalescence(parsed.delaisConvalescence)
       return
     }
     setLignes([{ description: '', quantite: 1, prixUnitaire: 0 }])
-    setPlanning('')
     setNotesSejour('')
+    setTypeSejour('')
+    setDelaisConvalescence('')
   }, [patientDetail, isEditingExisting])
 
   const patientRow = patients.find((p) => p.id === selectedPatient)
@@ -159,7 +194,15 @@ export default function DevisGestionnairePage() {
   const buildPayload = () => {
     const dateValidite = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const lignesPayload = lignes.map((l) => ({ ...l, total: l.quantite * l.prixUnitaire }))
-    return { dateValidite, lignes: lignesPayload, total: lignesPayload.reduce((s, x) => s + x.total, 0), planningMedical: planning || null, notesSejour: notesSejour || null, currency }
+    const sejourNotes = buildSejourNotes({ noteSejour: notesSejour, typeSejour, delaisConvalescence })
+    return {
+      dateValidite,
+      lignes: lignesPayload,
+      total: lignesPayload.reduce((s, x) => s + x.total, 0),
+      planningMedical: null,
+      notesSejour: sejourNotes || null,
+      currency,
+    }
   }
 
   const handleSaveDraft = async () => {
@@ -189,8 +232,10 @@ export default function DevisGestionnairePage() {
   const startEditing = () => {
     if (!existingDevis) return
     setLignes(existingDevis.lignes.map((l) => ({ description: l.description, quantite: l.quantite, prixUnitaire: l.prixUnitaire })))
-    setPlanning(existingDevis.planningMedical ?? '')
-    setNotesSejour(existingDevis.notesSejour ?? '')
+    const parsed = parseSejourMeta(existingDevis.notesSejour ?? existingDevis.planningMedical ?? '')
+    setNotesSejour(parsed.noteSejour)
+    setTypeSejour(parsed.typeSejour)
+    setDelaisConvalescence(parsed.delaisConvalescence)
     setIsEditingExisting(true)
   }
 
@@ -500,14 +545,18 @@ export default function DevisGestionnairePage() {
                           {/* Tableau */}
                           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                             <div className="grid grid-cols-12 bg-slate-50 px-4 py-2.5 border-b border-slate-200 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                              <div className="col-span-7">Prestation</div>
+                              <div className="col-span-5">Prestation</div>
                               <div className="col-span-2 text-center">Qté</div>
-                              <div className="col-span-3 text-right">Montant</div>
+                              <div className="col-span-2 text-right">PU</div>
+                              <div className="col-span-3 text-right">PT</div>
                             </div>
                             {existingDevis.lignes.map((l, i) => (
                               <div key={i} className="grid grid-cols-12 px-4 py-3 border-b border-slate-100 last:border-0 text-sm">
-                                <div className="col-span-7 text-foreground truncate">{l.description}</div>
+                                <div className="col-span-5 text-foreground truncate">{l.description}</div>
                                 <div className="col-span-2 text-center text-muted-foreground">{l.quantite}</div>
+                                <div className="col-span-2 text-right text-muted-foreground">
+                                  {l.prixUnitaire === 0 ? <span className="italic text-xs">Inclus</span> : formatCurrency(l.prixUnitaire, currency)}
+                                </div>
                                 <div className="col-span-3 text-right font-semibold">
                                   {l.total === 0 ? <span className="italic text-muted-foreground text-xs">Inclus</span> : formatCurrency(l.total, currency)}
                                 </div>
@@ -562,20 +611,24 @@ export default function DevisGestionnairePage() {
                           {/* Table lignes */}
                           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                             <div className="grid grid-cols-12 bg-slate-50 px-4 py-2.5 border-b border-slate-200 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                              <div className="col-span-6">Prestation</div>
+                              <div className="col-span-5">Prestation</div>
                               <div className="col-span-2 text-center">Qté</div>
-                              <div className="col-span-3 text-right">Prix ({currency})</div>
+                              <div className="col-span-2 text-right">PU ({currency})</div>
+                              <div className="col-span-2 text-right">PT</div>
                               <div className="col-span-1" />
                             </div>
                             <div className="divide-y divide-slate-100">
                               {lignes.map((ligne, i) => (
                                 <div key={i} className="grid grid-cols-12 gap-1.5 px-2 py-2 items-center">
-                                  <Input className="col-span-6 h-8 text-sm" placeholder="Prestation..." value={ligne.description}
+                                  <Input className="col-span-5 h-8 text-sm" placeholder="Prestation..." value={ligne.description}
                                     onChange={(e) => updateLigne(i, 'description', e.target.value)} />
                                   <Input className="col-span-2 h-8 text-sm text-center" type="number" min={1} value={ligne.quantite}
                                     onChange={(e) => updateLigne(i, 'quantite', parseInt(e.target.value, 10) || 1)} />
-                                  <Input className="col-span-3 h-8 text-sm text-right" type="number" min={0} value={ligne.prixUnitaire}
+                                  <Input className="col-span-2 h-8 text-sm text-right" type="number" min={0} value={ligne.prixUnitaire}
                                     onChange={(e) => updateLigne(i, 'prixUnitaire', parseInt(e.target.value, 10) || 0)} />
+                                  <div className="col-span-2 h-8 flex items-center justify-end px-2 text-xs font-semibold text-slate-700">
+                                    {formatCurrency(ligne.quantite * ligne.prixUnitaire, currency)}
+                                  </div>
                                   <button type="button" onClick={() => removeLigne(i)}
                                     className="col-span-1 flex justify-center text-muted-foreground/40 hover:text-red-400 transition-colors">
                                     <Trash2 className="h-4 w-4" />
@@ -594,15 +647,46 @@ export default function DevisGestionnairePage() {
                             <Plus className="h-3.5 w-3.5" /> Ajouter une ligne
                           </button>
 
-                          {/* Planning + Notes */}
+                          {/* Séjour */}
                           <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-muted-foreground">Planning médical</label>
-                            <Textarea rows={2} className="text-sm resize-none" placeholder="Durée intervention, hospitalisation, récupération..."
-                              value={planning} onChange={(e) => setPlanning(e.target.value)} />
+                            <label className="text-xs font-semibold text-muted-foreground">Type de séjour</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setTypeSejour('clinique')}
+                                className={`h-9 rounded-md border text-sm font-medium transition-colors ${
+                                  typeSejour === 'clinique'
+                                    ? 'border-brand-500 bg-brand-50 text-brand-700'
+                                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                Séjour clinique
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTypeSejour('hotel')}
+                                className={`h-9 rounded-md border text-sm font-medium transition-colors ${
+                                  typeSejour === 'hotel'
+                                    ? 'border-brand-500 bg-brand-50 text-brand-700'
+                                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                Hôtel
+                              </button>
+                            </div>
                           </div>
                           <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-muted-foreground">Notes séjour</label>
-                            <Textarea rows={2} className="text-sm resize-none" placeholder="Durée du séjour, hébergement, transport..."
+                            <label className="text-xs font-semibold text-muted-foreground">Délais de convalescence</label>
+                            <Input
+                              className="h-9 text-sm"
+                              placeholder="Ex: 10 à 14 jours de repos"
+                              value={delaisConvalescence}
+                              onChange={(e) => setDelaisConvalescence(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-muted-foreground">Note séjour</label>
+                            <Textarea rows={2} className="text-sm resize-none" placeholder="Organisation du séjour, accompagnement, transport..."
                               value={notesSejour} onChange={(e) => setNotesSejour(e.target.value)} />
                           </div>
 

@@ -54,6 +54,15 @@ export default function DevisPage() {
     try {
       const res = await patientApi.getDevis()
       setDevis(res.devis)
+      for (const d of res.devis) {
+        if (d.statut === 'envoye' && !d.vuParPatientAt) {
+          void patientApi.enregistrerConsultationDevis(d.id).then((r) => {
+            setDevis((prev) => prev.map((x) => (x.id === d.id ? r.devis : x)))
+          }).catch(() => {
+            /* silencieux : la consultation reste possible sans notification */
+          })
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {

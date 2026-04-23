@@ -141,9 +141,18 @@ export async function upsertFormulaire(userId: string, input: FormulaireSubmitIn
 
   // Mettre à jour le statut du dossier patient si soumis
   if (input.status === 'submitted') {
+    const payloadObj = input.payload as Record<string, unknown>
+    const rawSrc = payloadObj.sourceContact
+    const allowed = new Set(['facebook', 'instagram', 'radio', 'tv', 'amie', 'autre'])
+    const t = typeof rawSrc === 'string' ? rawSrc.trim() : ''
+    const src = t && allowed.has(t) ? t : undefined
+
     await prisma.patient.update({
       where: { id: patient.id },
-      data: { status: 'formulaire_complete' },
+      data: {
+        status: 'formulaire_complete',
+        ...(src ? { sourceContact: src } : {}),
+      },
     })
     const patientProfile = await prisma.patient.findUnique({
       where: { id: patient.id },
@@ -208,6 +217,39 @@ export async function getDevis(userId: string) {
     orderBy: { dateCreation: 'desc' },
   })
   return { devis }
+}
+
+export async function enregistrerConsultationDevis(userId: string, devisId: string) {
+  const patient = await prisma.patient.findUnique({ where: { userId } })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
+
+  const devis = await prisma.devis.findFirst({
+    where: { id: devisId, patientId: patient.id },
+  })
+  if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+  if (devis.statut !== 'envoye' || devis.vuParPatientAt) {
+    return { devis }
+  }
+
+  const updated = await prisma.devis.update({
+    where: { id: devisId },
+    data: { vuParPatientAt: new Date() },
+  })
+
+  const patientProfile = await prisma.patient.findUnique({
+    where: { id: patient.id },
+    select: { dossierNumber: true, user: { select: { fullName: true } } },
+  })
+  if (patientProfile) {
+    await notifyGestionnaires({
+      type: 'info',
+      titre: 'Devis consulté par le patient',
+      message: `${patientProfile.user.fullName} (${patientProfile.dossierNumber}) a consulté son devis (id ${devisId}).`,
+      lienAction: '/gestionnaire/devis',
+    })
+  }
+
+  return { devis: updated }
 }
 
 export async function repondreDevis(userId: string, devisId: string, input: RepondreDevisInput) {

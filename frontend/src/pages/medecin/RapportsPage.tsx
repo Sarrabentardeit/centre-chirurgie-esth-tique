@@ -3,7 +3,7 @@ import {
   Search, CheckCircle2, Clock, X, AlertTriangle, Heart, Scissors,
   Save, RefreshCw, AlertCircle, DollarSign, StickyNote, ExternalLink,
   ClipboardPlus, Sparkles, FileText, ChevronDown, ChevronUp,
-  Phone, Mail, MapPin, Activity, TrendingUp,
+  Phone, Mail, MapPin, Activity, TrendingUp, Calendar,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,8 @@ interface Rapport {
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null
+  nuitsClinique?: number | null
+  anesthesieGenerale?: boolean | null
   notes: string | null
   createdAt: string
 }
@@ -37,10 +39,20 @@ function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-function completionScore(diagnostic: string, interventions: string, forfait: string, valeur: string, notes: string): number {
-  const fields = [diagnostic, interventions, forfait, valeur, notes]
-  const filled  = fields.filter((f) => f.trim().length > 0).length
-  return Math.round((filled / fields.length) * 100)
+function completionScore(
+  diagnostic: string,
+  interventions: string,
+  forfait: string,
+  valeur: string,
+  notes: string,
+  nuitsClinique: string,
+  anesthesieGenerale: boolean | null,
+): number {
+  const textFields = [diagnostic, interventions, forfait, valeur, notes, nuitsClinique]
+  const filledText = textFields.filter((f) => f.trim().length > 0).length
+  const filledAnesthesie = anesthesieGenerale !== null ? 1 : 0
+  const totalFields = textFields.length + 1
+  return Math.round(((filledText + filledAnesthesie) / totalFields) * 100)
 }
 
 function CompletionRing({ pct }: { pct: number }) {
@@ -115,13 +127,21 @@ export default function RapportsPage() {
   const [interventions, setInterventions] = useState('')
   const [valeur, setValeur]               = useState('')
   const [forfait, setForfait]             = useState('')
+  const [nuitsClinique, setNuitsClinique] = useState('')
+  const [anesthesieGenerale, setAnesthesieGenerale] = useState<boolean | null>(null)
   const [notes, setNotes]                 = useState('')
   const [saving, setSaving]               = useState(false)
   const [saved, setSaved]                 = useState(false)
   const [saveError, setSaveError]         = useState<string | null>(null)
 
   // Sections ouvertes
-  const [openSections, setOpenSections] = useState({ diagnostic: true, interventions: true, forfait: true, notes: false })
+  const [openSections, setOpenSections] = useState({
+    diagnostic: true,
+    interventions: true,
+    forfait: true,
+    clinique: true,
+    notes: false,
+  })
   const toggleSection = (k: keyof typeof openSections) => setOpenSections((s) => ({ ...s, [k]: !s[k] }))
 
   const load = useCallback(async () => {
@@ -151,7 +171,8 @@ export default function RapportsPage() {
 
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
-    setDiagnostic(''); setInterventions(''); setValeur(''); setForfait(''); setNotes('')
+    setDiagnostic(''); setInterventions(''); setValeur(''); setForfait('')
+    setNuitsClinique(''); setAnesthesieGenerale(null); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
     try {
@@ -162,6 +183,8 @@ export default function RapportsPage() {
         setInterventions((r.interventionsRecommandees ?? []).join('\n'))
         setValeur(r.valeurMedicale ?? '')
         setForfait(r.forfaitPropose?.toString() ?? '')
+        setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
+        setAnesthesieGenerale(r.anesthesieGenerale ?? null)
         setNotes(r.notes ?? '')
         setPatients((prev) => prev.map((p) => p.id === patientId ? { ...p, rapport: r } : p))
       }
@@ -177,12 +200,27 @@ export default function RapportsPage() {
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
         valeurMedicale: valeur || undefined,
         forfaitPropose: forfait ? Number(forfait) : undefined,
+        nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
+        anesthesieGenerale: anesthesieGenerale === null ? undefined : anesthesieGenerale,
         notes: notes || undefined,
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
       setPatients((prev) => prev.map((p) => p.id === selectedId
-        ? { ...p, rapport: { id: '', diagnostic, interventionsRecommandees: interventions.split('\n').filter(Boolean), valeurMedicale: valeur, forfaitPropose: forfait ? Number(forfait) : null, notes, createdAt: new Date().toISOString() } }
+        ? {
+            ...p,
+            rapport: {
+              id: '',
+              diagnostic,
+              interventionsRecommandees: interventions.split('\n').filter(Boolean),
+              valeurMedicale: valeur,
+              forfaitPropose: forfait ? Number(forfait) : null,
+              nuitsClinique: nuitsClinique === '' ? null : Number(nuitsClinique),
+              anesthesieGenerale,
+              notes,
+              createdAt: new Date().toISOString(),
+            },
+          }
         : p))
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Erreur lors de la sauvegarde.')
@@ -202,7 +240,7 @@ export default function RapportsPage() {
   }, [patients, search])
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
-  const pct = completionScore(diagnostic, interventions, forfait, valeur, notes)
+  const pct = completionScore(diagnostic, interventions, forfait, valeur, notes, nuitsClinique, anesthesieGenerale)
 
   const stats = {
     aAnalyser:   patients.filter((p) => p.status === 'formulaire_complete').length,
@@ -223,6 +261,8 @@ export default function RapportsPage() {
           p.rapport!.forfaitPropose?.toString() ?? '',
           p.rapport!.valeurMedicale ?? '',
           p.rapport!.notes ?? '',
+          p.rapport!.nuitsClinique?.toString() ?? '',
+          p.rapport!.anesthesieGenerale ?? null,
         )
       : 0
 
@@ -624,6 +664,83 @@ export default function RapportsPage() {
                 </div>
               </Section>
 
+              {/* Séjour clinique */}
+              <Section
+                icon={Calendar}
+                title="Séjour clinique & anesthésie"
+                color="bg-cyan-100 text-cyan-600"
+                subtitle={
+                  nuitsClinique || anesthesieGenerale !== null
+                    ? `${nuitsClinique ? `${nuitsClinique} nuit(s)` : 'Nuits non précisées'} · ${
+                        anesthesieGenerale === null ? 'Anesthésie non précisée' : anesthesieGenerale ? 'Anesthésie générale: oui' : 'Anesthésie générale: non'
+                      }`
+                    : undefined
+                }
+                open={openSections.clinique}
+                onToggle={() => toggleSection('clinique')}
+              >
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Nombre de nuits en clinique
+                    </label>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={60}
+                        placeholder="Ex: 2"
+                        value={nuitsClinique}
+                        onChange={(e) => setNuitsClinique(e.target.value)}
+                        className="w-[120px] h-10"
+                      />
+                      <span className="text-xs text-muted-foreground">nuit(s)</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+                      Anesthésie générale
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAnesthesieGenerale(true)}
+                        className={`h-9 px-4 rounded-lg border text-sm font-medium transition-colors ${
+                          anesthesieGenerale === true
+                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Oui
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAnesthesieGenerale(false)}
+                        className={`h-9 px-4 rounded-lg border text-sm font-medium transition-colors ${
+                          anesthesieGenerale === false
+                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Non
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAnesthesieGenerale(null)}
+                        className={`h-9 px-4 rounded-lg border text-sm font-medium transition-colors ${
+                          anesthesieGenerale === null
+                            ? 'border-slate-400 bg-slate-100 text-slate-700'
+                            : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                        }`}
+                      >
+                        Non précisé
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Section>
+
               {/* Notes */}
               <Section
                 icon={StickyNote} title="Notes complémentaires" color="bg-slate-100 text-slate-600"
@@ -694,7 +811,7 @@ export default function RapportsPage() {
                     />
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {pct === 100 ? 'Rapport complet ✓' : `${5 - Math.round(pct / 20)} champ(s) restant(s)`}
+                    {pct === 100 ? 'Rapport complet ✓' : `${Math.max(0, 7 - Math.round((pct / 100) * 7))} champ(s) restant(s)`}
                   </p>
                 </div>
               </div>

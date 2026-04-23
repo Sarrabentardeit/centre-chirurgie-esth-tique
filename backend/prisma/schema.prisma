@@ -186,6 +186,8 @@ model Rapport {
   interventionsRecommandees String[] @map("interventions_recommandees")
   valeurMedicale           String?  @map("valeur_medicale")
   forfaitPropose           Float?   @map("forfait_propose")
+  nuitsClinique            Int?     @map("nuits_clinique")
+  anesthesieGenerale       Boolean? @map("anesthesie_generale")
   notes                    String?
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
@@ -212,6 +214,7 @@ model Devis {
   notesSejour    String?     @map("notes_sejour")
   dateValidite   DateTime?   @map("date_validite")
   dateCreation   DateTime    @default(now()) @map("date_creation")
+  vuParPatientAt DateTime?   @map("vu_par_patient_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)

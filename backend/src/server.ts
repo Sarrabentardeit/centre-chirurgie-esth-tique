@@ -15,6 +15,7 @@ import { authRouter } from './modules/auth/auth.routes.js'
 import { patientRouter } from './modules/patient/patient.routes.js'
 import { medecinRouter } from './modules/medecin/medecin.routes.js'
 import { gestionnaireRouter } from './modules/gestionnaire/gestionnaire.routes.js'
+import { publicRouter } from './modules/public/public.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -106,6 +107,7 @@ app.get('/uploads/:filename', async (req, res, next) => {
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api', healthRouter)
 app.use('/api/auth', authRouter)
+app.use('/api/public', publicRouter)
 
 app.use('/api/patient', patientRouter)
 app.use('/api/medecin', medecinRouter)

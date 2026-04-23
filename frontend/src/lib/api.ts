@@ -220,6 +220,8 @@ export interface Devis {
   notesSejour: string | null
   dateValidite: string | null
   dateCreation: string
+  updatedAt?: string
+  vuParPatientAt?: string | null
 }
 
 export interface RendezVous {
@@ -282,6 +284,11 @@ export const patientApi = {
   getDevis: () =>
     request<{ ok: true; devis: Devis[] }>('/patient/devis'),
 
+  enregistrerConsultationDevis: (id: string) =>
+    request<{ ok: true; devis: Devis }>(`/patient/devis/${id}/consultation`, {
+      method: 'POST',
+    }),
+
   repondreDevis: (id: string, body: { reponse: 'accepte' | 'refuse'; commentaire?: string }) =>
     request<{ ok: true; devis: Devis }>(`/patient/devis/${id}/repondre`, {
       method: 'POST',
@@ -331,7 +338,7 @@ export interface PatientListItem {
   updatedAt: string
   user: { fullName: string; email: string; createdAt: string }
   formulaires: Array<{ id: string; status: string; submittedAt: string | null }>
-  devis: Array<{ id: string; statut: string; total: number }>
+  devis: Array<{ id: string; statut: string; total: number; dateCreation: string; updatedAt?: string; vuParPatientAt?: string | null }>
 }
 
 export interface AgendaEvent {
@@ -424,7 +431,17 @@ export const medecinApi = {
       formulaires: Array<{ id: string; status: string; submittedAt: string | null; payload: Record<string, unknown> }>
       devis: Devis[]
       rendezvous: RendezVous[]
-      rapports: Array<{ id: string; diagnostic: string | null; interventionsRecommandees: string[]; valeurMedicale: string | null; forfaitPropose: number | null; notes: string | null; createdAt: string }>
+      rapports: Array<{
+        id: string
+        diagnostic: string | null
+        interventionsRecommandees: string[]
+        valeurMedicale: string | null
+        forfaitPropose: number | null
+        nuitsClinique?: number | null
+        anesthesieGenerale?: boolean | null
+        notes: string | null
+        createdAt: string
+      }>
     } }>(`/medecin/patients/${id}`),
 
   updatePatient: (id: string, body: {
@@ -450,6 +467,8 @@ export const medecinApi = {
     interventionsRecommandees?: string[]
     valeurMedicale?: string
     forfaitPropose?: number
+    nuitsClinique?: number
+    anesthesieGenerale?: boolean
     notes?: string
   }) =>
     request<{ ok: true; rapport: unknown }>(`/medecin/patients/${patientId}/rapport`, {
@@ -537,11 +556,22 @@ export interface GestionnaireRapportRow {
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null
+  nuitsClinique?: number | null
+  anesthesieGenerale?: boolean | null
   notes: string | null
   createdAt: string
 }
 
-export interface GestionnairePatientDetail extends PatientListItem {
+export interface GestionnaireFormulaireRow {
+  id: string
+  status: string
+  submittedAt: string | null
+  createdAt: string
+  payload: Record<string, unknown>
+}
+
+export interface GestionnairePatientDetail extends Omit<PatientListItem, 'formulaires'> {
+  formulaires: GestionnaireFormulaireRow[]
   rapports: GestionnaireRapportRow[]
   devis: Devis[]
 }
@@ -925,6 +955,24 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
     }
     throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
   }
+
+  if (!res.ok) {
+    const err = await res.json() as { code?: string; message?: string }
+    throw new ApiRequestError(res.status, err.code ?? 'UPLOAD_ERROR', err.message ?? 'Erreur upload.')
+  }
+
+  return (await res.json()) as UploadResponse
+}
+
+/** Upload sans JWT (formulaire public avant inscription). Mêmes types que l’upload patient. */
+export async function uploadFilePublic(file: File): Promise<UploadResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const res = await fetch(`${BASE_URL}/public/upload`, {
+    method: 'POST',
+    body: formData,
+  })
 
   if (!res.ok) {
     const err = await res.json() as { code?: string; message?: string }

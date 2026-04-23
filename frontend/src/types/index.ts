@@ -36,7 +36,7 @@ export interface Patient {
   nationalite: string
   ville: string
   pays: string
-  sourceContact: 'whatsapp' | 'instagram' | 'google' | 'direct'
+  sourceContact: string
   status: DossierStatus
   dateCreation: string
   derniereActivite: string

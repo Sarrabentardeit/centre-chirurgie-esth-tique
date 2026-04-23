@@ -232,9 +232,9 @@ export async function getPatientById(patientId: string) {
     where: { id: patientId },
     include: {
       user: { select: { fullName: true, email: true, createdAt: true } },
-      formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
+      formulaires: { orderBy: { createdAt: 'desc' } },
       devis: { orderBy: { dateCreation: 'desc' } },
-      rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
+      rapports: { orderBy: { createdAt: 'desc' } },
     },
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')

@@ -1,7 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Stethoscope, CheckCircle2, User, Phone, Mail,
-  MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList, Clock, ExternalLink,
+  MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -17,9 +17,11 @@ import { STATUS_LABELS, STATUS_COLORS, formatDate, formatCurrency } from '@/lib/
 import { medecinApi } from '@/lib/api'
 import type { Devis, RendezVous } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
+import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { InfoRow, FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 
 // ─── Types locaux ──────────────────────────────────────────────────────────────
 
@@ -45,7 +47,7 @@ interface PatientDetail {
   createdAt: string
   updatedAt: string
   user: { fullName: string; email: string; createdAt: string }
-  formulaires: Array<{ id: string; status: string; submittedAt: string | null; payload: Record<string, unknown> }>
+  formulaires: Array<{ id: string; status: string; submittedAt: string | null; createdAt?: string; payload: Record<string, unknown> }>
   devis: Devis[]
   rendezvous?: RendezVous[]
   agendaEvents?: Array<{
@@ -61,7 +63,12 @@ interface PatientDetail {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
+  facebook:  'bg-blue-50 text-blue-800 border-blue-200',
   instagram: 'bg-pink-50 text-pink-700 border-pink-200',
+  radio:     'bg-amber-50 text-amber-800 border-amber-200',
+  tv:        'bg-violet-50 text-violet-800 border-violet-200',
+  amie:      'bg-teal-50 text-teal-800 border-teal-200',
+  autre:     'bg-slate-100 text-slate-700 border-slate-200',
   whatsapp:  'bg-emerald-50 text-emerald-700 border-emerald-200',
   google:    'bg-blue-50 text-blue-700 border-blue-200',
   direct:    'bg-slate-100 text-slate-600 border-slate-200',
@@ -75,39 +82,6 @@ const DOSSIER_STATUSES = [
 
 function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
-}
-
-function InfoRow({ label, value, icon }: { label: string; value?: string | null; icon?: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border/50 last:border-0">
-      {icon && <span className="mt-0.5 text-muted-foreground shrink-0">{icon}</span>}
-      <span className="text-muted-foreground text-sm min-w-[130px] shrink-0">{label}</span>
-      <span className="text-sm font-medium ml-auto text-right">
-        {value || <span className="text-muted-foreground/70">-</span>}
-      </span>
-    </div>
-  )
-}
-
-function asString(value: unknown): string | null {
-  if (value === null || value === undefined) return null
-  const s = String(value).trim()
-  return s.length > 0 ? s : null
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.map((v) => String(v).trim()).filter(Boolean)
-}
-
-function resolveFileUrl(value: string): string {
-  if (value.startsWith('http://') || value.startsWith('https://')) return value
-  if (value.startsWith('/')) {
-    const base = (import.meta.env.VITE_API_URL as string | undefined)?.replace('/api', '') ?? 'http://localhost:4000'
-    return `${base}${value}`
-  }
-  const base = (import.meta.env.VITE_API_URL as string | undefined)?.replace('/api', '') ?? 'http://localhost:4000'
-  return `${base}/uploads/${encodeURIComponent(value)}`
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -220,7 +194,6 @@ export default function DossierPatientPage() {
 
   const formulaire = patient.formulaires?.[0]
   const rapport    = patient.rapports?.[0]
-  const payload    = (formulaire?.payload ?? {}) as Record<string, unknown>
   const rendezvous: RendezVous[] = patient.rendezvous ?? (patient.agendaEvents ?? [])
     .filter((ev) => ev.type === 'rdv')
     .map((ev) => {
@@ -273,8 +246,12 @@ export default function DossierPatientPage() {
             </div>
           </div>
           {patient.sourceContact && (
-            <span className={`text-xs px-2 py-1 rounded border font-medium shrink-0 ${SOURCE_COLORS[patient.sourceContact] ?? ''}`}>
-              {patient.sourceContact}
+            <span
+              className={`text-xs px-2 py-1 rounded border font-medium shrink-0 ${
+                SOURCE_COLORS[patient.sourceContact] ?? SOURCE_COLORS[patient.sourceContact.toLowerCase()] ?? ''
+              }`}
+            >
+              {formatSourceConnaissanceLabel(patient.sourceContact)}
             </span>
           )}
         </div>
@@ -337,7 +314,10 @@ export default function DossierPatientPage() {
                 <InfoRow label="Ville" value={patient.ville} icon={<MapPin className="h-3.5 w-3.5" />} />
                 <InfoRow label="Pays" value={patient.pays} />
                 <InfoRow label="Nationalité" value={patient.nationalite} />
-                <InfoRow label="Source" value={patient.sourceContact ?? undefined} />
+                <InfoRow
+                  label="Source"
+                  value={patient.sourceContact ? formatSourceConnaissanceLabel(patient.sourceContact) : undefined}
+                />
               </CardContent>
             </Card>
 
@@ -399,126 +379,12 @@ export default function DossierPatientPage() {
               <p className="text-sm text-muted-foreground">Aucun formulaire soumis</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-4 py-2.5 text-sm">
-                {formulaire.status === 'submitted'
-                  ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  : <Clock className="h-4 w-4 text-amber-600" />}
-                <span className="font-medium">
-                  {formulaire.status === 'submitted' ? 'Formulaire soumis' : 'Brouillon'}
-                </span>
-                {formulaire.submittedAt && (
-                  <span className="text-muted-foreground ml-2">le {formatDate(formulaire.submittedAt)}</span>
-                )}
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <Card>
-                  <CardHeader><CardTitle className="text-sm">Données personnelles</CardTitle></CardHeader>
-                  <CardContent>
-                    <InfoRow label="Date de naissance" value={asString(payload.dateNaissance)} />
-                    <InfoRow label="Poids" value={asString(payload.poids) ? `${String(payload.poids)} kg` : null} />
-                    <InfoRow label="Taille" value={asString(payload.taille) ? `${String(payload.taille)} cm` : null} />
-                    <InfoRow label="Groupe sanguin" value={asString(payload.groupeSanguin)} />
-                    <InfoRow label="Période souhaitée" value={asString(payload.periodeSouhaitee)} />
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader><CardTitle className="text-sm">Données médicales</CardTitle></CardHeader>
-                  <CardContent>
-                    <InfoRow label="Antécédents médicaux" value={asStringArray(payload.antecedentsMedicaux).join(', ') || null} />
-                    <InfoRow label="Traitement en cours" value={payload.traitementEnCours === true ? 'Oui' : payload.traitementEnCours === false ? 'Non' : null} />
-                    <InfoRow label="Détails traitement" value={asString(payload.traitementDetails)} />
-                    <InfoRow label="Allergies" value={asStringArray(payload.allergies).join(', ') || null} />
-                    <InfoRow label="Fumeuse" value={payload.fumeur === true ? 'Oui' : payload.fumeur === false ? 'Non' : null} />
-                    <InfoRow label="Détails tabac" value={asString(payload.detailsTabac)} />
-                    <InfoRow label="Alcool" value={payload.alcool === true ? 'Oui' : payload.alcool === false ? 'Non' : null} />
-                    <InfoRow label="Détails alcool" value={asString(payload.detailsAlcool)} />
-                    <InfoRow label="Drogue" value={payload.drogue === true ? 'Oui' : payload.drogue === false ? 'Non' : null} />
-                    <InfoRow label="Détails drogue" value={asString(payload.detailsDrogue)} />
-                    <InfoRow label="Autres maladies" value={asString(payload.autresMaladiesChroniques)} />
-                    <InfoRow label="Chirurgies antérieures" value={payload.chirurgiesAnterieures === true ? 'Oui' : payload.chirurgiesAnterieures === false ? 'Non' : null} />
-                    <InfoRow label="Détails chirurgies" value={asString(payload.chirurgiesDetails)} />
-                  </CardContent>
-                </Card>
-
-                <Card className="lg:col-span-2">
-                  <CardHeader><CardTitle className="text-sm">Demande du patient</CardTitle></CardHeader>
-                  <CardContent>
-                    <InfoRow label="Interventions souhaitées" value={asStringArray(payload.typeIntervention).join(', ') || null} />
-                    <InfoRow label="Description demande" value={asString(payload.descriptionDemande)} />
-                    <InfoRow label="Attentes" value={asString(payload.attentes)} />
-                    <InfoRow label="Date souhaitée" value={asString(payload.dateSouhaitee)} />
-                  </CardContent>
-                </Card>
-
-                <Card className="lg:col-span-2">
-                  <CardHeader><CardTitle className="text-sm">Documents et photos</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-2">Photos</p>
-                      {asStringArray(payload.photos).length === 0 ? (
-                        <p className="text-sm text-muted-foreground">-</p>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                          {asStringArray(payload.photos).map((photo, idx) => {
-                            const url = resolveFileUrl(photo)
-                            const fileName = decodeURIComponent(url.split('/').pop() ?? `photo-${idx + 1}`)
-                            return (
-                              <a
-                                key={`${photo}-${idx}`}
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30"
-                                title={fileName}
-                              >
-                                <img
-                                  src={url}
-                                  alt={fileName}
-                                  className="h-full w-full object-cover"
-                                  loading="lazy"
-                                />
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                                  <ExternalLink className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </div>
-                              </a>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-2">Documents</p>
-                      {asStringArray(payload.documentsPDF).length === 0 ? (
-                        <p className="text-sm text-muted-foreground">-</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {asStringArray(payload.documentsPDF).map((doc, idx) => {
-                            const url = resolveFileUrl(doc)
-                            const fileName = decodeURIComponent(url.split('/').pop() ?? `document-${idx + 1}`)
-                            return (
-                              <a
-                                key={`${doc}-${idx}`}
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 rounded-lg border px-3 py-2 hover:bg-muted/30 transition-colors"
-                              >
-                                <FileText className="h-4 w-4 text-rose-500 shrink-0" />
-                                <span className="text-sm truncate flex-1">{fileName}</span>
-                                <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0" />
-                              </a>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
+            <FormulairePayloadView
+              status={formulaire.status}
+              submittedAt={formulaire.submittedAt}
+              createdAt={formulaire.createdAt}
+              payload={(formulaire.payload ?? {}) as Record<string, unknown>}
+            />
           )}
         </TabsContent>
 

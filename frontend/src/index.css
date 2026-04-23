@@ -40,6 +40,89 @@
   }
 }
 
+@layer components {
+  /* react-phone-number-input — alignement visuel avec les Input du formulaire */
+  .formulaire-phone.PhoneInput {
+    display: flex;
+    align-items: stretch;
+    gap: 0.35rem;
+    width: 100%;
+    min-width: 0;
+  }
+  .formulaire-phone .PhoneInputCountry {
+    position: relative;
+    align-self: stretch;
+  }
+  .formulaire-phone .PhoneInputCountrySelect {
+    height: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0 0.4rem 0 0.35rem;
+    border-radius: 0.5rem;
+    border: 1px solid #e4c8bd;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+    line-height: 1.25;
+    cursor: pointer;
+  }
+  .formulaire-phone .PhoneInputCountrySelect:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(6, 42, 48, 0.12);
+    border-color: rgba(6, 42, 48, 0.35);
+  }
+  .formulaire-phone .PhoneInputCountryIconImg {
+    display: block;
+    width: 1.35rem;
+    height: auto;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+  }
+  .formulaire-phone .PhoneInputInput {
+    flex: 1;
+    min-width: 0;
+    height: 2.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid #e4c8bd;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    background: #fff;
+  }
+  .formulaire-phone .PhoneInputInput:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(6, 42, 48, 0.12);
+    border-color: rgba(6, 42, 48, 0.35);
+  }
+  .formulaire-phone .PhoneInputCountrySelect[disabled],
+  .formulaire-phone .PhoneInputInput:disabled {
+    opacity: 0.85;
+    cursor: not-allowed;
+    background: #fafafa;
+  }
+
+  .formulaire-phone--compact.PhoneInput {
+    gap: 0.25rem;
+  }
+  .formulaire-phone--compact .PhoneInputCountrySelect {
+    height: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0 0.3rem 0 0.28rem;
+    font-size: 0.75rem;
+    border-radius: 0.45rem;
+  }
+  .formulaire-phone--compact .PhoneInputInput {
+    height: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8125rem;
+    border-radius: 0.45rem;
+  }
+  .formulaire-phone--compact .PhoneInputCountryIconImg {
+    width: 1.05rem;
+  }
+}
+
 @layer utilities {
   .animate-fade-in {
     animation: fade-in 0.3s ease-out;

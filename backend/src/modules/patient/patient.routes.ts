@@ -119,6 +119,19 @@ patientRouter.get(
   }
 )
 
+// POST /api/patient/devis/:id/consultation — première ouverture / lecture du devis (notification gestionnaire)
+patientRouter.post(
+  '/devis/:id/consultation',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await patientService.enregistrerConsultationDevis(req.auth!.sub, paramToString(req.params.id))
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
 // POST /api/patient/devis/:id/repondre — accepter ou refuser un devis
 patientRouter.post(
   '/devis/:id/repondre',

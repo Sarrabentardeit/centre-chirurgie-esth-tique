@@ -10,6 +10,8 @@ import { CheckCircle2, ChevronLeft, ChevronRight, Upload, X, AlertCircle, Check,
 
 import { Input } from '@/components/ui/input'
 
+import { PhoneInputField, isValidPhoneNumber } from '@/components/ui/phone-input-field'
+
 import { Label } from '@/components/ui/label'
 
 import { Textarea } from '@/components/ui/textarea'
@@ -17,10 +19,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 
 import { cn } from '@/lib/utils'
+import {
+  SOURCE_CONNAISSANCE_OPTIONS,
+  formatSourceConnaissanceLabel,
+  isSourceConnaissance,
+} from '@/lib/sourceConnaissance'
 
 import { getDashboardPath, useAuthStore } from '@/store/authStore'
 
-import { authApi, formulaireApi, uploadFile } from '@/lib/api'
+import { authApi, formulaireApi, uploadFile, uploadFilePublic } from '@/lib/api'
 
 import { useNavigate } from 'react-router-dom'
 
@@ -40,21 +47,55 @@ const STEPS = [
 
 ]
 
-const INTERVENTIONS = [
+const INTERVENTIONS_BY_CATEGORY = {
+  visage: ['Rhinoplastie', 'Blépharoplastie', 'Lifting du visage', 'Otoplastie'],
+  seins: ['Augmentation mammaire', 'Réduction mammaire', 'Lifting mammaire'],
+  cellulite: ['Abdominoplastie', 'Liposuccion', 'Lipofilling'],
+} as const
 
-  'Rhinoplastie', 'Blepharoplastie', 'Lifting du visage', 'Otoplastie',
+const MOIS_PERIODE = [
+  { value: '01', label: 'Janvier' },
+  { value: '02', label: 'Février' },
+  { value: '03', label: 'Mars' },
+  { value: '04', label: 'Avril' },
+  { value: '05', label: 'Mai' },
+  { value: '06', label: 'Juin' },
+  { value: '07', label: 'Juillet' },
+  { value: '08', label: 'Août' },
+  { value: '09', label: 'Septembre' },
+  { value: '10', label: 'Octobre' },
+  { value: '11', label: 'Novembre' },
+  { value: '12', label: 'Décembre' },
+] as const
 
-  'Augmentation mammaire', 'Réduction mammaire', 'Lifting mammaire',
+function buildPeriodeSouhaitee(mois: string, annee: string): string {
+  const row = MOIS_PERIODE.find((x) => x.value === mois)
+  if (!row || !annee.trim()) return ''
+  return `${row.label} ${annee.trim()}`
+}
 
-  'Abdominoplastie', 'Liposuccion', 'Lipofilling', 'Blépharoplastie',
-
-]
+function parsePeriodeSouhaitee(s: string | undefined): { mois: string; annee: string } {
+  if (!s?.trim()) return { mois: '', annee: '' }
+  const t = s.trim()
+  const iso = t.match(/^(\d{4})-(\d{2})$/)
+  if (iso) {
+    const y = iso[1]
+    const m = iso[2]
+    return { annee: y, mois: m }
+  }
+  for (const { value, label } of MOIS_PERIODE) {
+    const re = new RegExp(`^${label}\\s+(\\d{4})$`, 'i')
+    const m = t.match(re)
+    if (m) return { mois: value, annee: m[1] }
+  }
+  return { mois: '', annee: '' }
+}
 
 const ANTECEDENTS = [
 
   'Diabète', 'Tension artérielle', 'Maladie cardiaque', 'Problèmes de coagulation',
 
-  'Troubles thyroïdiens', 'Asthme', 'Ã‰pilepsie', 'Dépression / Anxiété',
+  'Troubles thyroïdiens', 'Asthme', 'Épilepsie', 'Dépression / Anxiété',
 
 ]
 
@@ -66,21 +107,30 @@ const step1Schema = z.object({
 
   dateNaissance: z.string().min(1, 'Requis'),
 
-  ville: z.string().min(2, 'Requis'),
-
-  pays: z.string().min(2, 'Requis'),
-
-  periodeSouhaitee: z.string().min(2, 'Requis'),
+  sourceContact: z
+    .string()
+    .min(1, 'Indiquez comment vous avez connu le Dr Chennoufi.')
+    .refine((s) => isSourceConnaissance(s), { message: 'Option non valide.' }),
 
 })
 
-type Step1Data = z.infer<typeof step1Schema>
+type Step1Data = {
+  poids: string
+  taille: string
+  dateNaissance: string
+  sourceContact: string
+}
 
 const step3Schema = z.object({
 
   descriptionDemande: z.string().min(1, 'Champ requis'),
 
-  dateSouhaitee: z.string().min(1, 'Date souhaitée requise'),
+  periodeSouhaiteeMois: z.string().min(1, 'Sélectionnez un mois'),
+
+  periodeSouhaiteeAnnee: z.string().min(1, 'Sélectionnez une année'),
+
+  /** Présence d’un accompagnant pour le séjour / le parcours */
+  accompagnant: z.boolean(),
 
 })
 
@@ -99,6 +149,34 @@ function extractFileName(input: string): string {
     const last = input.split('/').pop() ?? input
     return decodeURIComponent(last)
   }
+}
+
+function guessMimeFromName(fileName: string, blobType: string): string {
+  if (blobType) return blobType
+  const ext = fileName.toLowerCase().split('.').pop() ?? ''
+  if (ext === 'pdf') return 'application/pdf'
+  if (ext === 'png') return 'image/png'
+  if (ext === 'webp') return 'image/webp'
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  return 'application/octet-stream'
+}
+
+/** Remplace les prévisualisations `blob:` par un upload réel (compte créé / session disponible). */
+async function materializeUploadedFiles(items: UploadedFile[]): Promise<UploadedFile[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      const u = item.url || ''
+      if (!u.startsWith('blob:')) return item
+      const res = await fetch(u)
+      if (!res.ok) throw new Error('Lecture du fichier local impossible.')
+      const blob = await res.blob()
+      const mime = guessMimeFromName(item.name, blob.type)
+      const file = new File([blob], item.name, { type: mime })
+      const uploaded = await uploadFile(file)
+      URL.revokeObjectURL(u)
+      return { url: uploaded.url, name: uploaded.name }
+    }),
+  )
 }
 
 export default function FormulairePage() {
@@ -129,13 +207,31 @@ export default function FormulairePage() {
     nom: '',
     email: '',
     phone: '',
+    ville: '',
+    pays: '',
     password: '',
     confirmPassword: '',
 
   })
 
-  const step1Form = useForm<Step1Data>({ resolver: zodResolver(step1Schema) })
-  const step3Form = useForm<Step3Data>({ resolver: zodResolver(step3Schema) })
+  const step1Form = useForm<Step1Data>({
+    resolver: zodResolver(step1Schema),
+    defaultValues: {
+      poids: '',
+      taille: '',
+      dateNaissance: '',
+      sourceContact: '',
+    },
+  })
+  const step3Form = useForm<Step3Data>({
+    resolver: zodResolver(step3Schema),
+    defaultValues: {
+      descriptionDemande: '',
+      periodeSouhaiteeMois: '',
+      periodeSouhaiteeAnnee: '',
+      accompagnant: false,
+    },
+  })
 
   useEffect(() => {
 
@@ -155,6 +251,8 @@ export default function FormulairePage() {
       nom: nom || '',
       email: user.email || '',
       phone: user.phone || '',
+      ville: '',
+      pays: '',
       password: '',
       confirmPassword: '',
     })
@@ -194,6 +292,8 @@ export default function FormulairePage() {
             groupeSanguin?: string
             photos?: string[]
             documentsPDF?: string[]
+            sourceContact?: string
+            accompagnant?: boolean
           }
         } | null
         const payload = formulaire?.payload
@@ -217,18 +317,23 @@ export default function FormulairePage() {
           return rows.length > 0 ? rows : [{ intervention: '', date: '' }]
         }
 
+        const src =
+          payload.sourceContact && isSourceConnaissance(String(payload.sourceContact))
+            ? String(payload.sourceContact)
+            : ''
         step1Form.reset({
           poids: payload.poids != null ? String(payload.poids) : '',
           taille: payload.taille != null ? String(payload.taille) : '',
           dateNaissance: payload.dateNaissance ?? '',
-          ville: step1Form.getValues('ville') ?? '',
-          pays: step1Form.getValues('pays') ?? '',
-          periodeSouhaitee: payload.periodeSouhaitee ?? '',
+          sourceContact: src,
         })
 
+        const { mois: psMois, annee: psAnnee } = parsePeriodeSouhaitee(payload.periodeSouhaitee)
         step3Form.reset({
           descriptionDemande: payload.descriptionDemande ?? payload.attentes ?? '',
-          dateSouhaitee: payload.dateSouhaitee ?? '',
+          periodeSouhaiteeMois: psMois,
+          periodeSouhaiteeAnnee: psAnnee,
+          accompagnant: typeof payload.accompagnant === 'boolean' ? payload.accompagnant : false,
         })
 
         setAntecedents(payload.antecedentsMedicaux ?? [])
@@ -326,10 +431,11 @@ export default function FormulairePage() {
     // Preview local immédiat
     const previews = files.map((f) => ({ url: URL.createObjectURL(f), name: f.name }))
     setter((prev) => [...prev, ...previews])
-    // Upload si connecté
-    if (user) {
-      setUploading(true)
-      const results = await Promise.allSettled(files.map((f) => uploadFile(f)))
+    // Patient connecté → /patient/upload ; formulaire public → /public/upload (avant inscription)
+    const uploadFn = user ? uploadFile : uploadFilePublic
+    setUploading(true)
+    try {
+      const results = await Promise.allSettled(files.map((f) => uploadFn(f)))
       setter((prev) => {
         const updated = [...prev]
         results.forEach((r, i) => {
@@ -340,6 +446,7 @@ export default function FormulairePage() {
         })
         return updated
       })
+    } finally {
       setUploading(false)
     }
   }, [user])
@@ -348,9 +455,13 @@ export default function FormulairePage() {
 
     if (currentStep === 1) {
       if (!user) {
-        const { prenom, nom, email, phone, password, confirmPassword } = publicIdentity
-        if (!prenom.trim() || !nom.trim() || !email.trim() || !phone.trim()) {
-          setAutoAccountError('Veuillez compléter vos coordonnées (prénom, nom, email, téléphone).')
+        const { prenom, nom, email, phone, ville, pays, password, confirmPassword } = publicIdentity
+        if (!prenom.trim() || !nom.trim() || !email.trim() || !phone.trim() || !ville.trim() || !pays.trim()) {
+          setAutoAccountError('Veuillez compléter vos coordonnées (prénom, nom, email, téléphone, ville, pays).')
+          return
+        }
+        if (!isValidPhoneNumber(phone)) {
+          setAutoAccountError('Veuillez saisir un numéro de téléphone valide (avec indicatif pays).')
           return
         }
         if (!email.includes('@')) {
@@ -387,10 +498,6 @@ export default function FormulairePage() {
         setStep4Error('Veuillez ajouter au moins une photo.')
         return
       }
-      if (uploadedDocs.length === 0) {
-        setStep4Error('Veuillez ajouter au moins un document PDF.')
-        return
-      }
       setStep4Error('')
     }
     setCurrentStep((s) => Math.min(s + 1, 5))
@@ -403,17 +510,27 @@ export default function FormulairePage() {
 
     let targetUser = user
     setAutoAccountError('')
+    if (!privacyAccepted) {
+      setPrivacyError(
+        user
+          ? 'Veuillez accepter le traitement de vos données médicales pour soumettre le formulaire.'
+          : 'Veuillez accepter la politique de confidentialité pour créer votre compte et soumettre le formulaire.',
+      )
+      return
+    }
     if (!targetUser) {
-      if (!privacyAccepted) {
-        setPrivacyError('Veuillez accepter la politique de confidentialité pour créer votre compte.')
-        return
-      }
       const prenom = publicIdentity.prenom.trim()
       const nom = publicIdentity.nom.trim()
       const email = publicIdentity.email.trim().toLowerCase()
       const phone = publicIdentity.phone.trim()
-      if (!prenom || !nom || !email || !phone) {
+      const ville = publicIdentity.ville.trim()
+      const pays = publicIdentity.pays.trim()
+      if (!prenom || !nom || !email || !phone || !ville || !pays) {
         setAutoAccountError('Veuillez compléter vos coordonnées pour finaliser la soumission.')
+        return
+      }
+      if (!isValidPhoneNumber(phone)) {
+        setAutoAccountError('Veuillez saisir un numéro de téléphone valide (avec indicatif pays).')
         return
       }
       try {
@@ -423,9 +540,10 @@ export default function FormulairePage() {
           password: publicIdentity.password,
           fullName: `${prenom} ${nom}`,
           phone,
+          ville,
+          pays,
           dateNaissance: step1.dateNaissance,
-          ville: step1.ville,
-          pays: step1.pays,
+          sourceContact: step1.sourceContact,
         })
         const newUser: User = {
           id: result.user.id,
@@ -443,14 +561,45 @@ export default function FormulairePage() {
     }
     const step1 = step1Form.getValues()
     const step3 = step3Form.getValues()
-    const uploadedPhotoUrls = uploadedPhotos
+
+    let photosForPayload = uploadedPhotos
+    let docsForPayload = uploadedDocs
+    const hasBlobPhotos = uploadedPhotos.some((p) => (p.url || '').startsWith('blob:'))
+    const hasBlobDocs = uploadedDocs.some((p) => (p.url || '').startsWith('blob:'))
+    if (hasBlobPhotos || hasBlobDocs) {
+      try {
+        setUploadingPhotos(hasBlobPhotos)
+        setUploadingDocs(hasBlobDocs)
+        const [nextPhotos, nextDocs] = await Promise.all([
+          materializeUploadedFiles(uploadedPhotos),
+          materializeUploadedFiles(uploadedDocs),
+        ])
+        photosForPayload = nextPhotos
+        docsForPayload = nextDocs
+        setUploadedPhotos(nextPhotos)
+        setUploadedDocs(nextDocs)
+      } catch (err) {
+        setStep4Error(
+          err instanceof Error
+            ? err.message
+            : "L'envoi des fichiers a échoué. Vérifiez votre connexion et réessayez.",
+        )
+        setCurrentStep(4)
+        return
+      } finally {
+        setUploadingPhotos(false)
+        setUploadingDocs(false)
+      }
+    }
+
+    const uploadedPhotoUrls = photosForPayload
       .map((f) => f.url || '')
       .filter((u) => Boolean(u) && !u.startsWith('blob:'))
-    const uploadedDocUrls = uploadedDocs
+    const uploadedDocUrls = docsForPayload
       .map((f) => f.url || '')
       .filter((u) => Boolean(u) && !u.startsWith('blob:'))
-    if (uploadedPhotoUrls.length === 0 || uploadedDocUrls.length === 0) {
-      setStep4Error("L'upload des fichiers a échoué. Réessayez d'ajouter les photos et PDF puis resoumettez.")
+    if (uploadedPhotoUrls.length === 0) {
+      setStep4Error("L'upload des photos a échoué. Réessayez d'ajouter au moins une photo puis resoumettez.")
       setCurrentStep(4)
       return
     }
@@ -462,8 +611,8 @@ export default function FormulairePage() {
       dateNaissance: step1.dateNaissance,
       poids: parseInt(step1.poids, 10),
       taille: parseInt(step1.taille, 10),
+      sourceContact: step1.sourceContact,
       groupeSanguin,
-      periodeSouhaitee: step3.dateSouhaitee || step1.periodeSouhaitee,
       antecedentsMedicaux: antecedents,
       traitementEnCours,
       traitementDetails: traitementEnCours ? traitementDetails : undefined,
@@ -483,8 +632,10 @@ export default function FormulairePage() {
       zonesConcernees: selectedInterventions,
       descriptionDemande: step3.descriptionDemande,
       attentes: step3.descriptionDemande,
+      periodeSouhaitee: buildPeriodeSouhaitee(step3.periodeSouhaiteeMois, step3.periodeSouhaiteeAnnee),
+      accompagnant: step3.accompagnant,
       photos: uploadedPhotoUrls,
-      documentsPDF: uploadedDocUrls,
+      documentsPDF: uploadedDocUrls.length > 0 ? uploadedDocUrls : undefined,
     }
     try {
       await formulaireApi.submit({ status: 'submitted', payload })
@@ -769,32 +920,77 @@ export default function FormulairePage() {
                   ? 'Vous êtes connectée : ces informations sont affichées en lecture seule.'
                   : "Complétez directement le formulaire. Votre compte patiente sera créé automatiquement à l'envoi."}
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {[
-                  { placeholder: 'Prénom', key: 'prenom' as const },
-                  { placeholder: 'Nom', key: 'nom' as const },
-                  { placeholder: 'Email', key: 'email' as const, type: 'email' },
-                  { placeholder: 'Téléphone *', key: 'phone' as const, required: true },
-                ].map(({ placeholder, key, type, required }) => (
-                  <div key={key} className="relative">
+              <div className="space-y-3">
+                {/* Une grille 2×2 : colonnes strictement égales (comme pays / ville) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { placeholder: 'Prénom', key: 'prenom' as const },
+                    { placeholder: 'Nom', key: 'nom' as const },
+                  ].map(({ placeholder, key }) => (
+                    <div key={key} className="relative min-w-0">
+                      <Input
+                        placeholder={placeholder}
+                        value={publicIdentity[key]}
+                        disabled={Boolean(user)}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          setPublicIdentity((p) => ({ ...p, [key]: value }))
+                          if (autoAccountError) setAutoAccountError('')
+                        }}
+                        className="border-brand-200 focus-visible:ring-brand-950/20 bg-white disabled:opacity-80"
+                      />
+                    </div>
+                  ))}
+                  <div className="relative min-w-0">
                     <Input
-                      type={type}
-                      placeholder={placeholder}
-                      value={publicIdentity[key]}
+                      type="email"
+                      placeholder="Email *"
+                      value={publicIdentity.email}
                       disabled={Boolean(user)}
                       onChange={(e) => {
-                        const value = e.target.value
-                        setPublicIdentity((p) => ({ ...p, [key]: value }))
+                        setPublicIdentity((p) => ({ ...p, email: e.target.value }))
                         if (autoAccountError) setAutoAccountError('')
                       }}
-                      required={required}
                       className="border-brand-200 focus-visible:ring-brand-950/20 bg-white disabled:opacity-80"
                     />
                   </div>
-                ))}
+                  <div className="relative min-w-0 w-full">
+                    <PhoneInputField
+                      compact
+                      value={publicIdentity.phone}
+                      onChange={(v) => {
+                        setPublicIdentity((p) => ({ ...p, phone: v ?? '' }))
+                        if (autoAccountError) setAutoAccountError('')
+                      }}
+                      disabled={Boolean(user)}
+                    />
+                  </div>
+                </div>
+                {/* Pays | Ville */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { placeholder: 'Pays *', key: 'pays' as const, required: true },
+                    { placeholder: 'Ville *', key: 'ville' as const, required: true },
+                  ].map(({ placeholder, key, required }) => (
+                    <div key={key} className="relative">
+                      <Input
+                        placeholder={placeholder}
+                        value={publicIdentity[key]}
+                        disabled={Boolean(user)}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          setPublicIdentity((p) => ({ ...p, [key]: value }))
+                          if (autoAccountError) setAutoAccountError('')
+                        }}
+                        required={required}
+                        className="border-brand-200 focus-visible:ring-brand-950/20 bg-white disabled:opacity-80"
+                      />
+                    </div>
+                  ))}
+                </div>
               {/* Champs mot de passe — uniquement si non connecté */}
               {!user && (
-                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                   <div className="space-y-1">
                     <label className="text-xs font-medium" style={{ color: '#062a30' }}>
                       Mot de passe <span style={{ color: '#c0392b' }}>*</span>
@@ -928,7 +1124,7 @@ export default function FormulairePage() {
             </div>
             {/* Mobile current step label */}
             <p className="mt-3 text-xs text-center sm:hidden" style={{ color: '#062a30', fontWeight: 600 }}>
-              Ã‰tape {currentStep} — {STEPS[currentStep - 1].label}
+              Étape {currentStep} — {STEPS[currentStep - 1].label}
             </p>
           </div>
           {/* â”€â”€ Form card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -961,28 +1157,26 @@ export default function FormulairePage() {
             <div className="p-4 sm:p-6 space-y-5">
               {/* â”€â”€ STEP 1 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
               {currentStep === 1 && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="poids" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                        Poids (kg) <span className="text-destructive">*</span>
-                      </Label>
-                      <Input id="poids" placeholder="65" {...step1Form.register('poids')} className="border-brand-200 focus-visible:ring-brand-950/20" />
-                      {step1Form.formState.errors.poids && (
-                        <p className="text-xs text-destructive">{step1Form.formState.errors.poids.message}</p>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="taille" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                        Taille (cm) <span className="text-destructive">*</span>
-                      </Label>
-                      <Input id="taille" placeholder="165" {...step1Form.register('taille')} className="border-brand-200 focus-visible:ring-brand-950/20" />
-                      {step1Form.formState.errors.taille && (
-                        <p className="text-xs text-destructive">{step1Form.formState.errors.taille.message}</p>
-                      )}
-                    </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="poids" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                      Poids (kg) <span className="text-destructive">*</span>
+                    </Label>
+                    <Input id="poids" placeholder="65" {...step1Form.register('poids')} className="border-brand-200 focus-visible:ring-brand-950/20" />
+                    {step1Form.formState.errors.poids && (
+                      <p className="text-xs text-destructive">{step1Form.formState.errors.poids.message}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="taille" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                      Taille (cm) <span className="text-destructive">*</span>
+                    </Label>
+                    <Input id="taille" placeholder="165" {...step1Form.register('taille')} className="border-brand-200 focus-visible:ring-brand-950/20" />
+                    {step1Form.formState.errors.taille && (
+                      <p className="text-xs text-destructive">{step1Form.formState.errors.taille.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="dateNaissance" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
                       Date de naissance <span className="text-destructive">*</span>
                     </Label>
@@ -991,27 +1185,22 @@ export default function FormulairePage() {
                       <p className="text-xs text-destructive">{step1Form.formState.errors.dateNaissance.message}</p>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="ville" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                        Ville <span className="text-destructive">*</span>
-                      </Label>
-                      <Input id="ville" placeholder="Tunis" {...step1Form.register('ville')} className="border-brand-200 focus-visible:ring-brand-950/20" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="pays" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                        Pays <span className="text-destructive">*</span>
-                      </Label>
-                      <Input id="pays" placeholder="Tunisie" {...step1Form.register('pays')} className="border-brand-200 focus-visible:ring-brand-950/20" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="periodeSouhaitee" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                      Période souhaitée <span className="text-destructive">*</span>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="sourceContact" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                      Comment avez-vous connu le Dr Chennoufi ? <span className="text-destructive">*</span>
                     </Label>
-                    <Input id="periodeSouhaitee" placeholder="Ex: Juin–Juillet 2026" {...step1Form.register('periodeSouhaitee')} className="border-brand-200 focus-visible:ring-brand-950/20" />
-                    {step1Form.formState.errors.periodeSouhaitee && (
-                      <p className="text-xs text-destructive">{step1Form.formState.errors.periodeSouhaitee.message}</p>
+                    <select
+                      id="sourceContact"
+                      className="flex h-10 w-full rounded-lg border border-brand-200 bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-950/20"
+                      {...step1Form.register('sourceContact')}
+                    >
+                      <option value="">Sélectionnez…</option>
+                      {SOURCE_CONNAISSANCE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    {step1Form.formState.errors.sourceContact && (
+                      <p className="text-xs text-destructive">{step1Form.formState.errors.sourceContact.message}</p>
                     )}
                   </div>
                 </div>
@@ -1151,7 +1340,6 @@ export default function FormulairePage() {
                         { label: 'Fumeuse', checked: fumeur, set: setFumeur },
                         { label: 'Alcool', checked: alcool, set: setAlcool },
                         { label: 'Drogue', checked: drogue, set: setDrogue },
-                        { label: 'Chirurgies antérieures', checked: chirurgiesAnterieures, set: setChirurgiesAnterieures },
                       ].map(({ label, checked, set }) => (
                         <label
                           key={label}
@@ -1169,7 +1357,7 @@ export default function FormulairePage() {
                     </div>
                   </div>
                   {fumeur && (
-                    <Textarea placeholder="Précisez type de cigarette/vape et quantité par jour..." value={detailsTabac} onChange={(e) => setDetailsTabac(e.target.value)} className="border-brand-200" />
+                    <Textarea placeholder="Précisez depuis quand vous fumez, le type de cigarette/vape et la quantité par jour..." value={detailsTabac} onChange={(e) => setDetailsTabac(e.target.value)} className="border-brand-200" />
                   )}
                   {alcool && (
                     <Textarea placeholder="Précisez fréquence/type d'alcool..." value={detailsAlcool} onChange={(e) => setDetailsAlcool(e.target.value)} className="border-brand-200" />
@@ -1186,22 +1374,67 @@ export default function FormulairePage() {
                     <Label className="mb-3 block text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
                       Type(s) d'intervention souhaité(s) <span className="text-destructive">*</span>
                     </Label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {INTERVENTIONS.map((item) => (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => toggleIntervention(item)}
-                          className={cn(
-                            'rounded-xl border px-3 py-2.5 text-sm text-left transition-all',
-                            selectedInterventions.includes(item)
-                              ? 'border-brand-950/30 bg-brand-950/5 text-brand-950 font-medium'
-                              : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground'
-                          )}
-                        >
-                          {item}
-                        </button>
-                      ))}
+                    <div className="space-y-3">
+                      <div>
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Visage</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {INTERVENTIONS_BY_CATEGORY.visage.map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => toggleIntervention(item)}
+                              className={cn(
+                                'rounded-xl border px-3 py-2.5 text-sm text-left transition-all',
+                                selectedInterventions.includes(item)
+                                  ? 'border-brand-950/30 bg-brand-950/5 text-brand-950 font-medium'
+                                  : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground'
+                              )}
+                            >
+                              {item}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Seins</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {INTERVENTIONS_BY_CATEGORY.seins.map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => toggleIntervention(item)}
+                              className={cn(
+                                'rounded-xl border px-3 py-2.5 text-sm text-left transition-all',
+                                selectedInterventions.includes(item)
+                                  ? 'border-brand-950/30 bg-brand-950/5 text-brand-950 font-medium'
+                                  : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground'
+                              )}
+                            >
+                              {item}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Cellulite</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {INTERVENTIONS_BY_CATEGORY.cellulite.map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => toggleIntervention(item)}
+                              className={cn(
+                                'rounded-xl border px-3 py-2.5 text-sm text-left transition-all',
+                                selectedInterventions.includes(item)
+                                  ? 'border-brand-950/30 bg-brand-950/5 text-brand-950 font-medium'
+                                  : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground'
+                              )}
+                            >
+                              {item}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     {step3Error && (
                       <p className="text-xs text-destructive mt-2 flex items-center gap-1">
@@ -1209,6 +1442,60 @@ export default function FormulairePage() {
                         {step3Error}
                       </p>
                     )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                      Période souhaitée <span className="text-destructive">*</span>
+                    </Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <select
+                          id="periode-mois"
+                          aria-label="Mois de la période souhaitée"
+                          className="flex h-10 w-full rounded-lg border border-brand-200 bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-950/20"
+                          {...step3Form.register('periodeSouhaiteeMois')}
+                        >
+                          <option value="">Mois…</option>
+                          {MOIS_PERIODE.map((m) => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                        {step3Form.formState.errors.periodeSouhaiteeMois && (
+                          <p className="text-xs text-destructive">{step3Form.formState.errors.periodeSouhaiteeMois.message}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <select
+                          id="periode-annee"
+                          aria-label="Année de la période souhaitée"
+                          className="flex h-10 w-full rounded-lg border border-brand-200 bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-950/20"
+                          {...step3Form.register('periodeSouhaiteeAnnee')}
+                        >
+                          <option value="">Année…</option>
+                          {Array.from({ length: 10 }, (_, i) => {
+                            const y = new Date().getFullYear() + i
+                            return (
+                              <option key={y} value={String(y)}>{y}</option>
+                            )
+                          })}
+                        </select>
+                        {step3Form.formState.errors.periodeSouhaiteeAnnee && (
+                          <p className="text-xs text-destructive">{step3Form.formState.errors.periodeSouhaiteeAnnee.message}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-brand-200/60 bg-brand-950/[0.03] px-4 py-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <Checkbox
+                        checked={step3Form.watch('accompagnant')}
+                        onCheckedChange={(v) => step3Form.setValue('accompagnant', !!v, { shouldDirty: true, shouldValidate: true })}
+                        className="mt-0.5"
+                      />
+                      <span className="text-sm leading-snug" style={{ color: '#282727' }}>
+                        Je serai accompagné(e) pour mon séjour / mon parcours (proche, conjoint, etc.)
+                      </span>
+                    </label>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="desc" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
@@ -1225,20 +1512,6 @@ export default function FormulairePage() {
                       <p className="text-xs text-destructive">{step3Form.formState.errors.descriptionDemande.message}</p>
                     )}
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="dateSouhaitee" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                      Date souhaitée <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      id="dateSouhaitee"
-                      type="date"
-                      {...step3Form.register('dateSouhaitee')}
-                      className="border-brand-200 focus-visible:ring-brand-950/20"
-                    />
-                    {step3Form.formState.errors.dateSouhaitee && (
-                      <p className="text-xs text-destructive">{step3Form.formState.errors.dateSouhaitee.message}</p>
-                    )}
-                  </div>
                 </div>
               )}
               {/* â”€â”€ STEP 4 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -1251,7 +1524,7 @@ export default function FormulairePage() {
                       e.currentTarget.value = ''
                     }}
                   />
-                  <input ref={docsInputRef} type="file" accept="application/pdf" multiple className="hidden"
+                  <input ref={docsInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple className="hidden"
                     onChange={(e) => {
                       const files = Array.from(e.target.files ?? [])
                       void handleFilesSelected(files, setUploadedDocs, setUploadingDocs)
@@ -1260,7 +1533,7 @@ export default function FormulairePage() {
                   />
                   {[
                     {
-                      label: 'Photos (face, dos, profil, bras)',
+                      label: 'Photos (face, dos, profils)',
                       hint: 'JPG, PNG — Nombre illimité',
                       files: uploadedPhotos,
                       setFiles: setUploadedPhotos,
@@ -1268,8 +1541,8 @@ export default function FormulairePage() {
                       uploading: uploadingPhotos,
                     },
                     {
-                      label: 'Documents médicaux (résultats, analyses, ordonnances)',
-                      hint: 'PDF — Nombre illimité',
+                      label: 'Documents médicaux (résultats, analyses, ordonnances) — optionnel',
+                      hint: 'PDF ou images — Nombre illimité',
                       files: uploadedDocs,
                       setFiles: setUploadedDocs,
                       ref: docsInputRef,
@@ -1364,11 +1637,26 @@ export default function FormulairePage() {
                           value: selectedInterventions.length > 0 ? selectedInterventions.join(', ') : 'Non renseigné',
                         },
                         {
+                          label: 'Connaissance Dr Chennoufi',
+                          value: formatSourceConnaissanceLabel(step1Form.getValues('sourceContact')) || '—',
+                        },
+                        {
+                          label: 'Période souhaitée',
+                          value: buildPeriodeSouhaitee(
+                            step3Form.getValues('periodeSouhaiteeMois'),
+                            step3Form.getValues('periodeSouhaiteeAnnee'),
+                          ) || '—',
+                        },
+                        {
+                          label: 'Accompagnant (séjour)',
+                          value: step3Form.getValues('accompagnant') ? 'Oui' : 'Non',
+                        },
+                        {
                           label: 'Antécédents',
                           value: antecedents.length > 0 ? `${antecedents.length} renseigné(s)` : 'Aucun',
                         },
                         { label: 'Photos uploadées', value: uploadedPhotos.length },
-                        { label: 'Documents PDF', value: uploadedDocs.length },
+                        { label: 'Documents (optionnel)', value: uploadedDocs.length },
                       ].map(({ label, value }) => (
                         <div
                           key={label}
@@ -1387,39 +1675,36 @@ export default function FormulairePage() {
                   >
                     En soumettant ce formulaire, vous confirmez que les informations fournies sont exactes et complètes.
                   </div>
-                  {!user && (
-                    <div
-                      className="rounded-xl p-3"
-                      style={{ background: 'rgba(6,42,48,0.04)', border: '1px solid rgba(6,42,48,0.1)' }}
-                    >
-                      <label className="flex items-start gap-3 text-sm" style={{ color: '#282727' }}>
-                        <Checkbox
-                          checked={privacyAccepted}
-                          onCheckedChange={(v) => {
-                            const accepted = !!v
-                            setPrivacyAccepted(accepted)
-                            if (accepted) setPrivacyError('')
-                          }}
-                          className="mt-0.5"
-                        />
-                        <span>
-                          J'accepte que mes données médicales soient traitées par l'équipe du Dr. Mehdi Chennoufi
-                          dans le cadre de ma prise en charge.{' '}
-                          <a
-                            href="#"
-                            onClick={(e) => e.preventDefault()}
-                            className="underline"
-                            style={{ color: '#81572d' }}
-                          >
-                            Politique de confidentialité
-                          </a>
-                        </span>
-                      </label>
-                      {privacyError && (
-                        <p className="mt-2 text-xs text-destructive">{privacyError}</p>
-                      )}
-                    </div>
-                  )}
+                  <div
+                    className="rounded-xl p-3"
+                    style={{ background: 'rgba(6,42,48,0.04)', border: '1px solid rgba(6,42,48,0.1)' }}
+                  >
+                    <label className="flex items-start gap-3 text-sm leading-relaxed" style={{ color: '#282727' }}>
+                      <Checkbox
+                        checked={privacyAccepted}
+                        onCheckedChange={(v) => {
+                          const accepted = !!v
+                          setPrivacyAccepted(accepted)
+                          if (accepted) setPrivacyError('')
+                        }}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        J'accepte que mes données médicales soient traitées par l'équipe du Dr. Mehdi Chennoufi dans le cadre de ma prise en charge.{' '}
+                        <a
+                          href="#"
+                          onClick={(e) => e.preventDefault()}
+                          className="underline"
+                          style={{ color: '#81572d' }}
+                        >
+                          Politique de confidentialité
+                        </a>
+                      </span>
+                    </label>
+                    {privacyError && (
+                      <p className="mt-2 text-xs text-destructive">{privacyError}</p>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={handleSubmit}

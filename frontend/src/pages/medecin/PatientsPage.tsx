@@ -14,6 +14,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { STATUS_LABELS, STATUS_COLORS, formatRelative } from '@/lib/utils'
 import type { DossierStatus } from '@/types'
 import { medecinApi, gestionnaireApi } from '@/lib/api'
+import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import type { PatientListItem } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 
@@ -29,7 +30,12 @@ const STATUS_FILTERS: Array<{ key: DossierStatus | 'all'; label: string; color: 
 ]
 
 const SOURCE_STYLES: Record<string, { label: string; color: string }> = {
+  facebook:  { label: 'Facebook',  color: 'bg-blue-50 text-blue-800 border border-blue-200' },
   instagram: { label: 'Instagram', color: 'bg-gradient-to-r from-purple-50 to-pink-50 text-pink-700 border border-pink-200' },
+  radio:     { label: 'Radio',       color: 'bg-amber-50 text-amber-800 border border-amber-200' },
+  tv:        { label: 'TV',          color: 'bg-violet-50 text-violet-800 border border-violet-200' },
+  amie:      { label: 'Entourage',   color: 'bg-teal-50 text-teal-800 border border-teal-200' },
+  autre:     { label: 'Autre',       color: 'bg-slate-100 text-slate-700 border border-slate-200' },
   whatsapp:  { label: 'WhatsApp',  color: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
   google:    { label: 'Google',    color: 'bg-blue-50 text-blue-700 border border-blue-200' },
   direct:    { label: 'Direct',    color: 'bg-slate-100 text-slate-600 border border-slate-200' },
@@ -456,7 +462,13 @@ export default function PatientsPage() {
             {patients.map((p, idx) => {
               const isUrgent   = p.status === 'formulaire_complete'
               const avatarCls  = AVATAR_COLOR[p.status] ?? 'bg-brand-100 text-brand-700'
-              const source     = p.sourceContact ? (SOURCE_STYLES[p.sourceContact] ?? { label: p.sourceContact, color: 'bg-muted text-muted-foreground border border-border' }) : null
+              const srcKey = (p.sourceContact ?? '').toLowerCase()
+              const source = p.sourceContact
+                ? (SOURCE_STYLES[srcKey] ?? {
+                    label: formatSourceConnaissanceLabel(p.sourceContact),
+                    color: 'bg-muted text-muted-foreground border border-border',
+                  })
+                : null
 
               return (
                 <div

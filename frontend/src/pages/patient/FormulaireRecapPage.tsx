@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { authApi, formulaireApi } from '@/lib/api'
+import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import type { MeResponse } from '@/lib/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ interface FormulairePayload {
   poids?: number
   taille?: number
   groupeSanguin?: string
+  sourceContact?: string
   periodeSouhaitee?: string
   antecedentsMedicaux?: string[]
   traitementEnCours?: boolean
@@ -35,6 +37,7 @@ interface FormulairePayload {
   typeIntervention?: string[]
   descriptionDemande?: string
   attentes?: string
+  accompagnant?: boolean
   photos?: string[]
   documentsPDF?: string[]
 }
@@ -456,7 +459,10 @@ export default function FormulaireRecapPage() {
             <Row label="Poids" value={p.poids ? `${p.poids} kg` : undefined} />
             <Row label="Taille" value={p.taille ? `${p.taille} cm` : undefined} />
             <Row label="Groupe sanguin" value={p.groupeSanguin} />
-            <Row label="Période souhaitée" value={p.periodeSouhaitee} />
+            <Row
+              label="Connaissance du Dr Chennoufi"
+              value={p.sourceContact ? formatSourceConnaissanceLabel(p.sourceContact) : undefined}
+            />
           </SectionCard>
 
           {/* Section 3 — Données médicales */}
@@ -514,6 +520,17 @@ export default function FormulaireRecapPage() {
                 </div>
               </div>
             )}
+            <Row label="Période souhaitée" value={p.periodeSouhaitee} />
+            <Row
+              label="Accompagnant (séjour)"
+              value={
+                p.accompagnant === true
+                  ? 'Oui'
+                  : p.accompagnant === false
+                    ? 'Non'
+                    : undefined
+              }
+            />
             <Row label="Description" value={p.descriptionDemande} />
             <Row label="Attentes" value={p.attentes !== p.descriptionDemande ? p.attentes : undefined} />
           </SectionCard>

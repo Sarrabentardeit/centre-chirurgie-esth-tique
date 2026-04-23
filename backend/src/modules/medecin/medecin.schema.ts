@@ -5,6 +5,8 @@ export const rapportSchema = z.object({
   interventionsRecommandees: z.array(z.string()).optional(),
   valeurMedicale:           z.string().optional(),
   forfaitPropose:           z.number().positive().optional(),
+  nuitsClinique:            z.number().int().min(0).max(60).optional(),
+  anesthesieGenerale:       z.boolean().optional(),
   notes:                    z.string().optional(),
 })
 export type RapportInput = z.infer<typeof rapportSchema>

@@ -204,10 +204,27 @@ export async function getDashboard(medecinId: string) {
     if (bucket) bucket.patients += 1
   }
 
+  const sourceLabel = (raw: string): string => {
+    const k = raw.trim().toLowerCase()
+    const map: Record<string, string> = {
+      facebook: 'Facebook',
+      instagram: 'Instagram',
+      radio: 'Radio',
+      tv: 'TV',
+      amie: 'Amie / ami / entourage',
+      autre: 'Autre',
+      whatsapp: 'WhatsApp',
+      google: 'Google',
+      direct: 'Site web / direct',
+      medecin: 'Médecin adressant',
+    }
+    return map[k] ?? (raw.trim() || 'Autre')
+  }
+
   const sourceRaw = new Map<string, number>()
   for (const p of patientsForAnalytics) {
-    const src = (p.sourceContact ?? '').trim() || 'Autre'
-    sourceRaw.set(src, (sourceRaw.get(src) ?? 0) + 1)
+    const label = sourceLabel((p.sourceContact ?? '').trim() || 'autre')
+    sourceRaw.set(label, (sourceRaw.get(label) ?? 0) + 1)
   }
   const totalSources = Array.from(sourceRaw.values()).reduce((a, b) => a + b, 0)
   const sourcesContact = Array.from(sourceRaw.entries())
@@ -536,6 +553,8 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     interventionsRecommandees: input.interventionsRecommandees ?? [],
     valeurMedicale:           input.valeurMedicale,
     forfaitPropose:           input.forfaitPropose,
+    nuitsClinique:            input.nuitsClinique,
+    anesthesieGenerale:       input.anesthesieGenerale,
     notes:                    input.notes,
   }
 
@@ -573,6 +592,8 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
         interventionsRecommandees: rapport.interventionsRecommandees,
         valeurMedicale: rapport.valeurMedicale,
         forfaitPropose: rapport.forfaitPropose,
+        nuitsClinique: rapport.nuitsClinique,
+        anesthesieGenerale: rapport.anesthesieGenerale,
         notes: rapport.notes,
         updatedAt: rapport.updatedAt,
       } as never,

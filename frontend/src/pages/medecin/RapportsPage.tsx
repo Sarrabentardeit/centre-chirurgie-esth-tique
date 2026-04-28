@@ -22,6 +22,7 @@ import type { PatientListItem } from '@/lib/api'
 interface Rapport {
   id: string
   diagnostic: string | null
+  examensDemandes?: string[]
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null
@@ -35,12 +36,19 @@ interface PatientWithRapport extends PatientListItem {
   rapport: Rapport | null
 }
 
+const EXAMEN_OPTIONS = [
+  'Echographie mammaire ou mammographie',
+  'Bilan sanguin complet (groupe sanguin, NFS, plaquettes, TP, TCA, HIV, Hépatite B/C, urée, créatinine, glycémie, iono, ASAT, ALAT)',
+  'Echographie abdominale',
+] as const
+
 function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
 function completionScore(
   diagnostic: string,
+  examensDemandes: string[],
   interventions: string,
   forfait: string,
   valeur: string,
@@ -48,7 +56,7 @@ function completionScore(
   nuitsClinique: string,
   anesthesieGenerale: boolean | null,
 ): number {
-  const textFields = [diagnostic, interventions, forfait, valeur, notes, nuitsClinique]
+  const textFields = [diagnostic, interventions, forfait, valeur, notes, nuitsClinique, examensDemandes.length > 0 ? 'ok' : '']
   const filledText = textFields.filter((f) => f.trim().length > 0).length
   const filledAnesthesie = anesthesieGenerale !== null ? 1 : 0
   const totalFields = textFields.length + 1
@@ -124,6 +132,7 @@ export default function RapportsPage() {
 
   // Rapport editor state
   const [diagnostic, setDiagnostic]       = useState('')
+  const [examensDemandes, setExamensDemandes] = useState<string[]>([])
   const [interventions, setInterventions] = useState('')
   const [valeur, setValeur]               = useState('')
   const [forfait, setForfait]             = useState('')
@@ -137,6 +146,7 @@ export default function RapportsPage() {
   // Sections ouvertes
   const [openSections, setOpenSections] = useState({
     diagnostic: true,
+    examens: true,
     interventions: true,
     forfait: true,
     clinique: true,
@@ -171,7 +181,7 @@ export default function RapportsPage() {
 
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
-    setDiagnostic(''); setInterventions(''); setValeur(''); setForfait('')
+    setDiagnostic(''); setExamensDemandes([]); setInterventions(''); setValeur(''); setForfait('')
     setNuitsClinique(''); setAnesthesieGenerale(null); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
@@ -180,6 +190,7 @@ export default function RapportsPage() {
       const r = res.patient.rapports?.[0]
       if (r) {
         setDiagnostic(r.diagnostic ?? '')
+        setExamensDemandes(r.examensDemandes ?? [])
         setInterventions((r.interventionsRecommandees ?? []).join('\n'))
         setValeur(r.valeurMedicale ?? '')
         setForfait(r.forfaitPropose?.toString() ?? '')
@@ -197,6 +208,7 @@ export default function RapportsPage() {
     try {
       await medecinApi.upsertRapport(selectedId, {
         diagnostic,
+        examensDemandes,
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
         valeurMedicale: valeur || undefined,
         forfaitPropose: forfait ? Number(forfait) : undefined,
@@ -212,6 +224,7 @@ export default function RapportsPage() {
             rapport: {
               id: '',
               diagnostic,
+              examensDemandes,
               interventionsRecommandees: interventions.split('\n').filter(Boolean),
               valeurMedicale: valeur,
               forfaitPropose: forfait ? Number(forfait) : null,
@@ -240,7 +253,7 @@ export default function RapportsPage() {
   }, [patients, search])
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
-  const pct = completionScore(diagnostic, interventions, forfait, valeur, notes, nuitsClinique, anesthesieGenerale)
+  const pct = completionScore(diagnostic, examensDemandes, interventions, forfait, valeur, notes, nuitsClinique, anesthesieGenerale)
 
   const stats = {
     aAnalyser:   patients.filter((p) => p.status === 'formulaire_complete').length,
@@ -257,6 +270,7 @@ export default function RapportsPage() {
     const rowPct = hasRapport
       ? completionScore(
           p.rapport!.diagnostic ?? '',
+          p.rapport!.examensDemandes ?? [],
           (p.rapport!.interventionsRecommandees ?? []).join('\n'),
           p.rapport!.forfaitPropose?.toString() ?? '',
           p.rapport!.valeurMedicale ?? '',
@@ -605,6 +619,42 @@ export default function RapportsPage() {
                 <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                   <span className="text-destructive">*</span> Champ obligatoire pour sauvegarder
                 </p>
+              </Section>
+
+              {/* Examens demandés */}
+              <Section
+                icon={ClipboardPlus}
+                title="Examens médicaux demandés"
+                color="bg-sky-100 text-sky-700"
+                subtitle={examensDemandes.length > 0 ? `${examensDemandes.length} examen(s) sélectionné(s)` : undefined}
+                open={openSections.examens}
+                onToggle={() => toggleSection('examens')}
+              >
+                <div className="space-y-2.5">
+                  {EXAMEN_OPTIONS.map((opt) => {
+                    const checked = examensDemandes.includes(opt)
+                    return (
+                      <label
+                        key={opt}
+                        className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                          checked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                          checked={checked}
+                          onChange={(e) => {
+                            setExamensDemandes((prev) =>
+                              e.target.checked ? [...prev, opt] : prev.filter((x) => x !== opt)
+                            )
+                          }}
+                        />
+                        <span className="text-sm text-foreground leading-relaxed">{opt}</span>
+                      </label>
+                    )
+                  })}
+                </div>
               </Section>
 
               {/* Interventions */}

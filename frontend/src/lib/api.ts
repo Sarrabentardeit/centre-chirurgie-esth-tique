@@ -434,6 +434,7 @@ export const medecinApi = {
       rapports: Array<{
         id: string
         diagnostic: string | null
+        examensDemandes?: string[]
         interventionsRecommandees: string[]
         valeurMedicale: string | null
         forfaitPropose: number | null
@@ -464,6 +465,7 @@ export const medecinApi = {
 
   upsertRapport: (patientId: string, body: {
     diagnostic?: string
+    examensDemandes?: string[]
     interventionsRecommandees?: string[]
     valeurMedicale?: string
     forfaitPropose?: number
@@ -553,6 +555,7 @@ export interface GestionnaireRapportRow {
   patientId: string
   medecinId: string
   diagnostic: string | null
+  examensDemandes?: string[]
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null

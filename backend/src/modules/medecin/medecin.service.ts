@@ -550,6 +550,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
 
   const data = {
     diagnostic:               input.diagnostic,
+    examensDemandes:          input.examensDemandes ?? [],
     interventionsRecommandees: input.interventionsRecommandees ?? [],
     valeurMedicale:           input.valeurMedicale,
     forfaitPropose:           input.forfaitPropose,

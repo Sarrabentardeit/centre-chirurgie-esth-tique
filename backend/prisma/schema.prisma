@@ -183,6 +183,7 @@ model Rapport {
   patientId                String   @map("patient_id")
   medecinId                String   @map("medecin_id")
   diagnostic               String?
+  examensDemandes          String[] @default([]) @map("examens_demandes")
   interventionsRecommandees String[] @map("interventions_recommandees")
   valeurMedicale           String?  @map("valeur_medicale")
   forfaitPropose           Float?   @map("forfait_propose")

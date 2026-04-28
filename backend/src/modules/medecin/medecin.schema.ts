@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const rapportSchema = z.object({
   diagnostic:               z.string().optional(),
+  examensDemandes:          z.array(z.string()).optional(),
   interventionsRecommandees: z.array(z.string()).optional(),
   valeurMedicale:           z.string().optional(),
   forfaitPropose:           z.number().positive().optional(),

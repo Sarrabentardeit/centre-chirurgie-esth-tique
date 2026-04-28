@@ -99,6 +99,7 @@ function Section({
 ══════════════════════════════════════════════════ */
 function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: CurrencyUnit }) {
   const interventions = r.interventionsRecommandees ?? []
+  const examens = r.examensDemandes ?? []
   return (
     <div className="space-y-4">
       {r.diagnostic?.trim() && (
@@ -121,6 +122,35 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
               </span>
             ))}
           </div>
+        </div>
+      )}
+      {(r.nuitsClinique != null || r.anesthesieGenerale != null) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits clinique</p>
+            <p className="text-sm font-semibold text-cyan-900">
+              {r.nuitsClinique != null ? `${r.nuitsClinique} nuit(s)` : 'Non précisé'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-indigo-700 mb-1">Anesthésie générale</p>
+            <p className="text-sm font-semibold text-indigo-900">
+              {r.anesthesieGenerale == null ? 'Non précisé' : r.anesthesieGenerale ? 'Oui' : 'Non'}
+            </p>
+          </div>
+        </div>
+      )}
+      {examens.length > 0 && (
+        <div className="rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3">
+          <p className="text-xs font-semibold text-sky-700 mb-2">Examens médicaux demandés</p>
+          <ul className="space-y-1.5">
+            {examens.map((examen) => (
+              <li key={examen} className="text-sm text-sky-900 flex items-start gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 shrink-0 text-sky-600" />
+                <span>{examen}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {r.valeurMedicale?.trim() && (

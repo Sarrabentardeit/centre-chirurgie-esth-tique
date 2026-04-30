@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 
 import { useForm } from 'react-hook-form'
 
@@ -47,11 +47,66 @@ const STEPS = [
 
 ]
 
-const INTERVENTIONS_BY_CATEGORY = {
-  visage: ['Rhinoplastie', 'Blépharoplastie', 'Lifting du visage', 'Otoplastie'],
-  seins: ['Augmentation mammaire', 'Réduction mammaire', 'Lifting mammaire'],
-  cellulite: ['Abdominoplastie', 'Liposuccion', 'Lipofilling'],
-} as const
+const INTERVENTION_CATEGORIES = [
+  {
+    key: 'visage',
+    title: 'Chirurgie du Visage',
+    items: [
+      'Blépharoplastie des Paupières Supérieures',
+      'Blépharoplastie des paupières inférieures',
+      'Lifting CervicoFacial (Deep Plane Face Lift)',
+      'NANOFAT Lipofilling du Visage (Comblement avec graisse)',
+      'Liposuccion du Menton',
+      'Traitement de la boule de bichât',
+      'Lifting du Sourcil (Fox Eyes)',
+      'Lifting de la Lèvre Supérieure (Lip Lift)',
+      'Traitement des oreilles décollées',
+      'Rhinoplastie (Chirurgie du Nez)',
+      'Autres (visage à préciser)',
+    ],
+  },
+  {
+    key: 'seins',
+    title: 'Chirurgie Mammaire',
+    items: [
+      'Augmentation Mammaire par Prothèses',
+      'Augmentation Mammaire Hybride (Prothèses + Lipofilling)',
+      'Lifting Mammaire sans prothèses',
+      'Lifting Mammaire avec Pose de Prothèses',
+      'Réduction Mammaire',
+      'Changement de Prothèses Mammaires',
+      'Retrait de Prothèses Mammaires',
+      'Autres (mammaire à préciser)',
+    ],
+  },
+  {
+    key: 'silhouette',
+    title: 'Chirurgie de la Silhouette',
+    items: [
+      'Lipoaspiration Haute Définition VASER - Cou',
+      'Lipoaspiration Haute Définition VASER - Bras',
+      'Lipoaspiration Haute Définition VASER - Dos',
+      'Lipoaspiration Haute Définition VASER - Flancs',
+      'Lipoaspiration Haute Définition VASER - Ventre',
+      'Lipoaspiration Haute Définition VASER - 360° (ventre, flancs et dos)',
+      'Lipoaspiration Haute Définition VASER - Cuisses Antérieures',
+      'Lipoaspiration Haute Définition VASER - Cuisses Intérieures',
+      'Lipoaspiration Haute Définition VASER - Cuisses Postérieures',
+      'Lipoaspiration Haute Définition VASER - Culotte de Cheval',
+      'Lipoaspiration Haute Définition VASER - Genoux',
+      'Lipoaspiration Haute Définition VASER - Mollets',
+      'Lipoaspiration Haute Définition VASER - Chevilles',
+      'Traitement du Lipœdème',
+      'Lifting des Bras',
+      "Abdominoplastie (Lifting de l'abdomen)",
+      'Body Lift (Abdominoplastie Circulaire : ventre et dos)',
+      'Lifting des Cuisses',
+      'Lipofilling du Postérieur (Brazilian Butt Lift)',
+      'Traitement du relâchement cutané (faible à modéré) par JPlasma',
+      'Autres (silhouette à préciser)',
+    ],
+  },
+] as const
 
 const MOIS_PERIODE = [
   { value: '01', label: 'Janvier' },
@@ -286,6 +341,7 @@ export default function FormulairePage() {
             chirurgiesAnterieures?: boolean
             chirurgiesDetails?: string
             typeIntervention?: string[]
+            autresInterventionsDetails?: string
             descriptionDemande?: string
             attentes?: string
             dateSouhaitee?: string
@@ -351,6 +407,7 @@ export default function FormulairePage() {
         setAllergies((payload.allergies ?? []).join(', '))
         setGroupeSanguin(payload.groupeSanguin ?? '')
         setSelectedInterventions(payload.typeIntervention ?? [])
+        setAutresInterventionsDetails(payload.autresInterventionsDetails ?? '')
         setUploadedPhotos(
           (payload.photos ?? []).map((u) => ({ url: u, name: extractFileName(u) }))
         )
@@ -405,6 +462,8 @@ export default function FormulairePage() {
   // Step 3 state
 
   const [selectedInterventions, setSelectedInterventions] = useState<string[]>([])
+  const [activeInterventionCategory, setActiveInterventionCategory] = useState<(typeof INTERVENTION_CATEGORIES)[number]['key']>('visage')
+  const [autresInterventionsDetails, setAutresInterventionsDetails] = useState('')
 
   const [step3Error, setStep3Error] = useState('')
 
@@ -630,6 +689,7 @@ export default function FormulairePage() {
       chirurgiesDetails: chirurgiesDetails || undefined,
       typeIntervention: selectedInterventions,
       zonesConcernees: selectedInterventions,
+      autresInterventionsDetails: autresInterventionsDetails.trim() || undefined,
       descriptionDemande: step3.descriptionDemande,
       attentes: step3.descriptionDemande,
       periodeSouhaitee: buildPeriodeSouhaitee(step3.periodeSouhaiteeMois, step3.periodeSouhaiteeAnnee),
@@ -662,6 +722,15 @@ export default function FormulairePage() {
     )
 
   }
+
+  const activeCategory = useMemo(
+    () => INTERVENTION_CATEGORIES.find((c) => c.key === activeInterventionCategory) ?? INTERVENTION_CATEGORIES[0],
+    [activeInterventionCategory]
+  )
+
+  const showAutresInterventionField = selectedInterventions.some((x) =>
+    x.trim().toLowerCase().startsWith('autres')
+  )
 
   const addChirurgieRow = () => {
 
@@ -1372,13 +1441,39 @@ export default function FormulairePage() {
                 <div className="space-y-5">
                   <div>
                     <Label className="mb-3 block text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                      Type(s) d'intervention souhaité(s) <span className="text-destructive">*</span>
+                      Type(s) d'interventions souhaité(s) <span className="text-destructive">*</span>
                     </Label>
                     <div className="space-y-3">
-                      <div>
-                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Visage</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {INTERVENTION_CATEGORIES.map((category) => (
+                          <button
+                            key={category.key}
+                            type="button"
+                            onClick={() => setActiveInterventionCategory(category.key)}
+                            className={cn(
+                              'rounded-xl border px-3 py-2.5 text-sm font-medium text-left transition-all',
+                              activeInterventionCategory === category.key
+                                ? 'border-brand-950/30 bg-brand-950/5 text-brand-950'
+                                : 'border-brand-200/60 bg-white text-slate-700 hover:bg-brand-100/30'
+                            )}
+                          >
+                            {category.title}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="rounded-xl border border-brand-200/60 bg-brand-50/20 p-3 sm:p-4 space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#062a30' }}>
+                            {activeCategory.title}
+                          </p>
+                          <span className="text-[11px] text-muted-foreground">
+                            {selectedInterventions.length} sélectionnée(s)
+                          </span>
+                        </div>
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                          {INTERVENTIONS_BY_CATEGORY.visage.map((item) => (
+                          {activeCategory.items.map((item) => (
                             <button
                               key={item}
                               type="button"
@@ -1387,7 +1482,7 @@ export default function FormulairePage() {
                                 'rounded-xl border px-3 py-2.5 text-sm text-left transition-all',
                                 selectedInterventions.includes(item)
                                   ? 'border-brand-950/30 bg-brand-950/5 text-brand-950 font-medium'
-                                  : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground'
+                                  : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground bg-white'
                               )}
                             >
                               {item}
@@ -1395,47 +1490,44 @@ export default function FormulairePage() {
                           ))}
                         </div>
                       </div>
-                      <div>
-                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Seins</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                          {INTERVENTIONS_BY_CATEGORY.seins.map((item) => (
-                            <button
-                              key={item}
-                              type="button"
-                              onClick={() => toggleIntervention(item)}
-                              className={cn(
-                                'rounded-xl border px-3 py-2.5 text-sm text-left transition-all',
-                                selectedInterventions.includes(item)
-                                  ? 'border-brand-950/30 bg-brand-950/5 text-brand-950 font-medium'
-                                  : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground'
-                              )}
-                            >
-                              {item}
-                            </button>
-                          ))}
+
+                      {selectedInterventions.length > 0 && (
+                        <div className="rounded-xl border border-brand-200/50 bg-white p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Sélection actuelle</p>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedInterventions.map((item) => (
+                              <button
+                                key={item}
+                                type="button"
+                                onClick={() => toggleIntervention(item)}
+                                className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-900 hover:bg-brand-100"
+                              >
+                                <span className="truncate max-w-[240px]">{item}</span>
+                                <X className="h-3 w-3" />
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Cellulite</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                          {INTERVENTIONS_BY_CATEGORY.cellulite.map((item) => (
-                            <button
-                              key={item}
-                              type="button"
-                              onClick={() => toggleIntervention(item)}
-                              className={cn(
-                                'rounded-xl border px-3 py-2.5 text-sm text-left transition-all',
-                                selectedInterventions.includes(item)
-                                  ? 'border-brand-950/30 bg-brand-950/5 text-brand-950 font-medium'
-                                  : 'border-brand-200/60 hover:bg-brand-100/30 text-foreground'
-                              )}
-                            >
-                              {item}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      )}
                     </div>
+                    <p className="text-[11px] text-muted-foreground mt-2">
+                      * Toutes nos lipoaspirations sont réalisées avec la technologie MICROAIRE.
+                    </p>
+                    {showAutresInterventionField && (
+                      <div className="space-y-1.5 mt-3">
+                        <Label htmlFor="autresInterventionsDetails" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                          Autres interventions (à préciser)
+                        </Label>
+                        <Textarea
+                          id="autresInterventionsDetails"
+                          rows={2}
+                          placeholder="Précisez les autres interventions souhaitées..."
+                          value={autresInterventionsDetails}
+                          onChange={(e) => setAutresInterventionsDetails(e.target.value)}
+                          className="border-brand-200 focus-visible:ring-brand-950/20"
+                        />
+                      </div>
+                    )}
                     {step3Error && (
                       <p className="text-xs text-destructive mt-2 flex items-center gap-1">
                         <AlertCircle className="h-3 w-3" />
@@ -1637,6 +1729,10 @@ export default function FormulairePage() {
                           value: selectedInterventions.length > 0 ? selectedInterventions.join(', ') : 'Non renseigné',
                         },
                         {
+                          label: 'Autres interventions (précisions)',
+                          value: autresInterventionsDetails.trim() || '—',
+                        },
+                        {
                           label: 'Connaissance Dr Chennoufi',
                           value: formatSourceConnaissanceLabel(step1Form.getValues('sourceContact')) || '—',
                         },
@@ -1690,7 +1786,7 @@ export default function FormulairePage() {
                         className="mt-0.5"
                       />
                       <span>
-                        J'accepte que mes données médicales soient traitées par l'équipe du Dr. Mehdi Chennoufi dans le cadre de ma prise en charge.{' '}
+                        J’atteste de l’authenticité des informations fournies et j’accepte que mes données médicales soient traitées par l’équipe du Dr Mehdi Chennoufi dans le cadre de ma prise en charge, conformément à la politique de confidentialité.{' '}
                         <a
                           href="#"
                           onClick={(e) => e.preventDefault()}

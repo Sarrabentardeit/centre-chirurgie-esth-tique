@@ -7,6 +7,7 @@ import {
   createUserByGestionnaireSchema,
   logistiqueSchema,
   refuseDevisSchema,
+  saveDevisContentSchema,
   updateTemplateSchema,
   upsertDevisDraftSchema,
 } from './gestionnaire.schema.js'
@@ -66,6 +67,23 @@ gestionnaireRouter.post(
   }
 )
 
+gestionnaireRouter.patch(
+  '/devis/:devisId/content',
+  validate(saveDevisContentSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.saveDevisCustomContent(
+        req.auth!.sub,
+        pid(req.params.devisId),
+        req.body.content,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
 gestionnaireRouter.post('/devis/:devisId/envoyer', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await gestionnaireService.sendDevis(req.auth!.sub, pid(req.params.devisId))
@@ -87,6 +105,15 @@ gestionnaireRouter.post(
     }
   }
 )
+
+gestionnaireRouter.delete('/devis/:devisId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await gestionnaireService.deleteDevis(req.auth!.sub, pid(req.params.devisId))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
 
 gestionnaireRouter.get('/notifications', async (req: Request, res: Response, next: NextFunction) => {
   try {

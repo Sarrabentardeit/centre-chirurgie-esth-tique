@@ -28,9 +28,12 @@ import { InfoRow, FormulairePayloadView } from '@/components/dossier/FormulaireP
 interface Rapport {
   id: string
   diagnostic: string | null
+  examensDemandes?: string[]
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null
+  nuitsClinique?: number | null
+  anesthesieGenerale?: boolean | null
   notes: string | null
   createdAt: string
 }
@@ -61,6 +64,16 @@ interface PatientDetail {
   }>
   rapports: Rapport[]
 }
+
+const EXAMEN_OPTIONS = [
+  'Echographie Mammaire ou Mammographie',
+  `Bilan sanguin complet qui comprend :
+• Bilan biologique (groupe sanguin, NFS, plaquettes, TP, TCA)
+• Bilan virologique HIV, Hépatite B et C.
+• URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT`,
+  'Echographie Abdominale',
+] as const
+const EXAMEN_AUTRE_PREFIX = 'Autre:'
 
 const SOURCE_COLORS: Record<string, string> = {
   facebook:  'bg-blue-50 text-blue-800 border-blue-200',
@@ -99,9 +112,13 @@ export default function DossierPatientPage() {
 
   // Rapport form
   const [diagnostic, setDiagnostic]     = useState('')
+  const [examensDemandes, setExamensDemandes] = useState<string[]>([])
+  const [examensAutreChecked, setExamensAutreChecked] = useState(false)
+  const [examensAutreText, setExamensAutreText] = useState('')
   const [interventions, setInterventions] = useState('')
-  const [valeur, setValeur]             = useState('')
   const [forfait, setForfait]           = useState('')
+  const [nuitsClinique, setNuitsClinique] = useState('')
+  const [anesthesieGenerale, setAnesthesieGenerale] = useState<boolean | null>(null)
   const [notes, setNotes]               = useState('')
   const [saving, setSaving]             = useState(false)
   const [saved, setSaved]               = useState(false)
@@ -120,11 +137,25 @@ export default function DossierPatientPage() {
       // Pre-fill rapport form
       const r = res.patient.rapports?.[0]
       if (r) {
+        const savedExamens = r.examensDemandes ?? []
+        const autreEntree = savedExamens.find((x) => x.trim().toLowerCase().startsWith('autre'))
         setDiagnostic(r.diagnostic ?? '')
+        setExamensDemandes(savedExamens.filter((x) => !x.trim().toLowerCase().startsWith('autre')))
+        setExamensAutreChecked(Boolean(autreEntree))
+        setExamensAutreText(
+          autreEntree?.startsWith(EXAMEN_AUTRE_PREFIX)
+            ? autreEntree.slice(EXAMEN_AUTRE_PREFIX.length).trim()
+            : ''
+        )
         setInterventions((r.interventionsRecommandees ?? []).join('\n'))
-        setValeur(r.valeurMedicale ?? '')
         setForfait(r.forfaitPropose?.toString() ?? '')
+        setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
+        setAnesthesieGenerale(r.anesthesieGenerale ?? null)
         setNotes(r.notes ?? '')
+      } else {
+        setExamensDemandes([])
+        setExamensAutreChecked(false)
+        setExamensAutreText('')
       }
       setNewStatus(res.patient.status)
     } catch (e) {
@@ -140,11 +171,19 @@ export default function DossierPatientPage() {
     if (!id) return
     setSaving(true); setRapportError(null)
     try {
+      const examensPayload = [...examensDemandes]
+      if (examensAutreChecked) {
+        examensPayload.push(
+          examensAutreText.trim() ? `${EXAMEN_AUTRE_PREFIX} ${examensAutreText.trim()}` : 'Autre'
+        )
+      }
       await medecinApi.upsertRapport(id, {
         diagnostic: diagnostic || undefined,
+        examensDemandes: examensPayload,
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
-        valeurMedicale: valeur || undefined,
         forfaitPropose: forfait ? Number(forfait) : undefined,
+        nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
+        anesthesieGenerale: anesthesieGenerale === null ? undefined : anesthesieGenerale,
         notes: notes || undefined,
       })
       setSaved(true)
@@ -428,6 +467,58 @@ export default function DossierPatientPage() {
               </div>
 
               <div className="space-y-2">
+                <Label>Examen complémentaire</Label>
+                <div className="space-y-2.5">
+                  {EXAMEN_OPTIONS.map((opt) => {
+                    const checked = examensDemandes.includes(opt)
+                    return (
+                      <label
+                        key={opt}
+                        className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                          checked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                          checked={checked}
+                          onChange={(e) => {
+                            setExamensDemandes((prev) =>
+                              e.target.checked ? [...prev, opt] : prev.filter((x) => x !== opt)
+                            )
+                          }}
+                        />
+                        <span className="text-sm text-foreground leading-relaxed whitespace-pre-line">{opt}</span>
+                      </label>
+                    )
+                  })}
+                  <label
+                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                      examensAutreChecked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                      checked={examensAutreChecked}
+                      onChange={(e) => {
+                        setExamensAutreChecked(e.target.checked)
+                        if (!e.target.checked) setExamensAutreText('')
+                      }}
+                    />
+                    <span className="text-sm text-foreground leading-relaxed">Autre</span>
+                  </label>
+                  {examensAutreChecked && (
+                    <Input
+                      value={examensAutreText}
+                      onChange={(e) => setExamensAutreText(e.target.value)}
+                      placeholder="Préciser l'examen complémentaire..."
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
                 <Label>Interventions recommandées (une par ligne)</Label>
                 <Textarea
                   value={interventions}
@@ -439,14 +530,6 @@ export default function DossierPatientPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Valeur médicale</Label>
-                  <Input
-                    value={valeur}
-                    onChange={(e) => setValeur(e.target.value)}
-                    placeholder="Ex: Excellent candidat"
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label>Forfait proposé (TND)</Label>
                   <Input
                     type="number"
@@ -454,6 +537,49 @@ export default function DossierPatientPage() {
                     onChange={(e) => setForfait(e.target.value)}
                     placeholder="Ex: 5000"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Nombre de nuits cliniques (séjour médical)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={60}
+                    value={nuitsClinique}
+                    onChange={(e) => setNuitsClinique(e.target.value)}
+                    placeholder="Ex: 2"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Anesthésie générale</Label>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={anesthesieGenerale === true ? 'brand' : 'outline'}
+                      onClick={() => setAnesthesieGenerale(true)}
+                    >
+                      Oui
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={anesthesieGenerale === false ? 'brand' : 'outline'}
+                      onClick={() => setAnesthesieGenerale(false)}
+                    >
+                      Non
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={anesthesieGenerale === null ? 'brand' : 'outline'}
+                      onClick={() => setAnesthesieGenerale(null)}
+                    >
+                      Non précisé
+                    </Button>
+                  </div>
                 </div>
               </div>
 

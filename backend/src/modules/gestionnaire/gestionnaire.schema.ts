@@ -55,6 +55,12 @@ export const resetTemplateSchema = z.object({
   key: templateKeySchema,
 })
 
+export const saveDevisContentSchema = z.object({
+  content: z.string(),
+})
+
+export type SaveDevisContentInput = z.infer<typeof saveDevisContentSchema>
+
 const chirurgieRowSchema = z.object({
   intervention: z.string(),
   date: z.string(),

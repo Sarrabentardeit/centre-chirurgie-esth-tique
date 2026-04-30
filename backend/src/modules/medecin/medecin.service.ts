@@ -152,7 +152,16 @@ export async function getDashboard(medecinId: string) {
     }),
     prisma.patient.findMany({
       where: { createdAt: { gte: monthStart } },
-      select: { createdAt: true, sourceContact: true },
+      select: {
+        createdAt: true,
+        sourceContact: true,
+        formulaires: {
+          where: { status: 'submitted' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { payload: true },
+        },
+      },
     }),
   ])
 
@@ -205,25 +214,38 @@ export async function getDashboard(medecinId: string) {
   }
 
   const sourceLabel = (raw: string): string => {
-    const k = raw.trim().toLowerCase()
+    const k = raw
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
     const map: Record<string, string> = {
       facebook: 'Facebook',
       instagram: 'Instagram',
       radio: 'Radio',
       tv: 'TV',
       amie: 'Amie / ami / entourage',
+      'amie / ami / entourage': 'Amie / ami / entourage',
       autre: 'Autre',
       whatsapp: 'WhatsApp',
       google: 'Google',
       direct: 'Site web / direct',
+      'site web': 'Site web / direct',
+      'site web / direct': 'Site web / direct',
       medecin: 'Médecin adressant',
+      'medecin adressant': 'Médecin adressant',
     }
     return map[k] ?? (raw.trim() || 'Autre')
   }
 
   const sourceRaw = new Map<string, number>()
   for (const p of patientsForAnalytics) {
-    const label = sourceLabel((p.sourceContact ?? '').trim() || 'autre')
+    const latestPayload = p.formulaires?.[0]?.payload as Record<string, unknown> | undefined
+    const sourceFromFormulaire = typeof latestPayload?.sourceContact === 'string'
+      ? latestPayload.sourceContact
+      : ''
+    const sourceFinal = sourceFromFormulaire.trim() || (p.sourceContact ?? '').trim() || 'autre'
+    const label = sourceLabel(sourceFinal)
     sourceRaw.set(label, (sourceRaw.get(label) ?? 0) + 1)
   }
   const totalSources = Array.from(sourceRaw.values()).reduce((a, b) => a + b, 0)

@@ -213,6 +213,7 @@ model Devis {
   currency       String      @default("EUR")
   planningMedical String?    @map("planning_medical")
   notesSejour    String?     @map("notes_sejour")
+  customContent  String?     @map("custom_content")
   dateValidite   DateTime?   @map("date_validite")
   dateCreation   DateTime    @default(now()) @map("date_creation")
   vuParPatientAt DateTime?   @map("vu_par_patient_at")

@@ -31,6 +31,7 @@ import NouveauPatientPage from './pages/medecin/NouveauPatientPage'
 // Gestionnaire pages
 import DashboardGestionnairePage from './pages/gestionnaire/DashboardGestionnairePage'
 import DevisGestionnairePage from './pages/gestionnaire/DevisGestionnairePage'
+import DevisEditorPage from './pages/gestionnaire/DevisEditorPage'
 import LogistiquePage from './pages/gestionnaire/LogistiquePage'
 import NotificationsPage from './pages/gestionnaire/NotificationsPage'
 import CommunicationPage from './pages/gestionnaire/CommunicationPage'
@@ -231,6 +232,14 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['gestionnaire']}>
                   <DevisGestionnairePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/gestionnaire/devis/:patientId/personnaliser"
+              element={
+                <ProtectedRoute allowedRoles={['gestionnaire']}>
+                  <DevisEditorPage />
                 </ProtectedRoute>
               }
             />

@@ -222,6 +222,7 @@ export interface Devis {
   dateCreation: string
   updatedAt?: string
   vuParPatientAt?: string | null
+  customContent?: string | null
 }
 
 export interface RendezVous {
@@ -711,10 +712,21 @@ export const gestionnaireApi = {
   sendDevis: (devisId: string) =>
     request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/envoyer`, { method: 'POST' }),
 
+  saveDevisCustomContent: (devisId: string, content: string) =>
+    request<{ ok: true }>(`/gestionnaire/devis/${devisId}/content`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    }),
+
   refuseDevis: (devisId: string, body?: { reason?: string }) =>
     request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/refuser`, {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
+    }),
+
+  deleteDevis: (devisId: string) =>
+    request<{ ok: true; deleted: true }>(`/gestionnaire/devis/${devisId}`, {
+      method: 'DELETE',
     }),
 
   getNotifications: () =>

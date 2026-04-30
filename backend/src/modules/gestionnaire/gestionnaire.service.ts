@@ -396,6 +396,15 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
   return { devis }
 }
 
+export async function saveDevisCustomContent(gestionnaireId: string, devisId: string, content: string) {
+  const devis = await prisma.devis.findUnique({ where: { id: devisId } })
+  if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+  if (devis.gestionnaireId !== gestionnaireId) throw new AppError(403, 'FORBIDDEN', 'Accès refusé.')
+  // Prisma generate bloqué sur Windows (EPERM), on utilise SQL raw
+  await prisma.$executeRaw`UPDATE "devis" SET "custom_content" = ${content} WHERE "id" = ${devisId}`
+  return { ok: true }
+}
+
 export async function sendDevis(gestionnaireId: string, devisId: string) {
   const devis = await prisma.devis.findUnique({ where: { id: devisId } })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
@@ -468,6 +477,48 @@ export async function refuseDevis(gestionnaireId: string, devisId: string, input
   })
 
   return { devis: updated }
+}
+
+export async function deleteDevis(gestionnaireId: string, devisId: string) {
+  const devis = await prisma.devis.findUnique({
+    where: { id: devisId },
+    include: { patient: true },
+  })
+  if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+  if (devis.gestionnaireId !== gestionnaireId) {
+    throw new AppError(403, 'FORBIDDEN', 'Ce devis ne vous appartient pas.')
+  }
+  if (devis.statut === 'accepte') {
+    throw new AppError(400, 'DEVIS_ACCEPTED', 'Un devis accepté ne peut pas être supprimé.')
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.devis.delete({ where: { id: devisId } })
+
+    const [remaining, rapportsCount] = await Promise.all([
+      tx.devis.findMany({
+        where: { patientId: devis.patientId },
+        select: { statut: true, dateCreation: true },
+        orderBy: { dateCreation: 'desc' },
+      }),
+      tx.rapport.count({ where: { patientId: devis.patientId } }),
+    ])
+
+    let nextStatus = devis.patient.status
+    if (remaining.some((d) => d.statut === 'accepte')) nextStatus = 'devis_accepte'
+    else if (remaining.some((d) => d.statut === 'envoye')) nextStatus = 'devis_envoye'
+    else if (remaining.some((d) => d.statut === 'brouillon')) nextStatus = 'devis_preparation'
+    else if (rapportsCount > 0) nextStatus = 'rapport_genere'
+
+    if (nextStatus !== devis.patient.status) {
+      await tx.patient.update({
+        where: { id: devis.patientId },
+        data: { status: nextStatus },
+      })
+    }
+  })
+
+  return { deleted: true as const }
 }
 
 export async function getLogistiquePatients() {

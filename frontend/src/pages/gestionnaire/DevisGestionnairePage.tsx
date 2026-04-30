@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Plus, Trash2, Save, Send, CheckCircle2, FileText, AlertCircle,
   RefreshCw, Search, Eye, EyeOff, ChevronDown, ChevronRight,
-  Stethoscope, ClipboardList, Scissors, Heart, ArrowLeft, X,
+  Stethoscope, ClipboardList, Scissors, Heart, ArrowLeft, X, FilePenLine,
   User, Mail, Phone, MapPin, Calendar,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { STATUS_COLORS, STATUS_LABELS, formatCurrency, formatDate, formatDateTime, type CurrencyUnit } from '@/lib/utils'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   gestionnaireApi,
   type Devis,
@@ -29,6 +29,24 @@ import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 interface LigneDevisForm { description: string; quantite: number; prixUnitaire: number }
 type TypeSejour = 'clinique' | 'hotel' | ''
 type PageView = 'list' | 'detail'
+
+const PRESTATIONS_PAR_DEFAUT = [
+  'Honoraires Chirurgiens et clinique (nbr de nuitées)',
+  'Supp Clinique accompagnateur',
+  'Transferts',
+  'Hôtel (nbr de nuitées)',
+  'Supp Hôtel Accompagnateur',
+  'Vêtement de contention (à préciser)',
+  'Drainage (nbr de séances)',
+  'Soins infirmiers (nbr de passages)',
+  'Medicaments',
+  'Frais de dossier',
+  'Divers et imprévus',
+] as const
+
+function buildDefaultLignes(): LigneDevisForm[] {
+  return PRESTATIONS_PAR_DEFAUT.map((description) => ({ description, quantite: 1, prixUnitaire: 0 }))
+}
 
 const TYPE_SEJOUR_PREFIX = 'TYPE_SEJOUR:'
 const DELAIS_CONVALESCENCE_PREFIX = 'DELAIS_CONVALESCENCE:'
@@ -190,6 +208,9 @@ interface DevisModalProps {
   delaisConvalescence: string; setDelaisConvalescence: (v: string) => void
   sent: boolean; savedDraft: boolean; actionLoading: boolean
   onSend: () => void; onSaveDraft: () => void
+  onDelete: () => void
+  canDelete: boolean
+  onCustomize: () => void
   currency: CurrencyUnit
 }
 
@@ -198,7 +219,7 @@ function DevisModal({
   lignes, addLigne, removeLigne, updateLigne, total,
   notesSejour, setNotesSejour, typeSejour, setTypeSejour,
   delaisConvalescence, setDelaisConvalescence,
-  sent, savedDraft, actionLoading, onSend, onSaveDraft, currency,
+  sent, savedDraft, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
 }: DevisModalProps) {
   // Fermer sur Escape
   useEffect(() => {
@@ -216,7 +237,7 @@ function DevisModal({
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
 
       {/* Carte modale */}
-      <div className="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
+      <div className="relative z-10 w-full max-w-5xl max-h-[94vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
@@ -350,6 +371,15 @@ function DevisModal({
           </Button>
           <Button
             variant="outline"
+            className="sm:w-auto h-10 gap-2 border-slate-200 text-slate-700"
+            onClick={onCustomize}
+            disabled={actionLoading}
+          >
+            <FilePenLine className="h-4 w-4" />
+            Personnaliser le devis
+          </Button>
+          <Button
+            variant="outline"
             className="sm:w-auto h-10 gap-2 border-slate-200"
             onClick={onSaveDraft}
             disabled={actionLoading}
@@ -357,6 +387,17 @@ function DevisModal({
             <Save className="h-4 w-4 text-slate-400" />
             {savedDraft ? 'Sauvegardé !' : 'Brouillon'}
           </Button>
+          {canDelete && (
+            <Button
+              variant="ghost"
+              className="sm:w-auto h-10 gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+              onClick={onDelete}
+              disabled={actionLoading}
+            >
+              <Trash2 className="h-4 w-4" />
+              Supprimer
+            </Button>
+          )}
           <Button variant="ghost" className="sm:w-auto h-10 text-slate-500" onClick={onClose}>
             Annuler
           </Button>
@@ -371,6 +412,7 @@ function DevisModal({
 ══════════════════════════════════════════════════ */
 export default function DevisGestionnairePage() {
   const { id: patientIdFromUrl } = useParams<{ id?: string }>()
+  const navigate = useNavigate()
   const currency: CurrencyUnit = 'TND'
 
   /* State global */
@@ -385,7 +427,7 @@ export default function DevisGestionnairePage() {
   const [showModal, setShowModal]         = useState(false)
 
   /* State devis form */
-  const [lignes, setLignes]                   = useState<LigneDevisForm[]>([{ description: '', quantite: 1, prixUnitaire: 0 }])
+  const [lignes, setLignes]                   = useState<LigneDevisForm[]>(buildDefaultLignes())
   const [notesSejour, setNotesSejour]         = useState('')
   const [typeSejour, setTypeSejour]           = useState<TypeSejour>('')
   const [delaisConvalescence, setDelaisConvalescence] = useState('')
@@ -460,7 +502,7 @@ export default function DevisGestionnairePage() {
       setNotesSejour(p.noteSejour); setTypeSejour(p.typeSejour); setDelaisConvalescence(p.delaisConvalescence)
       setIsEditingExisting(true)
     } else {
-      setLignes([{ description: '', quantite: 1, prixUnitaire: 0 }])
+      setLignes(buildDefaultLignes())
       setNotesSejour(''); setTypeSejour(''); setDelaisConvalescence('')
       setIsEditingExisting(false)
     }
@@ -512,6 +554,38 @@ export default function DevisGestionnairePage() {
       await loadPatientDetail(selectedPatient); await loadPatients()
     } catch (e) { setPageError(e instanceof Error ? e.message : 'Erreur.') }
     finally { setActionLoading(false) }
+  }
+
+  const handleCustomize = async () => {
+    if (!selectedPatient) return
+    setActionLoading(true); setPageError(null)
+    try {
+      // Sauvegarder d'abord le brouillon pour s'assurer que le devisId existe
+      await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
+      setShowModal(false)
+      navigate(`/gestionnaire/devis/${selectedPatient}/personnaliser`)
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Erreur.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleDeleteDevis = async () => {
+    if (!existingDevis) return
+    if (!window.confirm('Supprimer ce devis ? Cette action est irréversible.')) return
+    setActionLoading(true); setPageError(null)
+    try {
+      await gestionnaireApi.deleteDevis(existingDevis.id)
+      setShowModal(false)
+      setIsEditingExisting(false)
+      await loadPatientDetail(selectedPatient)
+      await loadPatients()
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Erreur.')
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   /* ══════ RENDER : Vue liste ══════ */
@@ -961,6 +1035,9 @@ export default function DevisGestionnairePage() {
           sent={sent} savedDraft={savedDraft} actionLoading={actionLoading}
           onSend={() => void handleSend()}
           onSaveDraft={() => void handleSaveDraft()}
+          onDelete={() => void handleDeleteDevis()}
+          canDelete={!!existingDevis && existingDevis.statut !== 'accepte'}
+          onCustomize={handleCustomize}
           currency={currency}
         />
       )}

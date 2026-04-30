@@ -37,10 +37,14 @@ interface PatientWithRapport extends PatientListItem {
 }
 
 const EXAMEN_OPTIONS = [
-  'Echographie mammaire ou mammographie',
-  'Bilan sanguin complet (groupe sanguin, NFS, plaquettes, TP, TCA, HIV, Hépatite B/C, urée, créatinine, glycémie, iono, ASAT, ALAT)',
-  'Echographie abdominale',
+  'Echographie Mammaire ou Mammographie',
+  `Bilan sanguin complet qui comprend :
+• Bilan biologique (groupe sanguin, NFS, plaquettes, TP, TCA)
+• Bilan virologique HIV, Hépatite B et C.
+• URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT`,
+  'Echographie Abdominale',
 ] as const
+const EXAMEN_AUTRE_PREFIX = 'Autre:'
 
 function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -49,6 +53,7 @@ function getInitials(name: string) {
 function completionScore(
   diagnostic: string,
   examensDemandes: string[],
+  examensAutreChecked: boolean,
   interventions: string,
   forfait: string,
   valeur: string,
@@ -56,7 +61,8 @@ function completionScore(
   nuitsClinique: string,
   anesthesieGenerale: boolean | null,
 ): number {
-  const textFields = [diagnostic, interventions, forfait, valeur, notes, nuitsClinique, examensDemandes.length > 0 ? 'ok' : '']
+  const examensOk = examensDemandes.length > 0 || examensAutreChecked
+  const textFields = [diagnostic, interventions, forfait, valeur, notes, nuitsClinique, examensOk ? 'ok' : '']
   const filledText = textFields.filter((f) => f.trim().length > 0).length
   const filledAnesthesie = anesthesieGenerale !== null ? 1 : 0
   const totalFields = textFields.length + 1
@@ -133,6 +139,8 @@ export default function RapportsPage() {
   // Rapport editor state
   const [diagnostic, setDiagnostic]       = useState('')
   const [examensDemandes, setExamensDemandes] = useState<string[]>([])
+  const [examensAutreChecked, setExamensAutreChecked] = useState(false)
+  const [examensAutreText, setExamensAutreText] = useState('')
   const [interventions, setInterventions] = useState('')
   const [valeur, setValeur]               = useState('')
   const [forfait, setForfait]             = useState('')
@@ -181,7 +189,7 @@ export default function RapportsPage() {
 
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
-    setDiagnostic(''); setExamensDemandes([]); setInterventions(''); setValeur(''); setForfait('')
+    setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
     setNuitsClinique(''); setAnesthesieGenerale(null); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
@@ -189,8 +197,16 @@ export default function RapportsPage() {
       const res = await medecinApi.getPatient(patientId)
       const r = res.patient.rapports?.[0]
       if (r) {
+        const savedExamens = r.examensDemandes ?? []
+        const autreEntree = savedExamens.find((x) => x.trim().toLowerCase().startsWith('autre'))
         setDiagnostic(r.diagnostic ?? '')
-        setExamensDemandes(r.examensDemandes ?? [])
+        setExamensDemandes(savedExamens.filter((x) => !x.trim().toLowerCase().startsWith('autre')))
+        setExamensAutreChecked(Boolean(autreEntree))
+        setExamensAutreText(
+          autreEntree?.startsWith(EXAMEN_AUTRE_PREFIX)
+            ? autreEntree.slice(EXAMEN_AUTRE_PREFIX.length).trim()
+            : ''
+        )
         setInterventions((r.interventionsRecommandees ?? []).join('\n'))
         setValeur(r.valeurMedicale ?? '')
         setForfait(r.forfaitPropose?.toString() ?? '')
@@ -206,9 +222,15 @@ export default function RapportsPage() {
     if (!selectedId || !diagnostic.trim()) return
     setSaving(true); setSaveError(null)
     try {
+      const examensPayload = [...examensDemandes]
+      if (examensAutreChecked) {
+        examensPayload.push(
+          examensAutreText.trim() ? `${EXAMEN_AUTRE_PREFIX} ${examensAutreText.trim()}` : 'Autre'
+        )
+      }
       await medecinApi.upsertRapport(selectedId, {
         diagnostic,
-        examensDemandes,
+        examensDemandes: examensPayload,
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
         valeurMedicale: valeur || undefined,
         forfaitPropose: forfait ? Number(forfait) : undefined,
@@ -224,7 +246,7 @@ export default function RapportsPage() {
             rapport: {
               id: '',
               diagnostic,
-              examensDemandes,
+              examensDemandes: examensPayload,
               interventionsRecommandees: interventions.split('\n').filter(Boolean),
               valeurMedicale: valeur,
               forfaitPropose: forfait ? Number(forfait) : null,
@@ -253,7 +275,8 @@ export default function RapportsPage() {
   }, [patients, search])
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
-  const pct = completionScore(diagnostic, examensDemandes, interventions, forfait, valeur, notes, nuitsClinique, anesthesieGenerale)
+  const examensCount = examensDemandes.length + (examensAutreChecked ? 1 : 0)
+  const pct = completionScore(diagnostic, examensDemandes, examensAutreChecked, interventions, forfait, valeur, notes, nuitsClinique, anesthesieGenerale)
 
   const stats = {
     aAnalyser:   patients.filter((p) => p.status === 'formulaire_complete').length,
@@ -271,6 +294,7 @@ export default function RapportsPage() {
       ? completionScore(
           p.rapport!.diagnostic ?? '',
           p.rapport!.examensDemandes ?? [],
+          false,
           (p.rapport!.interventionsRecommandees ?? []).join('\n'),
           p.rapport!.forfaitPropose?.toString() ?? '',
           p.rapport!.valeurMedicale ?? '',
@@ -624,9 +648,9 @@ export default function RapportsPage() {
               {/* Examens demandés */}
               <Section
                 icon={ClipboardPlus}
-                title="Examens médicaux demandés"
+                title="Examen complémentaire"
                 color="bg-sky-100 text-sky-700"
-                subtitle={examensDemandes.length > 0 ? `${examensDemandes.length} examen(s) sélectionné(s)` : undefined}
+                subtitle={examensCount > 0 ? `${examensCount} examen(s) sélectionné(s)` : undefined}
                 open={openSections.examens}
                 onToggle={() => toggleSection('examens')}
               >
@@ -650,10 +674,33 @@ export default function RapportsPage() {
                             )
                           }}
                         />
-                        <span className="text-sm text-foreground leading-relaxed">{opt}</span>
+                        <span className="text-sm text-foreground leading-relaxed whitespace-pre-line">{opt}</span>
                       </label>
                     )
                   })}
+                  <label
+                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                      examensAutreChecked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                      checked={examensAutreChecked}
+                      onChange={(e) => {
+                        setExamensAutreChecked(e.target.checked)
+                        if (!e.target.checked) setExamensAutreText('')
+                      }}
+                    />
+                    <span className="text-sm text-foreground leading-relaxed">Autre</span>
+                  </label>
+                  {examensAutreChecked && (
+                    <Input
+                      value={examensAutreText}
+                      onChange={(e) => setExamensAutreText(e.target.value)}
+                      placeholder="Préciser l'examen complémentaire..."
+                    />
+                  )}
                 </div>
               </Section>
 

@@ -32,6 +32,8 @@ services:
       UPLOAD_DIR: uploads
       UPLOAD_MAX_FILE_SIZE_MB: ${UPLOAD_MAX_FILE_SIZE_MB:-10}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      # URL publique du site (sans /api). Utilisée dans les URLs renvoyées par POST .../upload.
+      # Les fichiers réels sont dans le volume uploads_data → sans ce volume, les images 404 malgré la BDD.
       API_BASE_URL: ${API_BASE_URL:-http://localhost}
     depends_on:
       db:

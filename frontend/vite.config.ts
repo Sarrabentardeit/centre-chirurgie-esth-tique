@@ -12,6 +12,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:4000',
+      // Même origine que prod (nginx) : les fichiers formulaire sont sous /uploads sur le backend.
+      '/uploads': 'http://localhost:4000',
     },
   },
 })

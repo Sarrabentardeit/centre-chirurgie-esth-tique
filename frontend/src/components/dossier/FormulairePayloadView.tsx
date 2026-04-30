@@ -63,14 +63,24 @@ function asStringArray(value: unknown): string[] {
 export function resolveFormulaireFileUrl(value: string): string {
   if (!value?.trim()) return ''
 
-  const apiBase = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000/api')
-    .replace(/\/api\/?$/, '')
+  const viteApi = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000/api').replace(
+    /\/$/,
+    '',
+  )
+  /** Sans suffixe /api : origine en prod relative (`''`) ou absolue (`http://localhost:4000`). */
+  const apiBase = viteApi.replace(/\/api\/?$/, '') || ''
+
+  /** Express sert les fichiers sous `/uploads`, jamais sous `/api/uploads`. */
+  const normalizeUploadPath = (pathname: string): string => {
+    if (pathname.startsWith('/api/uploads/')) return `/uploads/${pathname.slice('/api/uploads/'.length)}`
+    return pathname
+  }
 
   // URL complète (http:// ou https://) — on extrait le pathname pour le rebaser
   // sur le VITE_API_URL courant (corrige les URLs Docker internes comme http://backend:4000).
   if (value.startsWith('http://') || value.startsWith('https://')) {
     try {
-      const { pathname } = new URL(value)
+      const pathname = normalizeUploadPath(new URL(value).pathname)
       if (pathname.startsWith('/uploads/')) return `${apiBase}${pathname}`
     } catch {
       // URL malformée — on la retourne telle quelle
@@ -78,15 +88,17 @@ export function resolveFormulaireFileUrl(value: string): string {
     return value
   }
 
+  const pathPart = normalizeUploadPath(value.trim())
+
   // Chemin absolu
-  if (value.startsWith('/uploads/')) return `${apiBase}${value}`
-  if (value.startsWith('/'))        return `${apiBase}${value}`
+  if (pathPart.startsWith('/uploads/')) return `${apiBase}${pathPart}`
+  if (pathPart.startsWith('/')) return `${apiBase}${pathPart}`
 
   // Chemin relatif commençant par uploads/
-  if (value.startsWith('uploads/')) return `${apiBase}/${value}`
+  if (pathPart.startsWith('uploads/')) return `${apiBase}/${pathPart}`
 
   // Nom de fichier seul
-  return `${apiBase}/uploads/${value}`
+  return `${apiBase}/uploads/${pathPart}`
 }
 
 export interface FormulairePayloadViewProps {

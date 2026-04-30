@@ -104,6 +104,14 @@ app.get('/uploads/:filename', async (req, res, next) => {
   }
 })
 
+// Compatibilité rétroactive : anciennes URLs stockées en `/api/uploads/...`
+// (ou caches frontend) doivent continuer à fonctionner en production.
+app.get('/api/uploads/:filename', (req, res) => {
+  const requested = String(req.params.filename ?? '')
+  const safeRequested = requested.replace(/[^a-zA-Z0-9._-]/g, '_')
+  res.redirect(302, `/uploads/${safeRequested}`)
+})
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api', healthRouter)
 app.use('/api/auth', authRouter)

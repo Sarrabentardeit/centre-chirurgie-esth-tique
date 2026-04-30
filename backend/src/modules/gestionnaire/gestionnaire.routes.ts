@@ -60,7 +60,7 @@ gestionnaireRouter.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await gestionnaireService.upsertDevisDraft(req.auth!.sub, pid(req.params.patientId), req.body)
-      res.json({ ok: true, ...result })
+      res.json(result)
     } catch (e) {
       next(e)
     }
@@ -77,7 +77,7 @@ gestionnaireRouter.patch(
         pid(req.params.devisId),
         req.body.content,
       )
-      res.json({ ok: true, ...result })
+      res.json(result)
     } catch (e) {
       next(e)
     }

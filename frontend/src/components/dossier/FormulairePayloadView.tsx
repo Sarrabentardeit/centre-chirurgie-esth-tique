@@ -6,6 +6,23 @@ import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 
 function PhotoThumb({ url, fileName }: { url: string; fileName: string }) {
   const [error, setError] = useState(false)
+  const hasValidUrl = Boolean(url && url.trim())
+  const showErrorState = error || !hasValidUrl
+
+  if (!hasValidUrl) {
+    return (
+      <div
+        className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30"
+        title={fileName}
+      >
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-50 text-slate-400 p-2">
+          <ImageOff className="h-6 w-6 shrink-0" />
+          <span className="text-[10px] text-center leading-tight truncate w-full">{fileName}</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <a
       href={url}
@@ -14,7 +31,7 @@ function PhotoThumb({ url, fileName }: { url: string; fileName: string }) {
       className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30"
       title={fileName}
     >
-      {error ? (
+      {showErrorState ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-50 text-slate-400 p-2">
           <ImageOff className="h-6 w-6 shrink-0" />
           <span className="text-[10px] text-center leading-tight truncate w-full">{fileName}</span>
@@ -28,7 +45,7 @@ function PhotoThumb({ url, fileName }: { url: string; fileName: string }) {
           onError={() => setError(true)}
         />
       )}
-      {!error && (
+      {!showErrorState && (
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
           <ExternalLink className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
@@ -62,6 +79,9 @@ function asStringArray(value: unknown): string[] {
 
 export function resolveFormulaireFileUrl(value: string): string {
   if (!value?.trim()) return ''
+  // Blob URL temporaire (créée par URL.createObjectURL) — jamais servable, on retourne vide
+  // pour que PhotoThumb affiche l'état d'erreur plutôt qu'une 404 silencieuse.
+  if (value.startsWith('blob:')) return ''
 
   const viteApi = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000/api').replace(
     /\/$/,
@@ -229,6 +249,20 @@ export function FormulairePayloadView({
                   {asStringArray(p.documentsPDF).map((doc, idx) => {
                     const url = resolveFormulaireFileUrl(doc)
                     const fileName = decodeURIComponent(url.split('/').pop() ?? `document-${idx + 1}`)
+                    const hasValidUrl = Boolean(url && url.trim())
+                    if (!hasValidUrl) {
+                      return (
+                        <div
+                          key={`${doc}-${idx}`}
+                          className="flex items-center gap-2 rounded-lg border px-3 py-2 bg-muted/20 text-muted-foreground"
+                          title={fileName}
+                        >
+                          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-sm truncate flex-1">{fileName}</span>
+                          <ImageOff className="h-4 w-4 shrink-0" />
+                        </div>
+                      )
+                    }
                     return (
                       <a
                         key={`${doc}-${idx}`}

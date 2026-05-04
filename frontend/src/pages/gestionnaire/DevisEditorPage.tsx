@@ -632,9 +632,9 @@ export default function DevisEditorPage() {
       vertical-align: top;
     }
 
-    /* Pied vide répété (espace de signature/cachet) */
+    /* Pied vide répété (espace réservé en bas de chaque page) */
     .page-table > tfoot > tr > td {
-      height: 18mm;
+      height: 10mm;
       padding: 0 14mm;
     }
 
@@ -680,7 +680,7 @@ export default function DevisEditorPage() {
     .offer-block { break-inside: avoid; page-break-inside: avoid; }
 
     /* ── Signature ── */
-    .signature-block { margin-top: 18px; text-align: right; break-inside: avoid; page-break-inside: avoid; }
+    .signature-block { margin-top: 18px; text-align: right; break-inside: avoid; page-break-inside: avoid; break-before: avoid; page-break-before: avoid; }
     .signature-block .sig-name { font-weight: 700; font-size: 12.5px; }
     .signature-block .sig-sub  { font-size: 11px; color: #555; margin-top: 1px; }
     .signature-block img.sig-img { width: 90px; height: 46px; object-fit: contain; display: block; margin-left: auto; margin-top: 4px; }
@@ -713,7 +713,7 @@ export default function DevisEditorPage() {
       <tr><td>
         <div class="doc-body">${topHtml}</div>
         ${tableHtml}
-        <div class="doc-body" style="margin-top:10px">${botHtml}</div>
+        <div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div>
         <div class="signature-block">
           <div class="sig-name">Dr CHENNOUFI Mehdi</div>
           <div class="sig-sub">Chirurgie Esthétique</div>

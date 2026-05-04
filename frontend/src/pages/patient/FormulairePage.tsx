@@ -164,7 +164,7 @@ const step1Schema = z.object({
 
   sourceContact: z
     .string()
-    .min(1, 'Indiquez comment vous avez connu le Dr Chennoufi.')
+    .min(1, 'Indiquez comment vous avez eu connaissance des prestations du Dr Chennoufi.')
     .refine((s) => isSourceConnaissance(s), { message: 'Option non valide.' }),
 
 })
@@ -176,18 +176,47 @@ type Step1Data = {
   sourceContact: string
 }
 
-const step3Schema = z.object({
-
-  descriptionDemande: z.string().min(1, 'Champ requis'),
-
-  periodeSouhaiteeMois: z.string().min(1, 'Sélectionnez un mois'),
-
-  periodeSouhaiteeAnnee: z.string().min(1, 'Sélectionnez une année'),
-
-  /** Présence d’un accompagnant pour le séjour / le parcours */
-  accompagnant: z.boolean(),
-
-})
+const step3Schema = z
+  .object({
+    descriptionDemande: z.string().min(1, 'Champ requis'),
+    periodeSouhaiteeMois: z.string().min(1, 'Sélectionnez un mois'),
+    periodeSouhaiteeAnnee: z.string().min(1, 'Sélectionnez une année'),
+    /** Présence d’un accompagnant pour le séjour / le parcours */
+    accompagnant: z.boolean(),
+    /** Renseignés uniquement si `accompagnant` — stockés comme chaînes pour les inputs number */
+    nbAdultesAccompagnement: z.string(),
+    nbEnfantsAccompagnement: z.string(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.accompagnant) return
+    const adultes = data.nbAdultesAccompagnement.trim()
+    const enfants = data.nbEnfantsAccompagnement.trim()
+    if (!/^\d+$/.test(adultes)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Indiquez le nombre d’adultes (0 ou plus).',
+        path: ['nbAdultesAccompagnement'],
+      })
+      return
+    }
+    if (!/^\d+$/.test(enfants)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Indiquez le nombre d’enfants (0 ou plus).',
+        path: ['nbEnfantsAccompagnement'],
+      })
+      return
+    }
+    const na = parseInt(adultes, 10)
+    const ne = parseInt(enfants, 10)
+    if (na + ne < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Au moins une personne doit accompagner le séjour (adulte ou enfant).',
+        path: ['nbAdultesAccompagnement'],
+      })
+    }
+  })
 
 type Step3Data = z.infer<typeof step3Schema>
 
@@ -285,6 +314,8 @@ export default function FormulairePage() {
       periodeSouhaiteeMois: '',
       periodeSouhaiteeAnnee: '',
       accompagnant: false,
+      nbAdultesAccompagnement: '',
+      nbEnfantsAccompagnement: '',
     },
   })
 
@@ -350,6 +381,8 @@ export default function FormulairePage() {
             documentsPDF?: string[]
             sourceContact?: string
             accompagnant?: boolean
+            nbAdultesAccompagnement?: number
+            nbEnfantsAccompagnement?: number
           }
         } | null
         const payload = formulaire?.payload
@@ -390,6 +423,14 @@ export default function FormulairePage() {
           periodeSouhaiteeMois: psMois,
           periodeSouhaiteeAnnee: psAnnee,
           accompagnant: typeof payload.accompagnant === 'boolean' ? payload.accompagnant : false,
+          nbAdultesAccompagnement:
+            payload.nbAdultesAccompagnement != null && Number.isFinite(Number(payload.nbAdultesAccompagnement))
+              ? String(payload.nbAdultesAccompagnement)
+              : '',
+          nbEnfantsAccompagnement:
+            payload.nbEnfantsAccompagnement != null && Number.isFinite(Number(payload.nbEnfantsAccompagnement))
+              ? String(payload.nbEnfantsAccompagnement)
+              : '',
         })
 
         setAntecedents(payload.antecedentsMedicaux ?? [])
@@ -694,6 +735,12 @@ export default function FormulairePage() {
       attentes: step3.descriptionDemande,
       periodeSouhaitee: buildPeriodeSouhaitee(step3.periodeSouhaiteeMois, step3.periodeSouhaiteeAnnee),
       accompagnant: step3.accompagnant,
+      ...(step3.accompagnant
+        ? {
+            nbAdultesAccompagnement: parseInt(step3.nbAdultesAccompagnement.trim(), 10),
+            nbEnfantsAccompagnement: parseInt(step3.nbEnfantsAccompagnement.trim(), 10),
+          }
+        : {}),
       photos: uploadedPhotoUrls,
       documentsPDF: uploadedDocUrls.length > 0 ? uploadedDocUrls : undefined,
     }
@@ -1256,7 +1303,7 @@ export default function FormulairePage() {
                   </div>
                   <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="sourceContact" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                      Comment avez-vous connu le Dr Chennoufi ? <span className="text-destructive">*</span>
+                      Comment avez-vous eu connaissance des prestations du Dr Chennoufi ? <span className="text-destructive">*</span>
                     </Label>
                     <select
                       id="sourceContact"
@@ -1302,11 +1349,11 @@ export default function FormulairePage() {
                     </div>
                     <div className="space-y-2 mt-3">
                       <Label htmlFor="autresChroniques" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                        Autre maladie chronique
+                        Autres maladies chroniques
                       </Label>
                       <Textarea
                         id="autresChroniques"
-                        placeholder="Précisez toute maladie chronique importante..."
+                        placeholder="Précisez toute autre maladie"
                         value={autresMaladiesChroniques}
                         onChange={(e) => setAutresMaladiesChroniques(e.target.value)}
                         className="border-brand-200"
@@ -1577,17 +1624,64 @@ export default function FormulairePage() {
                       </div>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-brand-200/60 bg-brand-950/[0.03] px-4 py-3">
+                  <div className="rounded-xl border border-brand-200/60 bg-brand-950/[0.03] px-4 py-3 space-y-3">
                     <label className="flex items-start gap-3 cursor-pointer">
                       <Checkbox
                         checked={step3Form.watch('accompagnant')}
-                        onCheckedChange={(v) => step3Form.setValue('accompagnant', !!v, { shouldDirty: true, shouldValidate: true })}
+                        onCheckedChange={(v) => {
+                          const checked = !!v
+                          step3Form.setValue('accompagnant', checked, { shouldDirty: true, shouldValidate: true })
+                          if (!checked) {
+                            step3Form.setValue('nbAdultesAccompagnement', '', { shouldDirty: true })
+                            step3Form.setValue('nbEnfantsAccompagnement', '', { shouldDirty: true })
+                          }
+                        }}
                         className="mt-0.5"
                       />
                       <span className="text-sm leading-snug" style={{ color: '#282727' }}>
                         Je serai accompagné(e) pour mon séjour / mon parcours (proche, conjoint, etc.)
                       </span>
                     </label>
+                    {step3Form.watch('accompagnant') && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-0 sm:pl-8">
+                        <div className="space-y-1">
+                          <Label htmlFor="nb-adultes-accomp" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                            Nombre d’adultes <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id="nb-adultes-accomp"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            step={1}
+                            placeholder="0"
+                            {...step3Form.register('nbAdultesAccompagnement')}
+                            className="border-brand-200"
+                          />
+                          {step3Form.formState.errors.nbAdultesAccompagnement && (
+                            <p className="text-xs text-destructive">{step3Form.formState.errors.nbAdultesAccompagnement.message}</p>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="nb-enfants-accomp" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                            Nombre d’enfants <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id="nb-enfants-accomp"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            step={1}
+                            placeholder="0"
+                            {...step3Form.register('nbEnfantsAccompagnement')}
+                            className="border-brand-200"
+                          />
+                          {step3Form.formState.errors.nbEnfantsAccompagnement && (
+                            <p className="text-xs text-destructive">{step3Form.formState.errors.nbEnfantsAccompagnement.message}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="desc" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
@@ -1733,7 +1827,7 @@ export default function FormulairePage() {
                           value: autresInterventionsDetails.trim() || '—',
                         },
                         {
-                          label: 'Connaissance Dr Chennoufi',
+                          label: 'Connaissance des prestations (Dr Chennoufi)',
                           value: formatSourceConnaissanceLabel(step1Form.getValues('sourceContact')) || '—',
                         },
                         {
@@ -1745,7 +1839,9 @@ export default function FormulairePage() {
                         },
                         {
                           label: 'Accompagnant (séjour)',
-                          value: step3Form.getValues('accompagnant') ? 'Oui' : 'Non',
+                          value: step3Form.getValues('accompagnant')
+                            ? `Oui — ${step3Form.getValues('nbAdultesAccompagnement')} adulte(s), ${step3Form.getValues('nbEnfantsAccompagnement')} enfant(s)`
+                            : 'Non',
                         },
                         {
                           label: 'Antécédents',

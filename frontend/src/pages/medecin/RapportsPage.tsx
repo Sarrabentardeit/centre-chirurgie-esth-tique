@@ -59,12 +59,11 @@ function completionScore(
   valeur: string,
   notes: string,
   nuitsClinique: string,
-  anesthesieGenerale: boolean | null,
 ): number {
   const examensOk = examensDemandes.length > 0 || examensAutreChecked
   const textFields = [diagnostic, interventions, forfait, valeur, notes, nuitsClinique, examensOk ? 'ok' : '']
   const filledText = textFields.filter((f) => f.trim().length > 0).length
-  const filledAnesthesie = anesthesieGenerale !== null ? 1 : 0
+  const filledAnesthesie = 1
   const totalFields = textFields.length + 1
   return Math.round(((filledText + filledAnesthesie) / totalFields) * 100)
 }
@@ -145,7 +144,7 @@ export default function RapportsPage() {
   const [valeur, setValeur]               = useState('')
   const [forfait, setForfait]             = useState('')
   const [nuitsClinique, setNuitsClinique] = useState('')
-  const [anesthesieGenerale, setAnesthesieGenerale] = useState<boolean | null>(null)
+  const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [notes, setNotes]                 = useState('')
   const [saving, setSaving]               = useState(false)
   const [saved, setSaved]                 = useState(false)
@@ -190,7 +189,7 @@ export default function RapportsPage() {
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
     setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
-    setNuitsClinique(''); setAnesthesieGenerale(null); setNotes('')
+    setNuitsClinique(''); setAnesthesieGenerale(false); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
     try {
@@ -209,9 +208,13 @@ export default function RapportsPage() {
         )
         setInterventions((r.interventionsRecommandees ?? []).join('\n'))
         setValeur(r.valeurMedicale ?? '')
-        setForfait(r.forfaitPropose?.toString() ?? '')
+        setForfait(
+          r.forfaitPropose != null && Number.isFinite(r.forfaitPropose)
+            ? String(Math.round(Number(r.forfaitPropose.toFixed(2))))
+            : ''
+        )
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
-        setAnesthesieGenerale(r.anesthesieGenerale ?? null)
+        setAnesthesieGenerale(r.anesthesieGenerale ?? false)
         setNotes(r.notes ?? '')
         setPatients((prev) => prev.map((p) => p.id === patientId ? { ...p, rapport: r } : p))
       }
@@ -235,7 +238,7 @@ export default function RapportsPage() {
         valeurMedicale: valeur || undefined,
         forfaitPropose: forfait ? Number(forfait) : undefined,
         nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
-        anesthesieGenerale: anesthesieGenerale === null ? undefined : anesthesieGenerale,
+        anesthesieGenerale,
         notes: notes || undefined,
       })
       setSaved(true)
@@ -276,7 +279,7 @@ export default function RapportsPage() {
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
   const examensCount = examensDemandes.length + (examensAutreChecked ? 1 : 0)
-  const pct = completionScore(diagnostic, examensDemandes, examensAutreChecked, interventions, forfait, valeur, notes, nuitsClinique, anesthesieGenerale)
+  const pct = completionScore(diagnostic, examensDemandes, examensAutreChecked, interventions, forfait, valeur, notes, nuitsClinique)
 
   const stats = {
     aAnalyser:   patients.filter((p) => p.status === 'formulaire_complete').length,
@@ -300,7 +303,6 @@ export default function RapportsPage() {
           p.rapport!.valeurMedicale ?? '',
           p.rapport!.notes ?? '',
           p.rapport!.nuitsClinique?.toString() ?? '',
-          p.rapport!.anesthesieGenerale ?? null,
         )
       : 0
 
@@ -767,11 +769,9 @@ export default function RapportsPage() {
                 title="Séjour clinique & anesthésie"
                 color="bg-cyan-100 text-cyan-600"
                 subtitle={
-                  nuitsClinique || anesthesieGenerale !== null
-                    ? `${nuitsClinique ? `${nuitsClinique} nuit(s)` : 'Nuits non précisées'} · ${
-                        anesthesieGenerale === null ? 'Anesthésie non précisée' : anesthesieGenerale ? 'Anesthésie générale: oui' : 'Anesthésie générale: non'
-                      }`
-                    : undefined
+                  `${nuitsClinique.trim() ? `${nuitsClinique} nuit(s)` : 'Nuits non précisées'} · ${
+                    anesthesieGenerale ? 'Anesthésie générale: oui' : 'Anesthésie générale: non'
+                  }`
                 }
                 open={openSections.clinique}
                 onToggle={() => toggleSection('clinique')}
@@ -821,17 +821,6 @@ export default function RapportsPage() {
                         }`}
                       >
                         Non
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAnesthesieGenerale(null)}
-                        className={`h-9 px-4 rounded-lg border text-sm font-medium transition-colors ${
-                          anesthesieGenerale === null
-                            ? 'border-slate-400 bg-slate-100 text-slate-700'
-                            : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
-                        }`}
-                      >
-                        Non précisé
                       </button>
                     </div>
                   </div>

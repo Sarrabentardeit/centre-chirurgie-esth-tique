@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   CalendarDays, CheckCircle2, Eye, EyeOff, Mail, MapPin,
-  RefreshCw, Search, ShieldCheck, Stethoscope, User, UserPlus, Users, AlertCircle,
+  RefreshCw, Search, ShieldCheck, Stethoscope, User, UserPlus, Users, AlertCircle, Pencil, Trash2, Save, X,
 } from 'lucide-react'
 import {
   gestionnaireApi,
@@ -90,6 +90,11 @@ export default function UsersManagementPage() {
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all')
   const [page,       setPage]       = useState(1)
   const PAGE_SIZE = 12
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const [editFullName, setEditFullName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editPassword, setEditPassword] = useState('')
+  const [actionUserId, setActionUserId] = useState<string | null>(null)
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -137,6 +142,71 @@ export default function UsersManagementPage() {
       setError(e instanceof Error ? e.message : 'Erreur lors de la création.')
     }
     setSaving(false)
+  }
+
+  const beginEdit = (u: GestionnaireUserRow) => {
+    setEditingUserId(u.id)
+    setEditFullName(u.fullName)
+    setEditEmail(u.email)
+    setEditPassword('')
+    setError(null)
+    setSuccess(null)
+  }
+
+  const cancelEdit = () => {
+    setEditingUserId(null)
+    setEditFullName('')
+    setEditEmail('')
+    setEditPassword('')
+  }
+
+  const handleSaveEdit = async (u: GestionnaireUserRow) => {
+    const fullName = editFullName.trim()
+    const email = editEmail.trim().toLowerCase()
+    const nextPassword = editPassword.trim()
+    if (!fullName || !email.includes('@')) {
+      setError('Nom complet et email valide requis.')
+      return
+    }
+    if (nextPassword && nextPassword.length < 8) {
+      setError('Le nouveau mot de passe doit contenir au moins 8 caractères.')
+      return
+    }
+    setActionUserId(u.id)
+    setError(null)
+    setSuccess(null)
+    try {
+      await gestionnaireApi.updateUser(u.id, {
+        fullName: fullName !== u.fullName ? fullName : undefined,
+        email: email !== u.email.toLowerCase() ? email : undefined,
+        password: nextPassword || undefined,
+      })
+      setSuccess('Compte mis à jour.')
+      cancelEdit()
+      await load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur lors de la mise à jour.')
+    } finally {
+      setActionUserId(null)
+    }
+  }
+
+  const handleDelete = async (u: GestionnaireUserRow) => {
+    const confirmed = window.confirm(`Supprimer le compte "${u.fullName}" ? Cette action est irréversible.`)
+    if (!confirmed) return
+    setActionUserId(u.id)
+    setError(null)
+    setSuccess(null)
+    try {
+      await gestionnaireApi.deleteUser(u.id)
+      setSuccess('Compte supprimé.')
+      if (editingUserId === u.id) cancelEdit()
+      await load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur lors de la suppression.')
+    } finally {
+      setActionUserId(null)
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -301,40 +371,110 @@ export default function UsersManagementPage() {
             const statusInfo = u.patient?.status ? STATUS_LABELS[u.patient.status] : null
             const RoleIcon = roleMeta.icon
             return (
-              <div key={u.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/60 transition-colors">
-                <Avatar name={u.fullName} role={u.role} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-sm">{u.fullName}</span>
-                    <Badge variant="outline" className={cn('text-[11px] px-2 py-0 h-5 gap-1', roleMeta.color, roleMeta.bg, roleMeta.border)}>
-                      <RoleIcon className="h-3 w-3" /> {roleMeta.label}
-                    </Badge>
-                    {statusInfo && (
-                      <span className={cn('text-[11px] rounded-full px-2 py-0.5 font-medium', statusInfo.color)}>
-                        {statusInfo.label}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                      <Mail className="h-3 w-3" /> {u.email}
-                    </span>
-                    {u.patient?.dossierNumber && (
-                      <span className="text-xs font-semibold text-brand-600">{u.patient.dossierNumber}</span>
-                    )}
-                    {(u.patient?.ville || u.patient?.pays) && (
+              <div key={u.id}>
+                <div className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/60 transition-colors">
+                  <Avatar name={u.fullName} role={u.role} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{u.fullName}</span>
+                      <Badge variant="outline" className={cn('text-[11px] px-2 py-0 h-5 gap-1', roleMeta.color, roleMeta.bg, roleMeta.border)}>
+                        <RoleIcon className="h-3 w-3" /> {roleMeta.label}
+                      </Badge>
+                      {statusInfo && (
+                        <span className={cn('text-[11px] rounded-full px-2 py-0.5 font-medium', statusInfo.color)}>
+                          {statusInfo.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                       <span className="text-xs text-gray-400 flex items-center gap-1">
-                        <MapPin className="h-3 w-3" />
-                        {[u.patient.ville, u.patient.pays].filter(Boolean).join(', ')}
+                        <Mail className="h-3 w-3" /> {u.email}
                       </span>
-                    )}
+                      {u.patient?.dossierNumber && (
+                        <span className="text-xs font-semibold text-brand-600">{u.patient.dossierNumber}</span>
+                      )}
+                      {(u.patient?.ville || u.patient?.pays) && (
+                        <span className="text-xs text-gray-400 flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {[u.patient.ville, u.patient.pays].filter(Boolean).join(', ')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-[11px] text-gray-400 flex items-center gap-1">
+                      <CalendarDays className="h-3 w-3" /> {formatRelative(u.createdAt)}
+                    </span>
+                    <div className="mt-1.5 flex items-center gap-1.5 justify-end">
+                      {editingUserId === u.id ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={cancelEdit}
+                            disabled={actionUserId === u.id}
+                          >
+                            <X className="h-3.5 w-3.5 mr-1" /> Annuler
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="brand"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => void handleSaveEdit(u)}
+                            disabled={actionUserId === u.id}
+                          >
+                            <Save className="h-3.5 w-3.5 mr-1" /> Enregistrer
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => beginEdit(u)}
+                            disabled={Boolean(actionUserId)}
+                          >
+                            <Pencil className="h-3.5 w-3.5 mr-1" /> Modifier
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-red-600 hover:text-red-700"
+                            onClick={() => void handleDelete(u)}
+                            disabled={Boolean(actionUserId)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" /> Supprimer
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                    <CalendarDays className="h-3 w-3" /> {formatRelative(u.createdAt)}
-                  </span>
-                </div>
+                {editingUserId === u.id && (
+                  <div className="px-5 pb-4 pt-2 border-t bg-muted/20">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-gray-600">Nom complet</Label>
+                        <Input value={editFullName} onChange={(e) => setEditFullName(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-gray-600">Email</Label>
+                        <Input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-gray-600">Nouveau mot de passe (optionnel)</Label>
+                        <Input
+                          type="password"
+                          placeholder="Laisser vide pour ne pas changer"
+                          value={editPassword}
+                          onChange={(e) => setEditPassword(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

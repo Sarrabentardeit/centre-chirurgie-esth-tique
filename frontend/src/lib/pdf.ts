@@ -2,6 +2,7 @@ import jsPDF from 'jspdf'
 import type { Devis, Patient } from '@/types'
 import type { CurrencyUnit } from '@/lib/utils'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { formatDevisSejourNotesForDisplay } from '@/lib/devisSejourNotes'
 
 type DownloadPdfFromTextParams = {
   title?: string
@@ -198,7 +199,11 @@ export function downloadDevisPdf(params: DownloadDevisPdfParams) {
     doc.text('Informations séjour', marginLeft, y)
     doc.setFont('helvetica', 'normal')
     y += 4
-    const noteLines = splitLinesForTable(doc, params.devis.notesSejour, usableWidth)
+    const noteLines = splitLinesForTable(
+      doc,
+      formatDevisSejourNotesForDisplay(params.devis.notesSejour),
+      usableWidth
+    )
     for (const l of noteLines) {
       if (y > 275) {
         doc.addPage()

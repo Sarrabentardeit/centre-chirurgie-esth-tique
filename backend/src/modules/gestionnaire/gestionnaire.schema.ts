@@ -107,3 +107,13 @@ export const createUserByGestionnaireSchema = z.object({
 })
 
 export type CreateUserByGestionnaireInput = z.infer<typeof createUserByGestionnaireSchema>
+
+export const updateUserByGestionnaireSchema = z.object({
+  fullName: z.string().min(2).optional(),
+  email: z.string().email().optional(),
+  password: z.string().min(8).optional(),
+}).refine((v) => Object.keys(v).length > 0, {
+  message: 'Aucun champ à modifier.',
+})
+
+export type UpdateUserByGestionnaireInput = z.infer<typeof updateUserByGestionnaireSchema>

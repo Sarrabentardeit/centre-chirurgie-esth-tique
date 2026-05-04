@@ -8,6 +8,7 @@ import {
   logistiqueSchema,
   refuseDevisSchema,
   saveDevisContentSchema,
+  updateUserByGestionnaireSchema,
   updateTemplateSchema,
   upsertDevisDraftSchema,
 } from './gestionnaire.schema.js'
@@ -298,3 +299,25 @@ gestionnaireRouter.post(
     }
   }
 )
+
+gestionnaireRouter.patch(
+  '/users/:userId',
+  validate(updateUserByGestionnaireSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.updateUserByGestionnaire(req.auth!.sub, pid(req.params.userId), req.body)
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+gestionnaireRouter.delete('/users/:userId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await gestionnaireService.deleteUserByGestionnaire(req.auth!.sub, pid(req.params.userId))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})

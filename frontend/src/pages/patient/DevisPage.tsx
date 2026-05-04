@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { patientApi } from '@/lib/api'
 import type { Devis } from '@/lib/api'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { formatDevisSejourNotesForDisplay } from '@/lib/devisSejourNotes'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -214,7 +215,9 @@ export default function DevisPage() {
               {d.notesSejour && (
                 <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm">
                   <p className="font-semibold text-amber-800 mb-1">Informations séjour</p>
-                  <p className="text-amber-700 whitespace-pre-line">{d.notesSejour}</p>
+                  <p className="text-amber-700 whitespace-pre-line">
+                    {formatDevisSejourNotesForDisplay(d.notesSejour)}
+                  </p>
                 </div>
               )}
 

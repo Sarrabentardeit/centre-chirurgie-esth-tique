@@ -22,12 +22,12 @@ import {
 } from '@/lib/api'
 import { FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
+import { buildSejourNotes, parseSejourMeta } from '@/lib/devisSejourNotes'
 
 /* ══════════════════════════════════════════════════
    TYPES & HELPERS
 ══════════════════════════════════════════════════ */
 interface LigneDevisForm { description: string; quantite: number; prixUnitaire: number }
-type TypeSejour = 'clinique' | 'hotel' | ''
 type PageView = 'list' | 'detail'
 
 const PRESTATIONS_PAR_DEFAUT = [
@@ -44,37 +44,31 @@ const PRESTATIONS_PAR_DEFAUT = [
   'Divers et imprévus',
 ] as const
 
-function buildDefaultLignes(): LigneDevisForm[] {
-  return PRESTATIONS_PAR_DEFAUT.map((description) => ({ description, quantite: 1, prixUnitaire: 0 }))
+/** Float DB / JSON (ex. 4999.999999999999) → dinars entiers affichés correctement. */
+function normalizeTndDinars(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  return Math.round(Number(n.toFixed(2)))
 }
 
-const TYPE_SEJOUR_PREFIX = 'TYPE_SEJOUR:'
-const DELAIS_CONVALESCENCE_PREFIX = 'DELAIS_CONVALESCENCE:'
+/** P.U. de la 1re ligne = forfait proposé par le médecin (rapport), si disponible. */
+function buildDefaultLignes(honorairesChirCliniquePu?: number): LigneDevisForm[] {
+  const pu0 =
+    typeof honorairesChirCliniquePu === 'number' &&
+    Number.isFinite(honorairesChirCliniquePu) &&
+    honorairesChirCliniquePu > 0
+      ? normalizeTndDinars(honorairesChirCliniquePu)
+      : 0
+  return PRESTATIONS_PAR_DEFAUT.map((description, i) => ({
+    description,
+    quantite: 1,
+    prixUnitaire: i === 0 ? pu0 : 0,
+  }))
+}
+
 const STATUTS_DEVIS = [
   'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
 ]
-
-function parseSejourMeta(notes: string | null | undefined) {
-  const lines = (notes ?? '').split('\n')
-  const typeLine = lines.find((l) => l.startsWith(TYPE_SEJOUR_PREFIX))
-  const delaiLine = lines.find((l) => l.startsWith(DELAIS_CONVALESCENCE_PREFIX))
-  const raw = typeLine?.replace(TYPE_SEJOUR_PREFIX, '').trim().toLowerCase()
-  const typeSejour: TypeSejour = raw === 'clinique' || raw === 'hotel' ? raw : ''
-  const delaisConvalescence = delaiLine?.replace(DELAIS_CONVALESCENCE_PREFIX, '').trim() ?? ''
-  const noteSejour = lines
-    .filter((l) => !l.startsWith(TYPE_SEJOUR_PREFIX) && !l.startsWith(DELAIS_CONVALESCENCE_PREFIX))
-    .join('\n').trim()
-  return { typeSejour, delaisConvalescence, noteSejour }
-}
-
-function buildSejourNotes(i: { noteSejour: string; typeSejour: TypeSejour; delaisConvalescence: string }) {
-  return [
-    i.typeSejour ? `${TYPE_SEJOUR_PREFIX}${i.typeSejour}` : '',
-    i.delaisConvalescence.trim() ? `${DELAIS_CONVALESCENCE_PREFIX}${i.delaisConvalescence.trim()}` : '',
-    i.noteSejour.trim(),
-  ].filter(Boolean).join('\n')
-}
 
 function initials(name: string) {
   const p = name.trim().split(/\s+/).filter(Boolean)
@@ -153,7 +147,7 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
           <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
             <p className="text-[11px] uppercase tracking-wide font-semibold text-indigo-700 mb-1">Anesthésie générale</p>
             <p className="text-sm font-semibold text-indigo-900">
-              {r.anesthesieGenerale == null ? 'Non précisé' : r.anesthesieGenerale ? 'Oui' : 'Non'}
+              {r.anesthesieGenerale ? 'Oui' : 'Non'}
             </p>
           </div>
         </div>
@@ -203,9 +197,11 @@ interface DevisModalProps {
   removeLigne: (i: number) => void
   updateLigne: (i: number, f: keyof LigneDevisForm, v: string | number) => void
   total: number
+  cliniqueNom: string; setCliniqueNom: (v: string) => void
+  cliniqueNuits: string; setCliniqueNuits: (v: string) => void
+  hotelNom: string; setHotelNom: (v: string) => void
+  hotelNuits: string; setHotelNuits: (v: string) => void
   notesSejour: string; setNotesSejour: (v: string) => void
-  typeSejour: TypeSejour; setTypeSejour: (v: TypeSejour) => void
-  delaisConvalescence: string; setDelaisConvalescence: (v: string) => void
   sent: boolean; savedDraft: boolean; actionLoading: boolean
   onSend: () => void; onSaveDraft: () => void
   onDelete: () => void
@@ -217,8 +213,9 @@ interface DevisModalProps {
 function DevisModal({
   onClose, patientName, existingDevis, isEditing,
   lignes, addLigne, removeLigne, updateLigne, total,
-  notesSejour, setNotesSejour, typeSejour, setTypeSejour,
-  delaisConvalescence, setDelaisConvalescence,
+  cliniqueNom, setCliniqueNom, cliniqueNuits, setCliniqueNuits,
+  hotelNom, setHotelNom, hotelNuits, setHotelNuits,
+  notesSejour, setNotesSejour,
   sent, savedDraft, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
 }: DevisModalProps) {
   // Fermer sur Escape
@@ -285,8 +282,16 @@ function DevisModal({
                     />
                     <Input
                       className="col-span-2 h-8 text-sm text-right border-slate-200"
-                      type="number" min={0} value={ligne.prixUnitaire}
-                      onChange={(e) => updateLigne(i, 'prixUnitaire', parseInt(e.target.value, 10) || 0)}
+                      type="number" min={0} step={1} value={ligne.prixUnitaire}
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        const v = raw === '' ? 0 : Number.parseFloat(raw)
+                        updateLigne(
+                          i,
+                          'prixUnitaire',
+                          Number.isFinite(v) ? normalizeTndDinars(v) : 0
+                        )
+                      }}
                     />
                     <div className="col-span-2 text-right text-xs font-semibold text-slate-600 pr-1">
                       {formatCurrency(ligne.quantite * ligne.prixUnitaire, currency)}
@@ -318,30 +323,55 @@ function DevisModal({
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Informations séjour</p>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                {(['clinique', 'hotel'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTypeSejour(typeSejour === t ? '' : t)}
-                    className={`h-10 rounded-xl border text-sm font-semibold transition-all ${
-                      typeSejour === t
-                        ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    {t === 'clinique' ? '🏥 Séjour clinique' : '🏨 Hôtel'}
-                  </button>
-                ))}
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1.5">Délais de convalescence</label>
-                <Input
-                  className="h-9 text-sm border-slate-200"
-                  placeholder="Ex : 10 à 14 jours de repos"
-                  value={delaisConvalescence}
-                  onChange={(e) => setDelaisConvalescence(e.target.value)}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+                  <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">🏥 Séjour clinique</p>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Nom de la clinique</label>
+                    <Input
+                      className="h-9 text-sm border-slate-200 bg-white"
+                      placeholder="Ex. : Clinique El Amen"
+                      value={cliniqueNom}
+                      onChange={(e) => setCliniqueNom(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Nombre de nuits</label>
+                    <Input
+                      className="h-9 text-sm border-slate-200 bg-white"
+                      type="number"
+                      min={0}
+                      step={1}
+                      placeholder="Ex. : 2"
+                      value={cliniqueNuits}
+                      onChange={(e) => setCliniqueNuits(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+                  <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">🏨 Hôtel</p>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Nom de l&apos;hôtel</label>
+                    <Input
+                      className="h-9 text-sm border-slate-200 bg-white"
+                      placeholder="Ex. : Hôtel du Lac"
+                      value={hotelNom}
+                      onChange={(e) => setHotelNom(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Nombre de nuits</label>
+                    <Input
+                      className="h-9 text-sm border-slate-200 bg-white"
+                      type="number"
+                      min={0}
+                      step={1}
+                      placeholder="Ex. : 5"
+                      value={hotelNuits}
+                      onChange={(e) => setHotelNuits(e.target.value)}
+                    />
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1.5">Notes séjour</label>
@@ -428,9 +458,11 @@ export default function DevisGestionnairePage() {
 
   /* State devis form */
   const [lignes, setLignes]                   = useState<LigneDevisForm[]>(buildDefaultLignes())
+  const [cliniqueNom, setCliniqueNom]         = useState('')
+  const [cliniqueNuits, setCliniqueNuits]     = useState('')
+  const [hotelNom, setHotelNom]               = useState('')
+  const [hotelNuits, setHotelNuits]           = useState('')
   const [notesSejour, setNotesSejour]         = useState('')
-  const [typeSejour, setTypeSejour]           = useState<TypeSejour>('')
-  const [delaisConvalescence, setDelaisConvalescence] = useState('')
   const [isEditingExisting, setIsEditingExisting] = useState(false)
   const [sent, setSent]                       = useState(false)
   const [savedDraft, setSavedDraft]           = useState(false)
@@ -497,13 +529,27 @@ export default function DevisGestionnairePage() {
 
   const openModal = (editing = false) => {
     if (editing && existingDevis) {
-      setLignes(existingDevis.lignes.map((l) => ({ description: l.description, quantite: l.quantite, prixUnitaire: l.prixUnitaire })))
+      setLignes(
+        existingDevis.lignes.map((l) => ({
+          description: l.description,
+          quantite: l.quantite,
+          prixUnitaire: normalizeTndDinars(l.prixUnitaire),
+        }))
+      )
       const p = parseSejourMeta(existingDevis.notesSejour ?? existingDevis.planningMedical ?? '')
-      setNotesSejour(p.noteSejour); setTypeSejour(p.typeSejour); setDelaisConvalescence(p.delaisConvalescence)
+      setCliniqueNom(p.cliniqueNom)
+      setCliniqueNuits(p.cliniqueNuits)
+      setHotelNom(p.hotelNom)
+      setHotelNuits(p.hotelNuits)
+      setNotesSejour(p.noteSejour)
       setIsEditingExisting(true)
     } else {
-      setLignes(buildDefaultLignes())
-      setNotesSejour(''); setTypeSejour(''); setDelaisConvalescence('')
+      const fp = rapportsList[0]?.forfaitPropose
+      const honoraires =
+        typeof fp === 'number' && Number.isFinite(fp) && fp > 0 ? fp : undefined
+      setLignes(buildDefaultLignes(honoraires))
+      setCliniqueNom(''); setCliniqueNuits(''); setHotelNom(''); setHotelNuits('')
+      setNotesSejour('')
       setIsEditingExisting(false)
     }
     setSent(false); setSavedDraft(false)
@@ -516,7 +562,14 @@ export default function DevisGestionnairePage() {
       dateValidite: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       lignes: ls, total: ls.reduce((s, x) => s + x.total, 0),
       planningMedical: null,
-      notesSejour: buildSejourNotes({ noteSejour: notesSejour, typeSejour, delaisConvalescence }) || null,
+      notesSejour:
+        buildSejourNotes({
+          cliniqueNom,
+          cliniqueNuits,
+          hotelNom,
+          hotelNuits,
+          noteSejour: notesSejour,
+        }) || null,
       currency,
     }
   }
@@ -1029,9 +1082,11 @@ export default function DevisGestionnairePage() {
           removeLigne={(i) => setLignes((p) => p.filter((_, idx) => idx !== i))}
           updateLigne={(i, f, v) => setLignes((p) => p.map((l, idx) => (idx === i ? { ...l, [f]: v } : l)))}
           total={total}
+          cliniqueNom={cliniqueNom} setCliniqueNom={setCliniqueNom}
+          cliniqueNuits={cliniqueNuits} setCliniqueNuits={setCliniqueNuits}
+          hotelNom={hotelNom} setHotelNom={setHotelNom}
+          hotelNuits={hotelNuits} setHotelNuits={setHotelNuits}
           notesSejour={notesSejour} setNotesSejour={setNotesSejour}
-          typeSejour={typeSejour} setTypeSejour={setTypeSejour}
-          delaisConvalescence={delaisConvalescence} setDelaisConvalescence={setDelaisConvalescence}
           sent={sent} savedDraft={savedDraft} actionLoading={actionLoading}
           onSend={() => void handleSend()}
           onSaveDraft={() => void handleSaveDraft()}

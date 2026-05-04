@@ -879,6 +879,18 @@ export const gestionnaireApi = {
         body: JSON.stringify(body),
       }
     ),
+
+  updateUser: (userId: string, body: { fullName?: string; email?: string; password?: string }) =>
+    request<{ ok: true; user: { id: string; fullName: string; email: string; role: 'patient' | 'medecin' | 'gestionnaire' } }>(
+      `/gestionnaire/users/${userId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }
+    ),
+
+  deleteUser: (userId: string) =>
+    request<{ ok: true; deleted: true }>(`/gestionnaire/users/${userId}`, { method: 'DELETE' }),
 }
 
 // ─── Upload API ───────────────────────────────────────────────────────────────

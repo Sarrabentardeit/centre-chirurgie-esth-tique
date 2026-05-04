@@ -171,7 +171,7 @@ export function FormulairePayloadView({
             <InfoRow label="Taille" value={asString(p.taille) ? `${String(p.taille)} cm` : null} />
             <InfoRow label="Groupe sanguin" value={asString(p.groupeSanguin)} />
             <InfoRow
-              label="Connaissance Dr Chennoufi"
+              label="Connaissance des prestations (Dr Chennoufi)"
               value={
                 asString(p.sourceContact)
                   ? formatSourceConnaissanceLabel(String(p.sourceContact))
@@ -189,6 +189,26 @@ export function FormulairePayloadView({
                     : null
               }
             />
+            {p.accompagnant === true && (
+              <>
+                <InfoRow
+                  label="Nombre d’adultes (accompagnement)"
+                  value={
+                    p.nbAdultesAccompagnement != null && String(p.nbAdultesAccompagnement).trim() !== ''
+                      ? String(p.nbAdultesAccompagnement)
+                      : null
+                  }
+                />
+                <InfoRow
+                  label="Nombre d’enfants (accompagnement)"
+                  value={
+                    p.nbEnfantsAccompagnement != null && String(p.nbEnfantsAccompagnement).trim() !== ''
+                      ? String(p.nbEnfantsAccompagnement)
+                      : null
+                  }
+                />
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -205,7 +225,7 @@ export function FormulairePayloadView({
             <InfoRow label="Détails alcool" value={asString(p.detailsAlcool)} />
             <InfoRow label="Drogue" value={p.drogue === true ? 'Oui' : p.drogue === false ? 'Non' : null} />
             <InfoRow label="Détails drogue" value={asString(p.detailsDrogue)} />
-            <InfoRow label="Autres maladies" value={asString(p.autresMaladiesChroniques)} />
+            <InfoRow label="Autres maladies chroniques" value={asString(p.autresMaladiesChroniques)} />
             <InfoRow label="Chirurgies antérieures" value={p.chirurgiesAnterieures === true ? 'Oui' : p.chirurgiesAnterieures === false ? 'Non' : null} />
             <InfoRow label="Détails chirurgies" value={asString(p.chirurgiesDetails)} />
           </CardContent>

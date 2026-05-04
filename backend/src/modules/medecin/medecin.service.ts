@@ -575,7 +575,11 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     examensDemandes:          input.examensDemandes ?? [],
     interventionsRecommandees: input.interventionsRecommandees ?? [],
     valeurMedicale:           input.valeurMedicale,
-    forfaitPropose:           input.forfaitPropose,
+    // Float Prisma : arrondi pour éviter 4999.999… en base / JSON.
+    forfaitPropose:
+      input.forfaitPropose === undefined
+        ? undefined
+        : Math.round(Number(input.forfaitPropose.toFixed(2))),
     nuitsClinique:            input.nuitsClinique,
     anesthesieGenerale:       input.anesthesieGenerale,
     notes:                    input.notes,

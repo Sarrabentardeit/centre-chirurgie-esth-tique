@@ -118,7 +118,7 @@ export default function DossierPatientPage() {
   const [interventions, setInterventions] = useState('')
   const [forfait, setForfait]           = useState('')
   const [nuitsClinique, setNuitsClinique] = useState('')
-  const [anesthesieGenerale, setAnesthesieGenerale] = useState<boolean | null>(null)
+  const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [notes, setNotes]               = useState('')
   const [saving, setSaving]             = useState(false)
   const [saved, setSaved]               = useState(false)
@@ -148,14 +148,19 @@ export default function DossierPatientPage() {
             : ''
         )
         setInterventions((r.interventionsRecommandees ?? []).join('\n'))
-        setForfait(r.forfaitPropose?.toString() ?? '')
+        setForfait(
+          r.forfaitPropose != null && Number.isFinite(r.forfaitPropose)
+            ? String(Math.round(Number(r.forfaitPropose.toFixed(2))))
+            : ''
+        )
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
-        setAnesthesieGenerale(r.anesthesieGenerale ?? null)
+        setAnesthesieGenerale(r.anesthesieGenerale ?? false)
         setNotes(r.notes ?? '')
       } else {
         setExamensDemandes([])
         setExamensAutreChecked(false)
         setExamensAutreText('')
+        setAnesthesieGenerale(false)
       }
       setNewStatus(res.patient.status)
     } catch (e) {
@@ -183,7 +188,7 @@ export default function DossierPatientPage() {
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
         forfaitPropose: forfait ? Number(forfait) : undefined,
         nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
-        anesthesieGenerale: anesthesieGenerale === null ? undefined : anesthesieGenerale,
+        anesthesieGenerale,
         notes: notes || undefined,
       })
       setSaved(true)
@@ -570,14 +575,6 @@ export default function DossierPatientPage() {
                       onClick={() => setAnesthesieGenerale(false)}
                     >
                       Non
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={anesthesieGenerale === null ? 'brand' : 'outline'}
-                      onClick={() => setAnesthesieGenerale(null)}
-                    >
-                      Non précisé
                     </Button>
                   </div>
                 </div>

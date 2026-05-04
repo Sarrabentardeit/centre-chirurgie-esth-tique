@@ -38,6 +38,8 @@ interface FormulairePayload {
   descriptionDemande?: string
   attentes?: string
   accompagnant?: boolean
+  nbAdultesAccompagnement?: number
+  nbEnfantsAccompagnement?: number
   photos?: string[]
   documentsPDF?: string[]
 }
@@ -460,7 +462,7 @@ export default function FormulaireRecapPage() {
             <Row label="Taille" value={p.taille ? `${p.taille} cm` : undefined} />
             <Row label="Groupe sanguin" value={p.groupeSanguin} />
             <Row
-              label="Connaissance du Dr Chennoufi"
+              label="Connaissance des prestations (Dr Chennoufi)"
               value={p.sourceContact ? formatSourceConnaissanceLabel(p.sourceContact) : undefined}
             />
           </SectionCard>
@@ -490,7 +492,7 @@ export default function FormulaireRecapPage() {
             <Row label="Tabac" value={p.fumeur ? (p.detailsTabac ? `Oui — ${p.detailsTabac}` : 'Oui') : 'Non'} />
             <Row label="Alcool" value={p.alcool ? (p.detailsAlcool ? `Oui — ${p.detailsAlcool}` : 'Oui') : 'Non'} />
             {p.autresMaladiesChroniques && (
-              <Row label="Autres maladies" value={p.autresMaladiesChroniques} />
+              <Row label="Autres maladies chroniques" value={p.autresMaladiesChroniques} />
             )}
             {p.chirurgiesAnterieures && (
               <Row
@@ -531,6 +533,12 @@ export default function FormulaireRecapPage() {
                     : undefined
               }
             />
+            {p.accompagnant === true && (
+              <>
+                <Row label="Nombre d’adultes (accompagnement)" value={p.nbAdultesAccompagnement != null ? String(p.nbAdultesAccompagnement) : undefined} />
+                <Row label="Nombre d’enfants (accompagnement)" value={p.nbEnfantsAccompagnement != null ? String(p.nbEnfantsAccompagnement) : undefined} />
+              </>
+            )}
             <Row label="Description" value={p.descriptionDemande} />
             <Row label="Attentes" value={p.attentes !== p.descriptionDemande ? p.attentes : undefined} />
           </SectionCard>

@@ -5,6 +5,7 @@ import type {
   CreateUserByGestionnaireInput,
   LogistiqueInput,
   RefuseDevisInput,
+  UpdateUserByGestionnaireInput,
   UpdateTemplateInput,
   UpsertDevisDraftInput,
 } from './gestionnaire.schema.js'
@@ -949,6 +950,95 @@ export async function createUserByGestionnaire(actorId: string, input: CreateUse
       dossierNumber: patient?.dossierNumber ?? null,
     },
   }
+}
+
+export async function updateUserByGestionnaire(actorId: string, userId: string, input: UpdateUserByGestionnaireInput) {
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, fullName: true, email: true, role: true },
+  })
+  if (!existing) throw new AppError(404, 'USER_NOT_FOUND', 'Compte introuvable.')
+  if (existing.id === actorId) {
+    throw new AppError(400, 'SELF_UPDATE_FORBIDDEN', 'Utilisez votre espace profil pour modifier votre propre compte.')
+  }
+
+  if (input.email && input.email.toLowerCase() !== existing.email.toLowerCase()) {
+    const emailTaken = await prisma.user.findUnique({
+      where: { email: input.email.toLowerCase() },
+      select: { id: true },
+    })
+    if (emailTaken) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
+  }
+
+  const data: { fullName?: string; email?: string; passwordHash?: string } = {}
+  if (input.fullName) data.fullName = input.fullName.trim()
+  if (input.email) data.email = input.email.trim().toLowerCase()
+  if (input.password) data.passwordHash = await bcrypt.hash(input.password, 12)
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data,
+    select: { id: true, fullName: true, email: true, role: true },
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      actorRole: 'gestionnaire',
+      action: 'update',
+      entity: 'user',
+      entityId: updated.id,
+      before: { fullName: existing.fullName, email: existing.email, role: existing.role } as never,
+      after: { fullName: updated.fullName, email: updated.email, role: updated.role } as never,
+    },
+  })
+
+  return { user: updated }
+}
+
+export async function deleteUserByGestionnaire(actorId: string, userId: string) {
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { patient: { select: { dossierNumber: true } } },
+  })
+  if (!existing) throw new AppError(404, 'USER_NOT_FOUND', 'Compte introuvable.')
+  if (existing.id === actorId) {
+    throw new AppError(400, 'SELF_DELETE_FORBIDDEN', 'Vous ne pouvez pas supprimer votre propre compte.')
+  }
+
+  if (existing.role === 'gestionnaire') {
+    const totalGestionnaires = await prisma.user.count({ where: { role: 'gestionnaire' } })
+    if (totalGestionnaires <= 1) {
+      throw new AppError(400, 'LAST_GESTIONNAIRE', 'Impossible de supprimer le dernier compte gestionnaire.')
+    }
+  }
+
+  if (existing.role === 'medecin') {
+    const totalMedecins = await prisma.user.count({ where: { role: 'medecin' } })
+    if (totalMedecins <= 1) {
+      throw new AppError(400, 'LAST_MEDECIN', 'Impossible de supprimer le dernier compte médecin.')
+    }
+  }
+
+  await prisma.user.delete({ where: { id: userId } })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      actorRole: 'gestionnaire',
+      action: 'delete',
+      entity: 'user',
+      entityId: userId,
+      before: {
+        fullName: existing.fullName,
+        email: existing.email,
+        role: existing.role,
+        dossierNumber: existing.patient?.dossierNumber ?? null,
+      } as never,
+    },
+  })
+
+  return { deleted: true as const }
 }
 
 async function resolveMedecinId(inputMedecinId?: string) {

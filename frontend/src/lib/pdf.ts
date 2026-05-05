@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
-import type { Devis, Patient } from '@/types'
+import type { Devis } from '@/lib/api'
+import type { Patient } from '@/types'
 import type { CurrencyUnit } from '@/lib/utils'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { formatDevisSejourNotesForDisplay } from '@/lib/devisSejourNotes'
@@ -77,7 +78,7 @@ export function downloadPdfFromText(params: DownloadPdfFromTextParams) {
 
 type DownloadDevisPdfParams = {
   devis: Devis
-  patient: Patient
+  patient: { nom: string; prenom: string }
   currency: CurrencyUnit
   filename: string
 }
@@ -120,7 +121,7 @@ export function downloadDevisPdf(params: DownloadDevisPdfParams) {
 
   doc.setFont('helvetica', 'bold')
   doc.text(`Créé le: ${formatDate(params.devis.dateCreation)}`, marginLeft, y)
-  doc.text(`Valable jusqu'au: ${formatDate(params.devis.dateValidite)}`, marginLeft + 85, y)
+  doc.text(`Valable jusqu'au: ${params.devis.dateValidite ? formatDate(params.devis.dateValidite) : '—'}`, marginLeft + 85, y)
   doc.setFont('helvetica', 'normal')
   y += 12
 

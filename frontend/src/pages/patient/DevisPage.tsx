@@ -10,10 +10,11 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
-import { patientApi } from '@/lib/api'
+import { authApi, patientApi } from '@/lib/api'
 import type { Devis } from '@/lib/api'
 import { formatDate, formatCurrency } from '@/lib/utils'
-import { formatDevisSejourNotesForDisplay } from '@/lib/devisSejourNotes'
+import { formatDevisSejourNotesForDisplay, parseSejourMeta } from '@/lib/devisSejourNotes'
+import { downloadDevisPdf } from '@/lib/pdf'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,9 @@ const DEVIS_STATUS = {
   accepte:   { label: 'Accepté',    color: 'success',     icon: CheckCircle2 },
   refuse:    { label: 'Refusé',     color: 'destructive', icon: XCircle },
 } as const
+
+const CONTENT_BREAK = '|||EDITOR_BREAK|||'
+const OG = '#c46a3c'
 
 function PageSkeleton() {
   return (
@@ -49,12 +53,27 @@ export default function DevisPage() {
   const [refusReason, setRefusReason]   = useState('')
   const [submitting, setSubmitting]     = useState(false)
   const [actionDone, setActionDone]     = useState<string | null>(null)
+  const [patientIdentity, setPatientIdentity] = useState<{ nom: string; prenom: string; dossierNumber: string }>({
+    nom: '',
+    prenom: '',
+    dossierNumber: '',
+  })
 
   const load = async () => {
     setLoading(true); setError(null)
     try {
       const res = await patientApi.getDevis()
       setDevis(res.devis)
+      try {
+        const me = await authApi.me()
+        const fullName = (me.user.name ?? '').trim()
+        const parts = fullName.split(/\s+/).filter(Boolean)
+        const prenom = parts[0] ?? 'Patient'
+        const nom = parts.slice(1).join(' ') || prenom
+        setPatientIdentity({ nom, prenom, dossierNumber: me.patient?.dossierNumber ?? '' })
+      } catch {
+        // L'export PDF reste possible avec une identité générique.
+      }
       for (const d of res.devis) {
         if (d.statut === 'envoye' && !d.vuParPatientAt) {
           void patientApi.enregistrerConsultationDevis(d.id).then((r) => {
@@ -91,6 +110,121 @@ export default function DevisPage() {
       setError(e instanceof Error ? e.message : 'Erreur lors de la réponse.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleDownloadPdf = (d: Devis) => {
+    const hasCustom = Boolean(d.customContent?.trim())
+    if (hasCustom) {
+      const raw = d.customContent!.trim()
+      const [topHtml, botHtml] = raw.includes(CONTENT_BREAK) ? raw.split(CONTENT_BREAK) : [raw, '']
+      const lignes = Array.isArray(d.lignes) ? d.lignes : []
+      const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+      const operationTitle =
+        lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
+      const sej = parseSejourMeta(d.notesSejour)
+      const nClin = Number.parseInt((sej.cliniqueNuits || '').trim(), 10)
+      const nHotel = Number.parseInt((sej.hotelNuits || '').trim(), 10)
+      const totalNights = (Number.isFinite(nClin) ? Math.max(0, nClin) : 0) + (Number.isFinite(nHotel) ? Math.max(0, nHotel) : 0)
+      const jours = totalNights + 1
+      const sejourLine = totalNights > 0 ? `Séjour ${totalNights} nuit${totalNights > 1 ? 's' : ''} / ${jours} jour${jours > 1 ? 's' : ''}` : ''
+      const fmtNum = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(n || 0))
+      const logoUrl = `${window.location.origin}/acces-patient-logo1-crop.png`
+      const sigUrl = `${window.location.origin}/signature.jpg`
+      const tableHtml = lignes.length > 0 ? `
+<div class="offer-block">
+  <hr class="section-hr"/>
+  <p class="section-title">Notre meilleure offre :</p>
+  <table class="offer-table">
+    <thead>
+      <tr>
+        <th class="col-desc">Description</th>
+        <th class="col-price">Tarif en <span style="color:${OG}">dt</span><br/><span class="price-sub">(Ferme et définitif)</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="desc-cell">
+          <div class="op-title">${operationTitle}</div>
+          ${sejourLine ? `<div class="sejour-badge">${sejourLine}</div>` : ''}
+        </td>
+        <td class="price-cell">${fmtNum(total)}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>` : ''
+      const html = `<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"/><title>Devis ${patientIdentity.dossierNumber}</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+@page{size:A4 portrait;margin:0mm}
+html,body{font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.55;color:#1a1a1a;background:#fff;margin:0;padding:0}
+.page-table{width:100%;border-collapse:collapse;table-layout:fixed}
+.page-table>thead>tr>td{padding:8mm 14mm 5mm;border-bottom:1px solid #e5e7eb}
+.page-table>tbody>tr>td{padding:6mm 14mm 0;vertical-align:top}
+.page-table>tfoot>tr>td{height:10mm;padding:0 14mm}
+p{margin:2px 0} ul,ol{padding-left:18px;margin:4px 0} li{margin:1px 0}
+strong{font-weight:700} em{font-style:italic} u{text-decoration:underline}
+mark{background:#fde68a;padding:0 1px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.doc-header{display:flex;justify-content:space-between;align-items:center}
+.doc-header img.logo{width:52px;height:52px;object-fit:contain}
+.doc-header .header-right{text-align:right;font-size:10px;color:#6b7280;line-height:1.4}
+.doc-header .header-ref{font-weight:700;color:${OG}}
+.doc-body p{margin:2px 0}.doc-body ul,.doc-body ol{padding-left:18px;margin:4px 0}.doc-body li{margin:1px 0}
+.doc-body hr{border:none;border-top:1px solid #e5e7eb;margin:12px 0 10px}
+.section-hr{border:none;border-top:1px solid #d1d5db;margin:12px 0 10px}
+.section-title{font-weight:700;text-decoration:underline;font-size:12.5px;margin-bottom:8px}
+.offer-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.offer-table th,.offer-table td{border:1.5px solid #374151;padding:7px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.col-desc{text-align:left;width:72%;background:#f9fafb;font-weight:700}.col-price{text-align:center;background:#f9fafb;font-weight:700}
+.price-sub{display:block;font-size:9px;font-weight:500;color:#6b7280}.desc-cell{vertical-align:top}
+.price-cell{text-align:center;vertical-align:middle;font-weight:700;font-size:20px;letter-spacing:.02em}
+.op-title{font-weight:700;color:${OG};background:#f3f4f6;padding:6px 10px;border-radius:3px}
+.sejour-badge{display:inline-block;margin-top:6px;font-weight:600;font-size:11px;color:#854d0e;background:#fef9c3;padding:4px 10px;border-radius:3px}
+.offer-block{break-inside:avoid;page-break-inside:avoid}
+.signature-block{margin-top:18px;text-align:right;break-inside:avoid;page-break-inside:avoid;break-before:avoid;page-break-before:avoid}
+.signature-block .sig-name{font-weight:700;font-size:12.5px}.signature-block .sig-sub{font-size:11px;color:#555;margin-top:1px}
+.signature-block img.sig-img{width:90px;height:46px;object-fit:contain;display:block;margin-left:auto;margin-top:4px}
+.signature-block .sig-line{width:140px;height:1px;border-bottom:1px solid #d1d5db;margin-left:auto;margin-top:4px}
+</style></head>
+<body><table class="page-table"><thead><tr><td><div class="doc-header"><img class="logo" src="${logoUrl}" alt="Logo" onerror="this.style.display='none'"/><div class="header-right"><div class="header-ref">${patientIdentity.dossierNumber}</div><div>Dr. CHENNOUFI Mehdi — Chirurgie Esthétique</div></div></div></td></tr></thead>
+<tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="doc-body">${topHtml}</div>${tableHtml}<div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div><div class="signature-block"><div class="sig-name">Dr CHENNOUFI Mehdi</div><div class="sig-sub">Chirurgie Esthétique</div><img class="sig-img" src="${sigUrl}" alt="Signature" onerror="this.style.display='none'"/><div class="sig-line"></div></div></td></tr></tbody></table></body></html>`
+      const popup = window.open('', '_blank', 'width=1050,height=960')
+      if (!popup) {
+        setError("Autorisez les popups pour exporter en PDF.")
+        return
+      }
+      popup.document.open()
+      popup.document.write(html)
+      popup.document.close()
+      popup.focus()
+      const waitAndPrint = () => {
+        const imgs = Array.from(popup.document.images)
+        if (imgs.length === 0) { popup.print(); popup.close(); return }
+        let loaded = 0
+        const done = () => { if (++loaded >= imgs.length) { popup.print(); popup.close() } }
+        imgs.forEach((img) => {
+          if (img.complete) done()
+          else {
+            img.addEventListener('load', done, { once: true })
+            img.addEventListener('error', done, { once: true })
+          }
+        })
+        setTimeout(() => { if (loaded < imgs.length) { popup.print(); popup.close() } }, 2000)
+      }
+      setTimeout(waitAndPrint, 200)
+      return
+    }
+
+    try {
+      downloadDevisPdf({
+        devis: d,
+        patient: { nom: patientIdentity.nom, prenom: patientIdentity.prenom },
+        currency: (d.currency || 'TND') as 'TND' | 'EUR',
+        filename: `devis-${d.id.slice(0, 8)}.pdf`,
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Impossible d'exporter le PDF.")
     }
   }
 
@@ -261,9 +395,13 @@ export default function DevisPage() {
                   <MessageSquare className="h-4 w-4" />
                   Contacter l'équipe
                 </Button>
-                <Button variant="ghost" className="gap-2 text-muted-foreground" disabled>
+                <Button
+                  variant="ghost"
+                  className="gap-2 text-muted-foreground"
+                  onClick={() => handleDownloadPdf(d)}
+                >
                   <Download className="h-4 w-4" />
-                  PDF (bientôt)
+                  Exporter PDF
                 </Button>
               </div>
 

@@ -12,6 +12,18 @@ export function formatDate(date: string | Date): string {
   return format(new Date(date), 'dd/MM/yyyy', { locale: fr })
 }
 
+/** `YYYY-MM-DD` (champ `<input type="date">`) en français, sans décalage fuseau. */
+export function formatIsoDateFrLong(iso: string | null | undefined): string {
+  if (!iso?.trim()) return '—'
+  const m = iso.trim().slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return formatDate(iso)
+  const y = Number(m[1])
+  const mo = Number(m[2])
+  const d = Number(m[3])
+  if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return iso.trim()
+  return format(new Date(y, mo - 1, d), 'd MMMM yyyy', { locale: fr })
+}
+
 export function formatDateTime(date: string | Date): string {
   return format(new Date(date), "dd/MM/yyyy 'à' HH:mm", { locale: fr })
 }

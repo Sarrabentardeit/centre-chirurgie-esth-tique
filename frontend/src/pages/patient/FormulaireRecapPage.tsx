@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { authApi, formulaireApi } from '@/lib/api'
+import { formatIsoDateFrLong, formatDateTime } from '@/lib/utils'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import type { MeResponse } from '@/lib/api'
 
@@ -243,15 +244,6 @@ function PdfList({ docs }: { docs: string[] }) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatDate(iso?: string | null) {
-  if (!iso) return '—'
-  try {
-    return new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(iso))
-  } catch {
-    return iso
-  }
-}
-
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   if (!value || value === '—') return null
   return (
@@ -387,7 +379,7 @@ export default function FormulaireRecapPage() {
               <div>
                 <p className="font-semibold" style={{ color: '#fdeada' }}>Formulaire soumis avec succès</p>
                 <p className="text-xs mt-0.5" style={{ color: 'rgba(228,200,189,0.6)' }}>
-                  Soumis le {formatDate(formulaire?.submittedAt)} · En cours d'examen par l'équipe médicale
+                  Soumis le {formulaire?.submittedAt ? formatDateTime(formulaire.submittedAt) : '—'} · En cours d'examen par l'équipe médicale
                 </p>
               </div>
             </div>
@@ -457,9 +449,15 @@ export default function FormulaireRecapPage() {
 
           {/* Section 2 — Données personnelles */}
           <SectionCard icon={Calendar} title="Données personnelles" color="bg-violet-500">
-            <Row label="Date de naissance" value={formatDate(p.dateNaissance ?? patient?.dateNaissance)} />
+            <Row label="Date de naissance" value={formatIsoDateFrLong(p.dateNaissance ?? patient?.dateNaissance)} />
             <Row label="Poids" value={p.poids ? `${p.poids} kg` : undefined} />
             <Row label="Taille" value={p.taille ? `${p.taille} cm` : undefined} />
+            {p.poids != null && p.taille != null && Number(p.taille) > 0 ? (
+              <Row
+                label="IMC (indicatif)"
+                value={`${(Number(p.poids) / (Number(p.taille) / 100) ** 2).toFixed(1)} kg/m²`}
+              />
+            ) : null}
             <Row label="Groupe sanguin" value={p.groupeSanguin} />
             <Row
               label="Connaissance des prestations (Dr Chennoufi)"
@@ -491,6 +489,7 @@ export default function FormulaireRecapPage() {
             />
             <Row label="Tabac" value={p.fumeur ? (p.detailsTabac ? `Oui — ${p.detailsTabac}` : 'Oui') : 'Non'} />
             <Row label="Alcool" value={p.alcool ? (p.detailsAlcool ? `Oui — ${p.detailsAlcool}` : 'Oui') : 'Non'} />
+            <Row label="Autres substances" value={p.drogue ? (p.detailsDrogue ? `Oui — ${p.detailsDrogue}` : 'Oui') : 'Non'} />
             {p.autresMaladiesChroniques && (
               <Row label="Autres maladies chroniques" value={p.autresMaladiesChroniques} />
             )}
@@ -522,7 +521,17 @@ export default function FormulaireRecapPage() {
                 </div>
               </div>
             )}
-            <Row label="Période souhaitée" value={p.periodeSouhaitee} />
+            {p.periodeSouhaitee ? (
+              <div className="py-2.5 border-b border-border/50">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                  Souhait de période pour le séjour (indicatif)
+                </p>
+                <p className="text-sm font-medium text-foreground">{p.periodeSouhaitee}</p>
+                <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                  À confirmer avec l’équipe ; ce n’est pas une date d’intervention fixée.
+                </p>
+              </div>
+            ) : null}
             <Row
               label="Accompagnant (séjour)"
               value={

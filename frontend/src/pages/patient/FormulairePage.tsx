@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react'
 
 import { useForm } from 'react-hook-form'
 
@@ -18,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 
 import { Checkbox } from '@/components/ui/checkbox'
 
-import { cn } from '@/lib/utils'
+import { cn, formatIsoDateFrLong } from '@/lib/utils'
 import {
   SOURCE_CONNAISSANCE_OPTIONS,
   formatSourceConnaissanceLabel,
@@ -146,6 +146,15 @@ function parsePeriodeSouhaitee(s: string | undefined): { mois: string; annee: st
   return { mois: '', annee: '' }
 }
 
+function formatImc(poidsKg: string, tailleCm: string): string {
+  const p = Number.parseInt(poidsKg, 10)
+  const t = Number.parseInt(tailleCm, 10)
+  if (!Number.isFinite(p) || !Number.isFinite(t) || t <= 0) return '—'
+  const imc = p / (t / 100) ** 2
+  if (!Number.isFinite(imc)) return '—'
+  return `${imc.toFixed(1)} kg/m²`
+}
+
 const ANTECEDENTS = [
 
   'Diabète', 'Tension artérielle', 'Maladie cardiaque', 'Problèmes de coagulation',
@@ -160,7 +169,18 @@ const step1Schema = z.object({
 
   taille: z.string().min(1, 'Requis').regex(/^\d+$/, 'Nombre entier requis'),
 
-  dateNaissance: z.string().min(1, 'Requis'),
+  dateNaissance: z
+    .string()
+    .min(1, 'Requis')
+    .refine((s) => {
+      const m = s.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+      if (!m) return true
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      if (Number.isNaN(d.getTime())) return false
+      const endToday = new Date()
+      endToday.setHours(23, 59, 59, 999)
+      return d <= endToday
+    }, { message: 'La date de naissance ne peut pas être dans le futur.' }),
 
   sourceContact: z
     .string()
@@ -1584,7 +1604,7 @@ export default function FormulairePage() {
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                      Période souhaitée <span className="text-destructive">*</span>
+                      Période souhaitée pour le séjour <span className="text-destructive">*</span>
                     </Label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
@@ -1623,6 +1643,9 @@ export default function FormulairePage() {
                         )}
                       </div>
                     </div>
+                    <p className="text-[11px] text-muted-foreground mt-2 max-w-xl leading-relaxed">
+                      Préférence pour organiser le séjour (mois et année). Ce n’est pas une date d’intervention : le calendrier définitif est fixé avec la clinique.
+                    </p>
                   </div>
                   <div className="rounded-xl border border-brand-200/60 bg-brand-950/[0.03] px-4 py-3 space-y-3">
                     <label className="flex items-start gap-3 cursor-pointer">
@@ -1816,47 +1839,115 @@ export default function FormulairePage() {
                         Récapitulatif de votre dossier
                       </p>
                     </div>
-                    <div className="space-y-3 text-sm">
-                      {[
-                        {
-                          label: 'Interventions souhaitées',
-                          value: selectedInterventions.length > 0 ? selectedInterventions.join(', ') : 'Non renseigné',
-                        },
-                        {
-                          label: 'Autres interventions (précisions)',
-                          value: autresInterventionsDetails.trim() || '—',
-                        },
-                        {
-                          label: 'Connaissance des prestations (Dr Chennoufi)',
-                          value: formatSourceConnaissanceLabel(step1Form.getValues('sourceContact')) || '—',
-                        },
-                        {
-                          label: 'Période souhaitée',
-                          value: buildPeriodeSouhaitee(
-                            step3Form.getValues('periodeSouhaiteeMois'),
-                            step3Form.getValues('periodeSouhaiteeAnnee'),
-                          ) || '—',
-                        },
-                        {
-                          label: 'Accompagnant (séjour)',
-                          value: step3Form.getValues('accompagnant')
-                            ? `Oui — ${step3Form.getValues('nbAdultesAccompagnement')} adulte(s), ${step3Form.getValues('nbEnfantsAccompagnement')} enfant(s)`
-                            : 'Non',
-                        },
-                        {
-                          label: 'Antécédents',
-                          value: antecedents.length > 0 ? `${antecedents.length} renseigné(s)` : 'Aucun',
-                        },
-                        { label: 'Photos uploadées', value: uploadedPhotos.length },
-                        { label: 'Documents (optionnel)', value: uploadedDocs.length },
-                      ].map(({ label, value }) => (
+                    <div className="space-y-0 text-sm">
+                      {(
+                        [
+                          {
+                            label: 'Date de naissance',
+                            value: formatIsoDateFrLong(step1Form.getValues('dateNaissance')),
+                          },
+                          {
+                            label: 'Poids / taille',
+                            value: `${step1Form.getValues('poids') || '—'} kg · ${step1Form.getValues('taille') || '—'} cm`,
+                          },
+                          {
+                            label: 'IMC (indicatif)',
+                            hint: 'À titre indicatif, calculé à partir du poids et de la taille.',
+                            value: formatImc(step1Form.getValues('poids'), step1Form.getValues('taille')),
+                          },
+                          {
+                            label: 'Groupe sanguin',
+                            value: groupeSanguin.trim() || '—',
+                          },
+                          {
+                            label: 'Allergies',
+                            value: allergies.trim() ? allergies.trim() : 'Aucune déclarée',
+                          },
+                          {
+                            label: 'Interventions souhaitées',
+                            hint: `${selectedInterventions.length} sélection(s)`,
+                            value:
+                              selectedInterventions.length > 0 ? (
+                                <ul className="mt-1 list-disc pl-4 space-y-1 text-left" style={{ color: '#282727' }}>
+                                  {selectedInterventions.map((i) => (
+                                    <li key={i}>{i}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                'Non renseigné'
+                              ),
+                          },
+                          {
+                            label: 'Autres interventions (précisions)',
+                            value: autresInterventionsDetails.trim() || '—',
+                          },
+                          {
+                            label: 'Connaissance des prestations (Dr Chennoufi)',
+                            value: formatSourceConnaissanceLabel(step1Form.getValues('sourceContact')) || '—',
+                          },
+                          {
+                            label: 'Souhait de période pour le séjour',
+                            hint: 'Indicatif — à confirmer avec l’équipe ; ce n’est pas une date d’intervention.',
+                            value:
+                              buildPeriodeSouhaitee(
+                                step3Form.getValues('periodeSouhaiteeMois'),
+                                step3Form.getValues('periodeSouhaiteeAnnee'),
+                              ) || '—',
+                          },
+                          {
+                            label: 'Accompagnant (séjour)',
+                            value: step3Form.getValues('accompagnant')
+                              ? `Oui — ${step3Form.getValues('nbAdultesAccompagnement')} adulte(s), ${step3Form.getValues('nbEnfantsAccompagnement')} enfant(s)`
+                              : 'Non',
+                          },
+                          {
+                            label: 'Antécédents médicaux déclarés',
+                            value: antecedents.length > 0 ? antecedents.join(', ') : 'Aucun déclaré',
+                          },
+                          {
+                            label: 'Traitement en cours',
+                            value: traitementEnCours
+                              ? (traitementDetails.trim() ? `Oui — ${traitementDetails.trim()}` : 'Oui')
+                              : 'Non',
+                          },
+                          {
+                            label: 'Tabac / alcool / autres substances',
+                            value: [
+                              fumeur ? `Tabac : ${detailsTabac.trim() || 'oui'}` : 'Tabac : non',
+                              alcool ? `Alcool : ${detailsAlcool.trim() || 'oui'}` : 'Alcool : non',
+                              drogue ? `Autres : ${detailsDrogue.trim() || 'oui'}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · '),
+                          },
+                          {
+                            label: 'Votre demande (résumé)',
+                            value: (
+                              <p className="mt-1 whitespace-pre-wrap text-left leading-relaxed max-h-40 overflow-y-auto rounded-md border border-black/5 bg-white/60 px-3 py-2 text-[13px]">
+                                {step3Form.getValues('descriptionDemande')?.trim() || '—'}
+                              </p>
+                            ),
+                          },
+                          {
+                            label: 'Photos et documents',
+                            value: `${uploadedPhotos.length} photo(s) · ${uploadedDocs.length} document(s)`,
+                          },
+                        ] as Array<{ label: string; hint?: string; value: ReactNode }>
+                      ).map((row) => (
                         <div
-                          key={label}
-                          className="flex justify-between items-center py-2"
-                          style={{ borderBottom: '1px solid rgba(228,200,189,0.4)' }}
+                          key={row.label}
+                          className="py-3 border-b last:border-b-0"
+                          style={{ borderColor: 'rgba(228,200,189,0.45)' }}
                         >
-                          <span style={{ color: '#929292' }}>{label}</span>
-                          <span className="font-medium text-right" style={{ color: '#282727' }}>{value}</span>
+                          <p className="text-xs font-medium uppercase tracking-wide" style={{ color: '#929292' }}>
+                            {row.label}
+                          </p>
+                          {row.hint && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{row.hint}</p>
+                          )}
+                          <div className="mt-1.5 font-medium" style={{ color: '#282727' }}>
+                            {row.value}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1960,7 +2051,7 @@ export default function FormulairePage() {
         className="py-3 text-center text-xs tracking-widest uppercase"
         style={{ background: '#062a30', color: 'rgba(253,234,218,0.35)' }}
       >
-        Â© 2026 Dr. Mehdi Chennoufi — Chirurgien Esthétique
+        © 2026 Dr. Mehdi Chennoufi — Chirurgien Esthétique
       </footer>
     </div>
 

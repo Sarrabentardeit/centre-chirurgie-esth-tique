@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import multer from 'multer'
 import { validate } from '../../middleware/validate.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { AppError } from '../../middleware/errorHandler.js'
 import {
   rapportSchema,
   createAgendaEventSchema,

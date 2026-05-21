@@ -363,13 +363,15 @@ function mapGoogleTypeToAgenda(
   allDay: boolean,
   appTypeFromProps?: string,
 ): AgendaEventType {
+  // Priorité au type posé par l'app lors d'un push précédent
   if (appTypeFromProps === 'rdv' || appTypeFromProps === 'blocage' || appTypeFromProps === 'vacances') {
     return appTypeFromProps
   }
   const s = summary.toLowerCase()
-  if (allDay || s.includes('vacance')) return 'vacances'
+  // Vacances seulement si le titre le dit explicitement — pas juste parce qu'il est toute la journée
+  if (s.includes('vacance') || s.includes('conge') || s.includes('congé') || s.includes('holiday') || s.includes('absent')) return 'vacances'
   if (s.includes('bloqu') || s.includes('indispon') || s.includes('blocked')) return 'blocage'
-  // Événement créé dans Google (sans marqueur Centre Est) → RDV externe
+  // Événement toute la journée sans marqueur spécifique → RDV (ex : ZITOUNA, BESMA, etc.)
   return 'rdv'
 }
 

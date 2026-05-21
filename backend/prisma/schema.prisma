@@ -255,7 +255,10 @@ model AgendaEvent {
 model GoogleCalendarSync {
   id               String    @id @default(uuid())
   medecinId        String    @unique @map("medecin_id")
+  /** Agenda Google pour les nouveaux RDV créés dans l’app */
   googleCalendarId String    @default("primary") @map("google_calendar_id")
+  /** Agendas Google cochés — synchro bidirectionnelle (import + modifications) */
+  syncCalendarIds  Json?     @map("sync_calendar_ids")
   refreshToken     String    @map("refresh_token")
   accessToken      String?   @map("access_token")
   tokenExpiresAt   DateTime? @map("token_expires_at")

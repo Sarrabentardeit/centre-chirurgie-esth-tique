@@ -27,9 +27,29 @@ function parseGoogleEventKey(
   return { calendarId: stored.slice(0, idx), eventId: stored.slice(idx + GOOGLE_EVENT_KEY_SEP.length) }
 }
 
-/** Tous les agendas cochés dans Google (pas seulement « primary »). */
-async function listSyncCalendarIds(calendar: calendar_v3.Calendar): Promise<string[]> {
-  const ids: string[] = []
+export type GoogleCalendarListItem = {
+  id: string
+  summary: string
+  primary: boolean
+  selected: boolean
+  backgroundColor?: string | null
+}
+
+function isSyncableCalendarEntry(item: calendar_v3.Schema$CalendarListEntry): boolean {
+  if (!item.id || item.selected === false) return false
+  const id = item.id.toLowerCase()
+  if (id.includes('#holiday@') || id.includes('#contacts@') || id.includes('addressbook')) return false
+  return true
+}
+
+function parseStoredSyncCalendarIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string' && x.length > 0)
+}
+
+/** Agendas cochés dans Google — même liste pour import et export. */
+async function listCalendarEntries(calendar: calendar_v3.Calendar): Promise<GoogleCalendarListItem[]> {
+  const items: GoogleCalendarListItem[] = []
   let pageToken: string | undefined
   do {
     const res = await calendar.calendarList.list({
@@ -38,13 +58,62 @@ async function listSyncCalendarIds(calendar: calendar_v3.Calendar): Promise<stri
       pageToken,
     })
     for (const item of res.data.items ?? []) {
-      if (!item.id) continue
-      if (item.selected === false) continue
-      ids.push(item.id)
+      if (!isSyncableCalendarEntry(item) || !item.id) continue
+      items.push({
+        id: item.id,
+        summary: item.summary ?? item.id,
+        primary: !!item.primary,
+        selected: item.selected !== false,
+        backgroundColor: item.backgroundColor ?? null,
+      })
     }
     pageToken = res.data.nextPageToken ?? undefined
   } while (pageToken)
+  return items
+}
+
+async function listSyncCalendarIds(calendar: calendar_v3.Calendar): Promise<string[]> {
+  const ids = (await listCalendarEntries(calendar)).map((c) => c.id)
   return ids.length > 0 ? ids : ['primary']
+}
+
+function pickDefaultPushCalendarId(
+  entries: GoogleCalendarListItem[],
+  syncIds: string[],
+): string {
+  const primary = entries.find((e) => e.primary && syncIds.includes(e.id))
+  if (primary) return primary.id
+  const cabinet = entries.find(
+    (e) =>
+      syncIds.includes(e.id) &&
+      /intervention|cabinet/i.test(e.summary),
+  )
+  if (cabinet) return cabinet.id
+  return syncIds[0] ?? 'primary'
+}
+
+async function getSyncCalendarIdsForMedecin(
+  sync: { syncCalendarIds: unknown; googleCalendarId: string },
+  calendar: calendar_v3.Calendar,
+): Promise<string[]> {
+  const stored = parseStoredSyncCalendarIds(sync.syncCalendarIds)
+  if (stored.length > 0) return stored
+  return listSyncCalendarIds(calendar)
+}
+
+/** Met à jour la liste des agendas synchronisés depuis Google (agendas cochés). */
+export async function refreshSyncCalendarIds(medecinId: string): Promise<string[]> {
+  const client = await getCalendarClient(medecinId)
+  if (!client) return []
+  const entries = await listCalendarEntries(client.calendar)
+  const ids = entries.map((e) => e.id)
+  const syncIds = ids.length > 0 ? ids : ['primary']
+  const data: { syncCalendarIds: string[]; googleCalendarId?: string } = { syncCalendarIds: syncIds }
+  if (!syncIds.includes(client.sync.googleCalendarId)) {
+    data.googleCalendarId = pickDefaultPushCalendarId(entries, syncIds)
+  }
+  await prisma.googleCalendarSync.update({ where: { medecinId }, data })
+  return syncIds
 }
 
 type AgendaEventWithPatient = AgendaEvent & {
@@ -129,6 +198,22 @@ export async function handleOAuthCallback(code: string, state: string): Promise<
     },
   })
 
+  try {
+    const client = await getCalendarClient(medecinId)
+    if (client) {
+      const entries = await listCalendarEntries(client.calendar)
+      const syncIds = entries.map((e) => e.id)
+      const ids = syncIds.length > 0 ? syncIds : ['primary']
+      const pushId = pickDefaultPushCalendarId(entries, ids)
+      await prisma.googleCalendarSync.update({
+        where: { medecinId },
+        data: { syncCalendarIds: ids, googleCalendarId: pushId },
+      })
+    }
+  } catch (err) {
+    logger.warn({ err, medecinId }, '[google-calendar] init sync calendars')
+  }
+
   void fullSync(medecinId).catch((err) => {
     logger.warn({ err, medecinId }, '[google-calendar] synchro initiale après connexion')
   })
@@ -143,14 +228,53 @@ export async function getSyncStatus(medecinId: string) {
     return { configured: false, linked: false }
   }
   const row = await prisma.googleCalendarSync.findUnique({ where: { medecinId } })
+  const syncIds = parseStoredSyncCalendarIds(row?.syncCalendarIds)
+  let pushCalendarSummary: string | null = null
+  if (row) {
+    const client = await getCalendarClient(medecinId)
+    if (client) {
+      const entries = await listCalendarEntries(client.calendar)
+      pushCalendarSummary =
+        entries.find((e) => e.id === row.googleCalendarId)?.summary ?? row.googleCalendarId
+    }
+  }
   return {
     configured: true,
     linked: !!row,
     googleCalendarId: row?.googleCalendarId ?? null,
-    /** Import depuis tous les agendas visibles dans Google (INTERVENTIONS CABINET, etc.) */
-    syncsAllCalendars: true,
+    pushCalendarSummary,
+    syncCalendarIds: syncIds,
+    syncCalendarCount: syncIds.length,
+    bidirectional: true,
     lastSyncAt: row?.lastSyncAt?.toISOString() ?? null,
   }
+}
+
+export async function listGoogleCalendars(medecinId: string) {
+  const client = await getCalendarClient(medecinId)
+  if (!client) throw new AppError(400, 'NOT_LINKED', 'Google Calendar non lié.')
+  const calendars = await listCalendarEntries(client.calendar)
+  const syncIds = await getSyncCalendarIdsForMedecin(client.sync, client.calendar)
+  return {
+    calendars,
+    syncCalendarIds: syncIds,
+    pushCalendarId: client.sync.googleCalendarId,
+  }
+}
+
+export async function setPushCalendar(medecinId: string, calendarId: string) {
+  const client = await getCalendarClient(medecinId)
+  if (!client) throw new AppError(400, 'NOT_LINKED', 'Google Calendar non lié.')
+  const syncIds = await getSyncCalendarIdsForMedecin(client.sync, client.calendar)
+  if (!syncIds.includes(calendarId)) {
+    throw new AppError(400, 'INVALID_CALENDAR', 'Cet agenda n’est pas dans votre liste synchronisée.')
+  }
+  await prisma.googleCalendarSync.update({
+    where: { medecinId },
+    data: { googleCalendarId: calendarId },
+  })
+  const label = (await listCalendarEntries(client.calendar)).find((c) => c.id === calendarId)?.summary
+  return { pushCalendarId: calendarId, pushCalendarSummary: label ?? calendarId }
 }
 
 export async function disconnectGoogle(medecinId: string) {
@@ -462,7 +586,7 @@ export async function pullFromGoogle(medecinId: string): Promise<{ imported: num
   timeMax.setMonth(timeMax.getMonth() + 12)
 
   const pushCalendarId = client.sync.googleCalendarId
-  const calendarIds = await listSyncCalendarIds(client.calendar)
+  const calendarIds = await getSyncCalendarIdsForMedecin(client.sync, client.calendar)
   const googleIds = new Set<string>()
 
   for (const sourceCalendarId of calendarIds) {
@@ -564,8 +688,9 @@ export type FullSyncResult = {
   removed: number
 }
 
-/** Synchronisation bidirectionnelle complète (app → Google puis Google → app). */
+/** Synchronisation bidirectionnelle complète sur les mêmes agendas Google cochés. */
 export async function fullSync(medecinId: string): Promise<FullSyncResult> {
+  await refreshSyncCalendarIds(medecinId)
   const push = await pushAllEventsToGoogle(medecinId)
   const pull = await pullFromGoogle(medecinId)
   return { ...push, ...pull }

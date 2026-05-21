@@ -515,8 +515,24 @@ export const medecinApi = {
       configured: boolean
       linked: boolean
       googleCalendarId?: string | null
+      pushCalendarSummary?: string | null
+      syncCalendarCount?: number
       lastSyncAt?: string | null
     }>('/medecin/google/status'),
+
+  listGoogleCalendars: () =>
+    request<{
+      ok: true
+      calendars: { id: string; summary: string; primary: boolean; selected: boolean }[]
+      syncCalendarIds: string[]
+      pushCalendarId: string
+    }>('/medecin/google/calendars'),
+
+  setGooglePushCalendar: (calendarId: string) =>
+    request<{ ok: true; pushCalendarId: string; pushCalendarSummary?: string }>(
+      '/medecin/google/push-calendar',
+      { method: 'PUT', body: JSON.stringify({ calendarId }) },
+    ),
 
   getGoogleConnectUrl: () =>
     request<{ ok: true; url: string }>('/medecin/google/connect'),
@@ -854,8 +870,24 @@ export const gestionnaireApi = {
       configured: boolean
       linked: boolean
       googleCalendarId?: string | null
+      pushCalendarSummary?: string | null
+      syncCalendarCount?: number
       lastSyncAt?: string | null
     }>(`/gestionnaire/google/status?medecinId=${encodeURIComponent(medecinId)}`),
+
+  listGoogleCalendars: (medecinId: string) =>
+    request<{
+      ok: true
+      calendars: { id: string; summary: string; primary: boolean; selected: boolean }[]
+      syncCalendarIds: string[]
+      pushCalendarId: string
+    }>(`/gestionnaire/google/calendars?medecinId=${encodeURIComponent(medecinId)}`),
+
+  setGooglePushCalendar: (medecinId: string, calendarId: string) =>
+    request<{ ok: true; pushCalendarId: string; pushCalendarSummary?: string }>(
+      `/gestionnaire/google/push-calendar?medecinId=${encodeURIComponent(medecinId)}`,
+      { method: 'PUT', body: JSON.stringify({ calendarId }) },
+    ),
 
   getGoogleConnectUrl: (medecinId: string) =>
     request<{ ok: true; url: string }>(

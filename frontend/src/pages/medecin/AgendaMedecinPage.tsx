@@ -131,7 +131,13 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
     configured: boolean
     linked: boolean
     lastSyncAt: string | null
+    pushCalendarSummary?: string | null
+    syncCalendarCount?: number
   } | null>(null)
+  const [googlePushCalendars, setGooglePushCalendars] = useState<
+    { id: string; summary: string }[]
+  >([])
+  const [googlePushCalendarId, setGooglePushCalendarId] = useState<string>('')
   const [googleBusy, setGoogleBusy] = useState(false)
   const [googleMessage, setGoogleMessage] = useState<string | null>(null)
   const googleSyncingRef = useRef(false)
@@ -219,9 +225,51 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
         configured: r.configured,
         linked: r.linked,
         lastSyncAt: r.lastSyncAt ?? null,
+        pushCalendarSummary: r.pushCalendarSummary ?? null,
+        syncCalendarCount: r.syncCalendarCount,
       })
     } catch {
       setGoogleStatus(null)
+    }
+  }
+
+  const loadGoogleCalendars = async (medecinId: string) => {
+    if (!medecinId) return
+    try {
+      const r =
+        mode === 'gestionnaire'
+          ? await gestionnaireApi.listGoogleCalendars(medecinId)
+          : await medecinApi.listGoogleCalendars()
+      const syncSet = new Set(r.syncCalendarIds)
+      setGooglePushCalendars(
+        r.calendars.filter((c) => syncSet.has(c.id)).map((c) => ({ id: c.id, summary: c.summary })),
+      )
+      setGooglePushCalendarId(r.pushCalendarId)
+    } catch {
+      setGooglePushCalendars([])
+    }
+  }
+
+  const handlePushCalendarChange = async (calendarId: string) => {
+    const mid = mode === 'gestionnaire' ? medecinDefault : user?.id
+    if (!mid) return
+    setGoogleBusy(true)
+    try {
+      const r =
+        mode === 'gestionnaire'
+          ? await gestionnaireApi.setGooglePushCalendar(mid, calendarId)
+          : await medecinApi.setGooglePushCalendar(calendarId)
+      setGooglePushCalendarId(r.pushCalendarId)
+      setGoogleStatus((prev) =>
+        prev
+          ? { ...prev, pushCalendarSummary: r.pushCalendarSummary ?? calendarId }
+          : prev,
+      )
+      await runAutoGoogleSync(mid)
+    } catch (e) {
+      setGoogleMessage(e instanceof Error ? e.message : 'Impossible de changer l’agenda Google.')
+    } finally {
+      setGoogleBusy(false)
     }
   }
 
@@ -250,6 +298,11 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
     if (mode === 'gestionnaire' && !medecinDefault) return
     void loadGoogleStatus(medecinDefault)
   }, [mode, medecinDefault])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!googleStatus?.linked || !medecinDefault) return
+    void loadGoogleCalendars(medecinDefault)
+  }, [googleStatus?.linked, medecinDefault, mode])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Synchro automatique dès que le médecin est lié à Google (ou changement de médecin)
   useEffect(() => {
@@ -617,14 +670,40 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                 )}
               </p>
               {googleStatus.linked ? (
-                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  {googleBusy && <RefreshCw className="h-3 w-3 animate-spin text-brand-700" />}
-                  Synchronisation automatique active — tous les agendas cochés dans Google
-                  (INTERVENTIONS CABINET, cliniques, etc.) sont importés ici.
-                  {googleStatus.lastSyncAt && (
-                    <> Dernière synchro : {new Date(googleStatus.lastSyncAt).toLocaleString('fr-FR')}</>
+                <div className="text-xs text-muted-foreground space-y-1.5">
+                  <p className="flex items-center gap-1.5">
+                    {googleBusy && <RefreshCw className="h-3 w-3 animate-spin text-brand-700" />}
+                    Synchro totale sur les mêmes agendas : ce qui est dans Google apparaît ici,
+                    ce que vous modifiez ici retourne sur le même agenda Google.
+                    {googleStatus.syncCalendarCount != null && googleStatus.syncCalendarCount > 0 && (
+                      <> ({googleStatus.syncCalendarCount} agenda{googleStatus.syncCalendarCount > 1 ? 's' : ''} coché{googleStatus.syncCalendarCount > 1 ? 's' : ''} dans Google)</>
+                    )}
+                    {googleStatus.lastSyncAt && (
+                      <> — dernière synchro : {new Date(googleStatus.lastSyncAt).toLocaleString('fr-FR')}</>
+                    )}
+                  </p>
+                  {googlePushCalendars.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>Nouveaux RDV créés dans l’app →</span>
+                      <Select
+                        value={googlePushCalendarId}
+                        onValueChange={(v) => void handlePushCalendarChange(v)}
+                        disabled={googleBusy}
+                      >
+                        <SelectTrigger className="h-8 w-[min(100%,280px)] text-xs">
+                          <SelectValue placeholder="Choisir un agenda" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {googlePushCalendars.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.summary}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   )}
-                </p>
+                </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
                   Liez une seule fois le Google Calendar du médecin ; la synchro se fera ensuite automatiquement.

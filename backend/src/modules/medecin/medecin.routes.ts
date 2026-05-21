@@ -85,6 +85,22 @@ medecinRouter.post('/google/push-all', async (req: Request, res: Response, next:
   } catch (e) { next(e) }
 })
 
+medecinRouter.get('/google/calendars', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await googleCalendar.listGoogleCalendars(req.auth!.sub)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.put('/google/push-calendar', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const calendarId = typeof req.body?.calendarId === 'string' ? req.body.calendarId : ''
+    if (!calendarId) throw new AppError(400, 'CALENDAR_REQUIRED', 'calendarId requis.')
+    const result = await googleCalendar.setPushCalendar(req.auth!.sub, calendarId)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
 // ── Dashboard ────────────────────────────────────────────────────────────────
 medecinRouter.get('/dashboard', async (req: Request, res: Response, next: NextFunction) => {
   try {

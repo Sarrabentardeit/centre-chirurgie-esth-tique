@@ -275,6 +275,26 @@ gestionnaireRouter.post('/google/push-all', async (req: Request, res: Response, 
   } catch (e) { next(e) }
 })
 
+gestionnaireRouter.get('/google/calendars', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const medecinId = queryMedecinId(req)
+    if (!medecinId) throw new AppError(400, 'MEDECIN_REQUIRED', 'medecinId requis.')
+    const result = await googleCalendar.listGoogleCalendars(medecinId)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+gestionnaireRouter.put('/google/push-calendar', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const medecinId = queryMedecinId(req)
+    if (!medecinId) throw new AppError(400, 'MEDECIN_REQUIRED', 'medecinId requis.')
+    const calendarId = typeof req.body?.calendarId === 'string' ? req.body.calendarId : ''
+    if (!calendarId) throw new AppError(400, 'CALENDAR_REQUIRED', 'calendarId requis.')
+    const result = await googleCalendar.setPushCalendar(medecinId, calendarId)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
 gestionnaireRouter.get('/agenda', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined

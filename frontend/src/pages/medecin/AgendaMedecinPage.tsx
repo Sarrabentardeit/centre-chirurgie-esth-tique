@@ -619,7 +619,8 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
               {googleStatus.linked ? (
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                   {googleBusy && <RefreshCw className="h-3 w-3 animate-spin text-brand-700" />}
-                  Synchronisation automatique active (agenda ↔ Google Calendar).
+                  Synchronisation automatique active — tous les agendas cochés dans Google
+                  (INTERVENTIONS CABINET, cliniques, etc.) sont importés ici.
                   {googleStatus.lastSyncAt && (
                     <> Dernière synchro : {new Date(googleStatus.lastSyncAt).toLocaleString('fr-FR')}</>
                   )}

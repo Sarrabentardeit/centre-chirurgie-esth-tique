@@ -10,6 +10,42 @@ import type { AgendaEvent, AgendaEventType } from '@prisma/client'
 const SCOPES = ['https://www.googleapis.com/auth/calendar']
 const APP_PROP_EVENT_ID = 'centreEstEventId'
 const APP_PROP_EVENT_TYPE = 'centreEstType'
+/** calendarId::eventId — les IDs Google ne sont uniques que par calendrier */
+const GOOGLE_EVENT_KEY_SEP = '::'
+
+function makeGoogleEventKey(calendarId: string, eventId: string): string {
+  return `${calendarId}${GOOGLE_EVENT_KEY_SEP}${eventId}`
+}
+
+function parseGoogleEventKey(
+  stored: string | null | undefined,
+  fallbackCalendarId: string,
+): { calendarId: string; eventId: string } | null {
+  if (!stored) return null
+  const idx = stored.indexOf(GOOGLE_EVENT_KEY_SEP)
+  if (idx === -1) return { calendarId: fallbackCalendarId, eventId: stored }
+  return { calendarId: stored.slice(0, idx), eventId: stored.slice(idx + GOOGLE_EVENT_KEY_SEP.length) }
+}
+
+/** Tous les agendas cochés dans Google (pas seulement « primary »). */
+async function listSyncCalendarIds(calendar: calendar_v3.Calendar): Promise<string[]> {
+  const ids: string[] = []
+  let pageToken: string | undefined
+  do {
+    const res = await calendar.calendarList.list({
+      minAccessRole: 'reader',
+      maxResults: 250,
+      pageToken,
+    })
+    for (const item of res.data.items ?? []) {
+      if (!item.id) continue
+      if (item.selected === false) continue
+      ids.push(item.id)
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return ids.length > 0 ? ids : ['primary']
+}
 
 type AgendaEventWithPatient = AgendaEvent & {
   patient?: { dossierNumber: string; user: { fullName: string } } | null
@@ -111,6 +147,8 @@ export async function getSyncStatus(medecinId: string) {
     configured: true,
     linked: !!row,
     googleCalendarId: row?.googleCalendarId ?? null,
+    /** Import depuis tous les agendas visibles dans Google (INTERVENTIONS CABINET, etc.) */
+    syncsAllCalendars: true,
     lastSyncAt: row?.lastSyncAt?.toISOString() ?? null,
   }
 }
@@ -230,17 +268,21 @@ function parseGoogleEventTimes(g: calendar_v3.Schema$Event): {
 
 async function upsertImportedGoogleEvent(
   medecinId: string,
+  sourceCalendarId: string,
   g: calendar_v3.Schema$Event,
   stats: { imported: number; updated: number },
 ): Promise<void> {
   if (!g.id) return
 
+  const storedGoogleId = makeGoogleEventKey(sourceCalendarId, g.id)
   const { dateDebut, dateFin, allDay } = parseGoogleEventTimes(g)
   const summary = (g.summary ?? '').trim() || 'Importé Google Calendar'
   const appType = g.extendedProperties?.private?.[APP_PROP_EVENT_TYPE]
   const type = mapGoogleTypeToAgenda(summary, allDay, appType)
 
-  const existing = await prisma.agendaEvent.findFirst({ where: { googleEventId: g.id } })
+  const existing = await prisma.agendaEvent.findFirst({
+    where: { OR: [{ googleEventId: storedGoogleId }, { googleEventId: g.id }] },
+  })
 
   if (existing) {
     if (existing.medecinId !== medecinId) return
@@ -251,6 +293,7 @@ async function upsertImportedGoogleEvent(
     await prisma.agendaEvent.update({
       where: { id: existing.id },
       data: {
+        googleEventId: storedGoogleId,
         type,
         title: summary,
         dateDebut,
@@ -274,7 +317,7 @@ async function upsertImportedGoogleEvent(
         dateDebut,
         dateFin,
         allDay,
-        googleEventId: g.id,
+        googleEventId: storedGoogleId,
         lastSyncedFrom: 'google',
         notes: g.description ?? null,
         statut: type === 'rdv' ? 'confirme' : null,
@@ -285,10 +328,12 @@ async function upsertImportedGoogleEvent(
   } catch (err) {
     const code = (err as { code?: string })?.code
     if (code !== 'P2002') {
-      logger.warn({ err, googleEventId: g.id }, '[google-calendar] import create skipped')
+      logger.warn({ err, googleEventId: storedGoogleId }, '[google-calendar] import create skipped')
       return
     }
-    const dup = await prisma.agendaEvent.findFirst({ where: { googleEventId: g.id } })
+    const dup = await prisma.agendaEvent.findFirst({
+      where: { OR: [{ googleEventId: storedGoogleId }, { googleEventId: g.id }] },
+    })
     if (dup?.medecinId !== medecinId) return
     await prisma.agendaEvent.update({
       where: { id: dup.id },
@@ -325,11 +370,15 @@ export async function pushEventToGoogle(eventId: string): Promise<boolean> {
 
   const body = toGoogleEventBody(ev)
 
+  const pushCalendarId = client.sync.googleCalendarId
+
   try {
     if (ev.googleEventId) {
+      const parsed = parseGoogleEventKey(ev.googleEventId, pushCalendarId)
+      if (!parsed) return false
       await client.calendar.events.update({
-        calendarId: client.sync.googleCalendarId,
-        eventId: ev.googleEventId,
+        calendarId: parsed.calendarId,
+        eventId: parsed.eventId,
         requestBody: body,
       })
       await prisma.agendaEvent.update({
@@ -340,14 +389,17 @@ export async function pushEventToGoogle(eventId: string): Promise<boolean> {
     }
 
     const created = await client.calendar.events.insert({
-      calendarId: client.sync.googleCalendarId,
+      calendarId: pushCalendarId,
       requestBody: body,
     })
 
     if (created.data.id) {
       await prisma.agendaEvent.update({
         where: { id: ev.id },
-        data: { googleEventId: created.data.id, lastSyncedFrom: 'app' },
+        data: {
+          googleEventId: makeGoogleEventKey(pushCalendarId, created.data.id),
+          lastSyncedFrom: 'app',
+        },
       })
       return true
     }
@@ -385,10 +437,12 @@ export async function deleteEventFromGoogle(medecinId: string, googleEventId: st
   if (!googleEventId || !isGoogleCalendarConfigured()) return
   const client = await getCalendarClient(medecinId)
   if (!client) return
+  const parsed = parseGoogleEventKey(googleEventId, client.sync.googleCalendarId)
+  if (!parsed) return
   try {
     await client.calendar.events.delete({
-      calendarId: client.sync.googleCalendarId,
-      eventId: googleEventId,
+      calendarId: parsed.calendarId,
+      eventId: parsed.eventId,
     })
   } catch (err) {
     console.error('[google-calendar] delete failed', googleEventId, err)
@@ -407,61 +461,69 @@ export async function pullFromGoogle(medecinId: string): Promise<{ imported: num
   const timeMax = new Date()
   timeMax.setMonth(timeMax.getMonth() + 12)
 
+  const pushCalendarId = client.sync.googleCalendarId
+  const calendarIds = await listSyncCalendarIds(client.calendar)
   const googleIds = new Set<string>()
-  let pageToken: string | undefined
 
-  do {
-    const res = await client.calendar.events.list({
-      calendarId: client.sync.googleCalendarId,
-      timeMin: timeMin.toISOString(),
-      timeMax: timeMax.toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime',
-      maxResults: 250,
-      pageToken,
-    })
+  for (const sourceCalendarId of calendarIds) {
+    let pageToken: string | undefined
+    do {
+      const res = await client.calendar.events.list({
+        calendarId: sourceCalendarId,
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
+        singleEvents: true,
+        orderBy: 'startTime',
+        maxResults: 250,
+        pageToken,
+      })
 
-    for (const g of res.data.items ?? []) {
-      if (!g.id || g.status === 'cancelled') continue
-      googleIds.add(g.id)
+      for (const g of res.data.items ?? []) {
+        if (!g.id || g.status === 'cancelled') continue
+        const storedGoogleId = makeGoogleEventKey(sourceCalendarId, g.id)
+        googleIds.add(storedGoogleId)
+        googleIds.add(g.id)
 
-      const appId = g.extendedProperties?.private?.[APP_PROP_EVENT_ID]
-      const { dateDebut, dateFin, allDay } = parseGoogleEventTimes(g)
-      const summary = (g.summary ?? '').trim() || 'Importé Google Calendar'
-      const appType = g.extendedProperties?.private?.[APP_PROP_EVENT_TYPE]
+        const appId = g.extendedProperties?.private?.[APP_PROP_EVENT_ID]
+        const { dateDebut, dateFin, allDay } = parseGoogleEventTimes(g)
+        const summary = (g.summary ?? '').trim() || 'Importé Google Calendar'
+        const appType = g.extendedProperties?.private?.[APP_PROP_EVENT_TYPE]
 
-      if (appId) {
-        const existing = await prisma.agendaEvent.findFirst({
-          where: { id: appId, medecinId },
-        })
-        if (existing?.lastSyncedFrom === 'app') {
-          const age = Date.now() - existing.updatedAt.getTime()
-          if (age < 8000) continue
-        }
-        if (existing) {
-          const type = mapGoogleTypeToAgenda(summary, allDay, appType)
-          await prisma.agendaEvent.update({
-            where: { id: appId },
-            data: {
-              googleEventId: g.id,
-              type,
-              title: summary,
-              dateDebut,
-              dateFin,
-              allDay,
-              lastSyncedFrom: 'google',
-            },
+        if (appId) {
+          const existing = await prisma.agendaEvent.findFirst({
+            where: { id: appId, medecinId },
           })
-          stats.updated++
-          continue
+          if (existing?.lastSyncedFrom === 'app') {
+            const age = Date.now() - existing.updatedAt.getTime()
+            if (age < 8000) continue
+          }
+          if (existing) {
+            const type = mapGoogleTypeToAgenda(summary, allDay, appType)
+            await prisma.agendaEvent.update({
+              where: { id: appId },
+              data: {
+                googleEventId: storedGoogleId,
+                type,
+                title: summary,
+                dateDebut,
+                dateFin,
+                allDay,
+                lastSyncedFrom: 'google',
+              },
+            })
+            stats.updated++
+            continue
+          }
         }
+
+        await upsertImportedGoogleEvent(medecinId, sourceCalendarId, g, stats)
       }
 
-      await upsertImportedGoogleEvent(medecinId, g, stats)
-    }
+      pageToken = res.data.nextPageToken ?? undefined
+    } while (pageToken)
+  }
 
-    pageToken = res.data.nextPageToken ?? undefined
-  } while (pageToken)
+  logger.info({ medecinId, calendarCount: calendarIds.length, ...stats }, '[google-calendar] pull done')
 
   const linked = await prisma.agendaEvent.findMany({
     where: {
@@ -473,7 +535,11 @@ export async function pullFromGoogle(medecinId: string): Promise<{ imported: num
 
   for (const local of linked) {
     if (!local.googleEventId) continue
-    if (googleIds.has(local.googleEventId)) continue
+    const parsed = parseGoogleEventKey(local.googleEventId, pushCalendarId)
+    const keys = parsed
+      ? [local.googleEventId, parsed.eventId, makeGoogleEventKey(parsed.calendarId, parsed.eventId)]
+      : [local.googleEventId]
+    if (keys.some((k) => googleIds.has(k))) continue
     if (local.lastSyncedFrom === 'app') {
       const age = Date.now() - local.updatedAt.getTime()
       if (age < 8000) continue

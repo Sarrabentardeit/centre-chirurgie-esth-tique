@@ -20,8 +20,16 @@ const envSchema = z.object({
   /** Synchro Google Calendar */
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_REDIRECT_URI: z.string().url().optional(),
-  FRONTEND_URL: z.string().url().optional(),
+  GOOGLE_REDIRECT_URI: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined))
+    .pipe(z.string().url().optional()),
+  FRONTEND_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined))
+    .pipe(z.string().url().optional()),
 })
 
 const parsed = envSchema.safeParse(process.env)

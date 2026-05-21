@@ -691,18 +691,16 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                 <div className="text-xs text-muted-foreground space-y-1.5">
                   <p className="flex items-center gap-1.5">
                     {googleBusy && <RefreshCw className="h-3 w-3 animate-spin text-brand-700" />}
-                    Synchro totale sur les mêmes agendas : ce qui est dans Google apparaît ici,
-                    ce que vous modifiez ici retourne sur le même agenda Google.
-                    {googleStatus.syncCalendarCount != null && googleStatus.syncCalendarCount > 0 && (
-                      <> ({googleStatus.syncCalendarCount} agenda{googleStatus.syncCalendarCount > 1 ? 's' : ''} coché{googleStatus.syncCalendarCount > 1 ? 's' : ''} dans Google)</>
-                    )}
+                    Synchronisation bidirectionnelle active.
                     {googleStatus.lastSyncAt && (
-                      <> — dernière synchro : {new Date(googleStatus.lastSyncAt).toLocaleString('fr-FR')}</>
+                      <span className="text-[11px] opacity-70">
+                        Mise à jour : {new Date(googleStatus.lastSyncAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     )}
                   </p>
                   {googlePushCalendars.length > 0 && (
                     <div className="flex flex-wrap items-center gap-2">
-                      <span>Nouveaux RDV créés dans l’app →</span>
+                      <span className="text-muted-foreground">Agenda de destination :</span>
                       <Select
                         value={googlePushCalendarId}
                         onValueChange={(v) => void handlePushCalendarChange(v)}
@@ -712,11 +710,14 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                           <SelectValue placeholder="Choisir un agenda" />
                         </SelectTrigger>
                         <SelectContent>
-                          {googlePushCalendars.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.summary}
-                            </SelectItem>
-                          ))}
+                          {googlePushCalendars.map((c) => {
+                            const isEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.summary)
+                            return (
+                              <SelectItem key={c.id} value={c.id}>
+                                {isEmail ? 'Agenda principal' : c.summary}
+                              </SelectItem>
+                            )
+                          })}
                         </SelectContent>
                       </Select>
                     </div>

@@ -611,6 +611,24 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
     })
   }
 
+  const deleteEvent = (eventId: string) => {
+    const target = events.find((e) => e.id === eventId)
+    if (!target) return
+    const apiId = target._apiId ?? target.id
+
+    // Suppression optimiste immédiate
+    setLocalEvents((prev) => prev.filter((e) => e.id !== eventId))
+    setApiRdv((prev) => prev.filter((r) => r.id !== eventId))
+    setRdvOverrides((prev) => { const n = { ...prev }; delete n[eventId]; return n })
+    setRdvStatusOverrides((prev) => { const n = { ...prev }; delete n[eventId]; return n })
+    if (selectedEventId === eventId) setSelectedEventId(null)
+
+    void agendaApi.deleteAgendaEvent(apiId).catch(() => {
+      // Rollback : recharger l'agenda
+      setAgendaReloadKey((k) => k + 1)
+    })
+  }
+
   const updateRdvStatus = (eventId: string, statut: 'planifie' | 'confirme' | 'annule') => {
     const target = events.find((e) => e.id === eventId && e.type === 'rdv')
     if (!target) return
@@ -720,10 +738,37 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                   Lier Google Calendar
                 </Button>
               ) : (
+                <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  disabled={googleBusy}
+                  onClick={async () => {
+                    setGoogleBusy(true)
+                    setGoogleMessage(null)
+                    try {
+                      await (mode === 'gestionnaire'
+                        ? gestionnaireApi.syncGoogleCalendarNow(medecinDefault)
+                        : medecinApi.syncGoogleCalendarNow())
+                      setAgendaReloadKey((k) => k + 1)
+                      await loadGoogleStatus(medecinDefault)
+                      setGoogleMessage('Synchronisation terminée.')
+                    } catch {
+                      setGoogleMessage('Erreur lors de la synchronisation.')
+                    } finally {
+                      setGoogleBusy(false)
+                    }
+                  }}
+                >
+                  <RefreshCw className={`h-4 w-4 ${googleBusy ? 'animate-spin' : ''}`} />
+                  Forcer la synchro
+                </Button>
                 <Button size="sm" variant="outline" className="gap-1.5 text-destructive" disabled={googleBusy} onClick={() => void handleDisconnectGoogle()}>
                   <Unlink className="h-4 w-4" />
                   Déconnecter
                 </Button>
+                </>
               )}
             </div>
           </CardContent>
@@ -1375,32 +1420,38 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                                     <p className="text-[10px] text-red-700">Bloqué</p>
                                   )}
                                   {hasCollision && <p className="text-[10px] text-amber-700">Conflit horaire</p>}
-                                  {item.type === 'rdv' && rdvStatus !== 'annule' && (
-                                    <div className="mt-1 flex gap-1 flex-wrap">
-                                      {rdvStatus !== 'confirme' && (
+                                  <div className="mt-1 flex gap-1 flex-wrap">
+                                    {item.type === 'rdv' && rdvStatus !== 'annule' && (
+                                      <>
+                                        {rdvStatus !== 'confirme' && (
+                                          <span
+                                            className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium"
+                                            onClick={(e) => { e.stopPropagation(); e.preventDefault(); updateRdvStatus(item.id, 'confirme') }}
+                                          >
+                                            ✓ Confirmer
+                                          </span>
+                                        )}
                                         <span
-                                          className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium"
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            e.preventDefault()
-                                            updateRdvStatus(item.id, 'confirme')
-                                          }}
+                                          className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 font-medium"
+                                          onClick={(e) => { e.stopPropagation(); e.preventDefault(); updateRdvStatus(item.id, 'annule') }}
                                         >
-                                          ✓ Confirmer
+                                          ✕ Annuler
                                         </span>
-                                      )}
-                                      <span
-                                        className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 font-medium"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          e.preventDefault()
-                                          updateRdvStatus(item.id, 'annule')
-                                        }}
-                                      >
-                                        ✕ Annuler RDV
-                                      </span>
-                                    </div>
-                                  )}
+                                      </>
+                                    )}
+                                    <span
+                                      className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200 font-medium"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        e.preventDefault()
+                                        if (window.confirm('Supprimer définitivement cet événement ?')) {
+                                          deleteEvent(item.id)
+                                        }
+                                      }}
+                                    >
+                                      🗑 Supprimer
+                                    </span>
+                                  </div>
                                 </button>
                               )
                             })}
@@ -1468,6 +1519,43 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                   <p className="text-sm whitespace-pre-wrap">{selectedEvent.notes}</p>
                 </div>
               )}
+            </div>
+
+            <div className="px-5 pb-4 flex justify-between gap-2 border-t border-border pt-3">
+              {selectedEvent.type === 'rdv' && (selectedEvent.statut ?? 'planifie') !== 'annule' && (
+                <div className="flex gap-2">
+                  {(selectedEvent.statut ?? 'planifie') !== 'confirme' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                      onClick={() => { updateRdvStatus(selectedEvent.id, 'confirme'); setSelectedEventId(null) }}
+                    >
+                      ✓ Confirmer
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-red-700 border-red-200 hover:bg-red-50"
+                    onClick={() => { updateRdvStatus(selectedEvent.id, 'annule'); setSelectedEventId(null) }}
+                  >
+                    ✕ Annuler
+                  </Button>
+                </div>
+              )}
+              <Button
+                size="sm"
+                variant="destructive"
+                className="ml-auto"
+                onClick={() => {
+                  if (window.confirm('Supprimer définitivement cet événement ?')) {
+                    deleteEvent(selectedEvent.id)
+                  }
+                }}
+              >
+                🗑 Supprimer définitivement
+              </Button>
             </div>
           </div>
         </div>

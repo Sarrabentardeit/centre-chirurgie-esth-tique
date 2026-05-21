@@ -61,10 +61,15 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik}"
       - "traefik.http.routers.centre-est.rule=Host(`chennoufi.nav.ovh`)"
       - "traefik.http.routers.centre-est.entrypoints=websecure"
       - "traefik.http.routers.centre-est.tls=true"
       - "traefik.http.routers.centre-est.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.centre-est-http.rule=Host(`chennoufi.nav.ovh`)"
+      - "traefik.http.routers.centre-est-http.entrypoints=web"
+      - "traefik.http.routers.centre-est-http.middlewares=centre-est-redirect-https"
+      - "traefik.http.middlewares.centre-est-redirect-https.redirectscheme.scheme=https"
       - "traefik.http.services.centre-est.loadbalancer.server.port=80"
     networks:
       - default

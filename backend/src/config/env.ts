@@ -16,6 +16,12 @@ const envSchema = z.object({
   UPLOAD_DIR: z.string().default('uploads'),
   UPLOAD_MAX_FILE_SIZE_MB: z.coerce.number().default(10),
   CORS_ORIGINS: z.string().optional(),
+
+  /** Synchro Google Calendar */
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  FRONTEND_URL: z.string().url().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

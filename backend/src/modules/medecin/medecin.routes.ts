@@ -13,6 +13,8 @@ import {
   createPreDossierSchema,
 } from './medecin.schema.js'
 import * as medecinService from './medecin.service.js'
+import * as googleCalendar from '../google-calendar/google-calendar.service.js'
+import { googleCalendarCallbackRouter } from '../google-calendar/google-calendar.routes.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
@@ -36,8 +38,52 @@ const upload = multer({
 export const medecinRouter = Router()
 const paramToString = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? ''
 
+/** OAuth Google — callback public (avant auth) */
+medecinRouter.use('/google', googleCalendarCallbackRouter)
+
 medecinRouter.use(requireAuth)
 medecinRouter.use(requireRole('medecin'))
+
+// ── Google Calendar ───────────────────────────────────────────────────────────
+medecinRouter.get('/google/connect', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const url = await googleCalendar.getConnectUrl(req.auth!.sub, '/medecin/agenda')
+    res.json({ ok: true, url })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.get('/google/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const status = await googleCalendar.getSyncStatus(req.auth!.sub)
+    res.json({ ok: true, ...status })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.post('/google/disconnect', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await googleCalendar.disconnectGoogle(req.auth!.sub)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.post('/google/sync-now', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await googleCalendar.fullSync(req.auth!.sub)
+    res.json({
+      ok: true,
+      stats: { imported: result.imported, updated: result.updated, removed: result.removed },
+      pushed: result.pushed,
+      failed: result.failed,
+    })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.post('/google/push-all', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await googleCalendar.pushAllEventsToGoogle(req.auth!.sub)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 medecinRouter.get('/dashboard', async (req: Request, res: Response, next: NextFunction) => {
@@ -135,7 +181,9 @@ medecinRouter.get('/agenda', async (req: Request, res: Response, next: NextFunct
   try {
     const from = req.query.from as string | undefined
     const to   = req.query.to   as string | undefined
-    const result = await medecinService.getAgenda(req.auth!.sub, from, to)
+    const medecinId = req.auth!.sub
+    const result = await medecinService.getAgenda(medecinId, from, to)
+    googleCalendar.triggerAutoSync(medecinId)
     res.json({ ok: true, ...result })
   } catch (e) { next(e) }
 })

@@ -359,6 +359,7 @@ export interface RdvMedecin {
   id: string
   date: string
   heure: string
+  heureFin?: string
   type: string
   motif: string | null
   statut: string
@@ -507,6 +508,34 @@ export const medecinApi = {
 
   deleteAgendaEvent: (id: string) =>
     request<{ ok: true; deleted: true }>(`/medecin/agenda/${id}`, { method: 'DELETE' }),
+
+  getGoogleCalendarStatus: () =>
+    request<{
+      ok: true
+      configured: boolean
+      linked: boolean
+      googleCalendarId?: string | null
+      lastSyncAt?: string | null
+    }>('/medecin/google/status'),
+
+  getGoogleConnectUrl: () =>
+    request<{ ok: true; url: string }>('/medecin/google/connect'),
+
+  disconnectGoogleCalendar: () =>
+    request<{ ok: true; disconnected: boolean }>('/medecin/google/disconnect', { method: 'POST' }),
+
+  syncGoogleCalendarNow: () =>
+    request<{
+      ok: true
+      stats: { imported: number; updated: number; removed: number }
+      pushed: number
+      failed: number
+    }>('/medecin/google/sync-now', { method: 'POST' }),
+
+  pushAllEventsToGoogle: () =>
+    request<{ ok: true; pushed: number; failed: number }>('/medecin/google/push-all', {
+      method: 'POST',
+    }),
 
   getPostOpPatients: () =>
     request<{ ok: true; patients: PostOpPatient[] }>('/medecin/post-op'),
@@ -818,6 +847,42 @@ export const gestionnaireApi = {
 
   deleteAgendaEvent: (id: string) =>
     request<{ ok: true; deleted: true }>(`/gestionnaire/agenda/${id}`, { method: 'DELETE' }),
+
+  getGoogleCalendarStatus: (medecinId: string) =>
+    request<{
+      ok: true
+      configured: boolean
+      linked: boolean
+      googleCalendarId?: string | null
+      lastSyncAt?: string | null
+    }>(`/gestionnaire/google/status?medecinId=${encodeURIComponent(medecinId)}`),
+
+  getGoogleConnectUrl: (medecinId: string) =>
+    request<{ ok: true; url: string }>(
+      `/gestionnaire/google/connect?medecinId=${encodeURIComponent(medecinId)}`,
+    ),
+
+  disconnectGoogleCalendar: (medecinId: string) =>
+    request<{ ok: true; disconnected: boolean }>(
+      `/gestionnaire/google/disconnect?medecinId=${encodeURIComponent(medecinId)}`,
+      { method: 'POST' },
+    ),
+
+  syncGoogleCalendarNow: (medecinId: string) =>
+    request<{
+      ok: true
+      stats: { imported: number; updated: number; removed: number }
+      pushed: number
+      failed: number
+    }>(`/gestionnaire/google/sync-now?medecinId=${encodeURIComponent(medecinId)}`, {
+      method: 'POST',
+    }),
+
+  pushAllEventsToGoogle: (medecinId: string) =>
+    request<{ ok: true; pushed: number; failed: number }>(
+      `/gestionnaire/google/push-all?medecinId=${encodeURIComponent(medecinId)}`,
+      { method: 'POST' },
+    ),
 
   getUsers: (params?: {
     search?: string

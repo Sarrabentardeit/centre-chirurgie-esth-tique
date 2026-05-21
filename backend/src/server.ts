@@ -17,6 +17,7 @@ import { medecinRouter } from './modules/medecin/medecin.routes.js'
 import { gestionnaireRouter } from './modules/gestionnaire/gestionnaire.routes.js'
 import { publicRouter } from './modules/public/public.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
+import { startGoogleCalendarScheduler } from './modules/google-calendar/google-calendar.scheduler.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const allowedCorsOrigins = env.CORS_ORIGINS
@@ -132,6 +133,7 @@ app.use(errorHandler)
 // ── Démarrage ────────────────────────────────────────────────────────────────
 app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, '🚀 Serveur démarré')
+  startGoogleCalendarScheduler()
 })
 
 export default app

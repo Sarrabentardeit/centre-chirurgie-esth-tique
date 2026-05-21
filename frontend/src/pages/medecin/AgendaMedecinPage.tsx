@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Search, Plus, Ban, Plane, ChevronLeft, ChevronRight, X, Calendar } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Search, Plus, Ban, Plane, ChevronLeft, ChevronRight, X, Calendar, Link2, RefreshCw, Unlink } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
@@ -125,6 +126,16 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
     confirmer: false,
   })
   const [currentAgendaMedecinId, setCurrentAgendaMedecinId] = useState<string>('')
+  const [agendaReloadKey, setAgendaReloadKey] = useState(0)
+  const [googleStatus, setGoogleStatus] = useState<{
+    configured: boolean
+    linked: boolean
+    lastSyncAt: string | null
+  } | null>(null)
+  const [googleBusy, setGoogleBusy] = useState(false)
+  const [googleMessage, setGoogleMessage] = useState<string | null>(null)
+  const googleSyncingRef = useRef(false)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // Chargement initial : patients + liste des médecins (gestionnaire uniquement)
   useEffect(() => {
@@ -185,7 +196,7 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
         mapEvents(r.events ?? [])
       }).catch(() => {})
     }
-  }, [user?.id, mode, selectedMedecin])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id, mode, selectedMedecin, agendaReloadKey])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const patients = apiPatients
   const rdv = apiRdv
@@ -196,6 +207,114 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
   }, [mode, apiMedecins, user])
 
   const medecinDefault = selectedMedecin || medecins[0]?.id || ''
+
+  const loadGoogleStatus = async (medecinId: string) => {
+    if (!medecinId) return
+    try {
+      const r =
+        mode === 'gestionnaire'
+          ? await gestionnaireApi.getGoogleCalendarStatus(medecinId)
+          : await medecinApi.getGoogleCalendarStatus()
+      setGoogleStatus({
+        configured: r.configured,
+        linked: r.linked,
+        lastSyncAt: r.lastSyncAt ?? null,
+      })
+    } catch {
+      setGoogleStatus(null)
+    }
+  }
+
+  const runAutoGoogleSync = useCallback(
+    async (medecinId: string) => {
+      if (!medecinId || googleSyncingRef.current) return
+      googleSyncingRef.current = true
+      setGoogleBusy(true)
+      try {
+        await (mode === 'gestionnaire'
+          ? gestionnaireApi.syncGoogleCalendarNow(medecinId)
+          : medecinApi.syncGoogleCalendarNow())
+        setAgendaReloadKey((k) => k + 1)
+        await loadGoogleStatus(medecinId)
+      } catch {
+        /* synchro silencieuse — le scheduler serveur réessaiera */
+      } finally {
+        googleSyncingRef.current = false
+        setGoogleBusy(false)
+      }
+    },
+    [mode],
+  )
+
+  useEffect(() => {
+    if (mode === 'gestionnaire' && !medecinDefault) return
+    void loadGoogleStatus(medecinDefault)
+  }, [mode, medecinDefault])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Synchro automatique dès que le médecin est lié à Google (ou changement de médecin)
+  useEffect(() => {
+    if (!googleStatus?.linked || !medecinDefault) return
+    void runAutoGoogleSync(medecinDefault)
+  }, [googleStatus?.linked, medecinDefault, runAutoGoogleSync])
+
+  // Synchro périodique tant que la page agenda est ouverte
+  useEffect(() => {
+    if (!googleStatus?.linked || !medecinDefault) return
+    const timer = window.setInterval(() => void runAutoGoogleSync(medecinDefault), 120_000)
+    return () => window.clearInterval(timer)
+  }, [googleStatus?.linked, medecinDefault, runAutoGoogleSync])
+
+  useEffect(() => {
+    const g = searchParams.get('google')
+    if (g === 'linked') {
+      setGoogleMessage('Google Calendar lié — synchronisation automatique en cours.')
+      searchParams.delete('google')
+      setSearchParams(searchParams, { replace: true })
+      if (medecinDefault) {
+        void loadGoogleStatus(medecinDefault).then(() => runAutoGoogleSync(medecinDefault))
+      }
+    } else if (g === 'error') {
+      setGoogleMessage('Connexion Google Calendar annulée ou refusée.')
+      searchParams.delete('google')
+      setSearchParams(searchParams, { replace: true })
+    }
+  }, [searchParams, setSearchParams, medecinDefault, runAutoGoogleSync])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleLinkGoogle = async () => {
+    const mid = mode === 'gestionnaire' ? medecinDefault : undefined
+    if (mode === 'gestionnaire' && !mid) return
+    setGoogleBusy(true)
+    setGoogleMessage(null)
+    try {
+      const r =
+        mode === 'gestionnaire' && mid
+          ? await gestionnaireApi.getGoogleConnectUrl(mid)
+          : await medecinApi.getGoogleConnectUrl()
+      window.location.href = r.url
+    } catch (e) {
+      setGoogleMessage(e instanceof Error ? e.message : 'Impossible de lancer la connexion Google.')
+      setGoogleBusy(false)
+    }
+  }
+
+  const handleDisconnectGoogle = async () => {
+    const mid = mode === 'gestionnaire' ? medecinDefault : undefined
+    if (mode === 'gestionnaire' && !mid) return
+    setGoogleBusy(true)
+    try {
+      if (mode === 'gestionnaire' && mid) {
+        await gestionnaireApi.disconnectGoogleCalendar(mid)
+      } else {
+        await medecinApi.disconnectGoogleCalendar()
+      }
+      setGoogleMessage('Google Calendar déconnecté.')
+      await loadGoogleStatus(medecinDefault)
+    } catch (e) {
+      setGoogleMessage(e instanceof Error ? e.message : 'Échec de la déconnexion.')
+    } finally {
+      setGoogleBusy(false)
+    }
+  }
 
   const planned = useMemo(
     () =>
@@ -223,11 +342,11 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
         medecinId: currentAgendaMedecinId || user?.id || '',
         date: override?.date ?? item.date,
         start: override?.start ?? item.heure,
-        end: override?.end ?? item.heure,
+        end: override?.end ?? item.heureFin ?? item.heure,
         type: 'rdv' as const,
         patientId: item.patient?.id,
-        title: item.patient?.user.fullName ?? item.type,
-        motif: item.motif ?? undefined,
+        title: item.patient?.user.fullName ?? item.type ?? 'RDV',
+        motif: item.motif ?? item.type ?? undefined,
         statut: rdvStatusOverrides[item.id] ?? normalizeRdvStatut(item.statut),
         _apiId: item.id,
       }
@@ -483,6 +602,53 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
           Gestion globale des rendez-vous médecins et patientes.
         </p>
       </div>
+
+      {googleStatus?.configured && (
+        <Card className="border-brand-200/60 bg-brand-50/40">
+          <CardContent className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-brand-700" />
+                Google Calendar
+                {googleStatus.linked ? (
+                  <Badge variant="success" className="text-[10px]">Connecté</Badge>
+                ) : (
+                  <Badge variant="secondary" className="text-[10px]">Non connecté</Badge>
+                )}
+              </p>
+              {googleStatus.linked ? (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  {googleBusy && <RefreshCw className="h-3 w-3 animate-spin text-brand-700" />}
+                  Synchronisation automatique active (agenda ↔ Google Calendar).
+                  {googleStatus.lastSyncAt && (
+                    <> Dernière synchro : {new Date(googleStatus.lastSyncAt).toLocaleString('fr-FR')}</>
+                  )}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Liez une seule fois le Google Calendar du médecin ; la synchro se fera ensuite automatiquement.
+                </p>
+              )}
+              {googleMessage && (
+                <p className="text-xs text-brand-800">{googleMessage}</p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {!googleStatus.linked ? (
+                <Button size="sm" variant="brand" className="gap-1.5" disabled={googleBusy} onClick={() => void handleLinkGoogle()}>
+                  <Link2 className="h-4 w-4" />
+                  Lier Google Calendar
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" className="gap-1.5 text-destructive" disabled={googleBusy} onClick={() => void handleDisconnectGoogle()}>
+                  <Unlink className="h-4 w-4" />
+                  Déconnecter
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="pt-4 space-y-3">

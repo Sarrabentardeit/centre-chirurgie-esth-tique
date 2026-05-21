@@ -8,6 +8,7 @@ import type {
   CreatePreDossierInput,
 } from './medecin.schema.js'
 import bcrypt from 'bcryptjs'
+import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 
 async function notifyGestionnaires(input: {
   titre: string
@@ -681,6 +682,7 @@ export async function getAgenda(medecinId: string, from?: string, to?: string) {
       // L'agenda frontend attend YYYY-MM-DD (pas un datetime ISO complet)
       date:   e.dateDebut.toISOString().slice(0, 10),
       heure:  `${e.dateDebut.getHours().toString().padStart(2, '0')}:${e.dateDebut.getMinutes().toString().padStart(2, '0')}`,
+      heureFin: `${e.dateFin.getHours().toString().padStart(2, '0')}:${e.dateFin.getMinutes().toString().padStart(2, '0')}`,
       type:   e.title ?? 'RDV',
       motif:  e.motif ?? null,
       statut: e.statut ?? 'planifie',
@@ -715,6 +717,7 @@ export async function createAgendaEvent(medecinId: string, input: CreateAgendaEv
     entityId: event.id,
     after: event,
   })
+  void googleCalendar.pushEventToGoogle(event.id)
   return { event }
 }
 
@@ -748,12 +751,14 @@ export async function updateAgendaEvent(
     before: existing,
     after: event,
   })
+  void googleCalendar.pushEventToGoogle(event.id)
   return { event }
 }
 
 export async function deleteAgendaEvent(medecinId: string, eventId: string) {
   const existing = await prisma.agendaEvent.findFirst({ where: { id: eventId, medecinId } })
   if (!existing) throw new AppError(404, 'EVENT_NOT_FOUND', 'Événement introuvable.')
+  void googleCalendar.deleteEventFromGoogle(medecinId, existing.googleEventId)
   await prisma.agendaEvent.delete({ where: { id: eventId } })
   await writeAuditLog({
     actorId: medecinId,

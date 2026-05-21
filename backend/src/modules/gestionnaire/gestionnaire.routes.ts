@@ -14,6 +14,7 @@ import {
 } from './gestionnaire.schema.js'
 import { createAgendaEventSchema, updateAgendaEventSchema } from '../medecin/medecin.schema.js'
 import * as gestionnaireService from './gestionnaire.service.js'
+import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 
 function pid(v: string | string[] | undefined): string {
   const s = Array.isArray(v) ? v[0] : v
@@ -220,12 +221,67 @@ gestionnaireRouter.get('/analytics', async (_req: Request, res: Response, next: 
   }
 })
 
+function queryMedecinId(req: Request): string | undefined {
+  return typeof req.query.medecinId === 'string' ? req.query.medecinId : undefined
+}
+
+gestionnaireRouter.get('/google/connect', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const medecinId = queryMedecinId(req)
+    if (!medecinId) throw new AppError(400, 'MEDECIN_REQUIRED', 'medecinId requis.')
+    const url = await googleCalendar.getConnectUrl(medecinId, '/gestionnaire/agenda')
+    res.json({ ok: true, url })
+  } catch (e) { next(e) }
+})
+
+gestionnaireRouter.get('/google/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const medecinId = queryMedecinId(req)
+    if (!medecinId) throw new AppError(400, 'MEDECIN_REQUIRED', 'medecinId requis.')
+    const status = await googleCalendar.getSyncStatus(medecinId)
+    res.json({ ok: true, ...status })
+  } catch (e) { next(e) }
+})
+
+gestionnaireRouter.post('/google/disconnect', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const medecinId = queryMedecinId(req)
+    if (!medecinId) throw new AppError(400, 'MEDECIN_REQUIRED', 'medecinId requis.')
+    const result = await googleCalendar.disconnectGoogle(medecinId)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+gestionnaireRouter.post('/google/sync-now', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const medecinId = queryMedecinId(req)
+    if (!medecinId) throw new AppError(400, 'MEDECIN_REQUIRED', 'medecinId requis.')
+    const result = await googleCalendar.fullSync(medecinId)
+    res.json({
+      ok: true,
+      stats: { imported: result.imported, updated: result.updated, removed: result.removed },
+      pushed: result.pushed,
+      failed: result.failed,
+    })
+  } catch (e) { next(e) }
+})
+
+gestionnaireRouter.post('/google/push-all', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const medecinId = queryMedecinId(req)
+    if (!medecinId) throw new AppError(400, 'MEDECIN_REQUIRED', 'medecinId requis.')
+    const result = await googleCalendar.pushAllEventsToGoogle(medecinId)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
 gestionnaireRouter.get('/agenda', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined
     const to = typeof req.query.to === 'string' ? req.query.to : undefined
     const medecinId = typeof req.query.medecinId === 'string' ? req.query.medecinId : undefined
     const result = await gestionnaireService.getAgendaForGestionnaire(from, to, medecinId)
+    if (medecinId) googleCalendar.triggerAutoSync(medecinId)
     res.json({ ok: true, ...result })
   } catch (e) {
     next(e)

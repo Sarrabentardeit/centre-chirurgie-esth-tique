@@ -89,7 +89,8 @@ model User {
   sessions     Session[]
   messages     Message[]
   notifications Notification[]
-  agendaEvents  AgendaEvent[]
+  agendaEvents       AgendaEvent[]
+  googleCalendarSync GoogleCalendarSync?
 
   @@map("users")
 }
@@ -229,24 +230,42 @@ model Devis {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model AgendaEvent {
-  id          String          @id @default(uuid())
-  medecinId   String          @map("medecin_id")
-  type        AgendaEventType
-  title       String?
-  motif       String?
-  dateDebut   DateTime        @map("date_debut")
-  dateFin     DateTime        @map("date_fin")
-  allDay      Boolean         @default(false) @map("all_day")
-  patientId   String?         @map("patient_id")
-  statut      RdvStatut?
-  notes       String?
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
+  id             String          @id @default(uuid())
+  medecinId      String          @map("medecin_id")
+  type           AgendaEventType
+  title          String?
+  motif          String?
+  dateDebut      DateTime        @map("date_debut")
+  dateFin        DateTime        @map("date_fin")
+  allDay         Boolean         @default(false) @map("all_day")
+  patientId      String?         @map("patient_id")
+  statut         RdvStatut?
+  notes          String?
+  googleEventId  String?         @unique @map("google_event_id")
+  lastSyncedFrom String?         @map("last_synced_from")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
   medecin User     @relation(fields: [medecinId], references: [id], onDelete: Cascade)
   patient Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
 
   @@map("agenda_events")
+}
+
+model GoogleCalendarSync {
+  id               String    @id @default(uuid())
+  medecinId        String    @unique @map("medecin_id")
+  googleCalendarId String    @default("primary") @map("google_calendar_id")
+  refreshToken     String    @map("refresh_token")
+  accessToken      String?   @map("access_token")
+  tokenExpiresAt   DateTime? @map("token_expires_at")
+  lastSyncAt       DateTime? @map("last_sync_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  medecin User @relation(fields: [medecinId], references: [id], onDelete: Cascade)
+
+  @@map("google_calendar_sync")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import type {
   UpsertDevisDraftInput,
 } from './gestionnaire.schema.js'
 import type { CreateAgendaEventInput, UpdateAgendaEventInput } from '../medecin/medecin.schema.js'
+import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 
 const patientListInclude = {
   user: { select: { fullName: true, email: true, createdAt: true } },
@@ -1086,6 +1087,7 @@ export async function getAgendaForGestionnaire(from?: string, to?: string, medec
       id: e.id,
       date: e.dateDebut.toISOString().slice(0, 10),
       heure: `${e.dateDebut.getHours().toString().padStart(2, '0')}:${e.dateDebut.getMinutes().toString().padStart(2, '0')}`,
+      heureFin: `${e.dateFin.getHours().toString().padStart(2, '0')}:${e.dateFin.getMinutes().toString().padStart(2, '0')}`,
       type: e.title ?? 'RDV',
       motif: e.motif ?? null,
       statut: e.statut ?? 'planifie',
@@ -1123,6 +1125,7 @@ export async function createAgendaEventByGestionnaire(actorId: string, input: Cr
       after: event as never,
     },
   })
+  void googleCalendar.pushEventToGoogle(event.id)
   return { event }
 }
 
@@ -1154,12 +1157,14 @@ export async function updateAgendaEventByGestionnaire(actorId: string, eventId: 
       after: event as never,
     },
   })
+  void googleCalendar.pushEventToGoogle(event.id)
   return { event }
 }
 
 export async function deleteAgendaEventByGestionnaire(actorId: string, eventId: string) {
   const existing = await prisma.agendaEvent.findUnique({ where: { id: eventId } })
   if (!existing) throw new AppError(404, 'EVENT_NOT_FOUND', 'Événement introuvable.')
+  void googleCalendar.deleteEventFromGoogle(existing.medecinId, existing.googleEventId)
   await prisma.agendaEvent.delete({ where: { id: eventId } })
   await prisma.auditLog.create({
     data: {

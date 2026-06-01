@@ -113,9 +113,6 @@ export function replaceDevisAmountPlaceholders(html: string, totalTnd: number): 
 export function buildDevisAmountSentence(totalTnd: number): string {
   const totalStr = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(totalTnd)
   const letters = amountTndInWords(totalTnd)
-  const euroNum = tndToEuroApprox(totalTnd)
-  const euroLetters = amountEuroInWords(totalTnd)
-  const euroNumStr = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(euroNum)
 
-  return `La totalité des frais de votre séjour médical s'élève à ${letters} Dinars Tunisiens (${totalStr} dt) soit à peu près (selon le cours de change du jour amené à évoluer) ${euroLetters} (${euroNumStr}) euros.`
+  return `La totalité des frais de votre séjour médical s'élève à ${letters} Dinars Tunisiens (${totalStr} dt).`
 }

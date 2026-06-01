@@ -33,6 +33,52 @@ export interface ParsedSejourMeta {
   noteSejour: string
 }
 
+export const CLINIQUE_CHOIX = {
+  didon: 'Didon Clinic La Soukra',
+  amen: 'Clinique Amen La Marsa',
+  autre: '__autre__',
+} as const
+
+export const HOTEL_CHOIX = {
+  mouradi: 'Mouradi Gammarth',
+  darMarsa: 'Hotel Dar Marsa La Soukra',
+  autre: '__autre__',
+} as const
+
+export type CliniqueChoiceKey = keyof typeof CLINIQUE_CHOIX | ''
+export type HotelChoiceKey = keyof typeof HOTEL_CHOIX | ''
+
+export function cliniqueNomFromChoice(choice: string, autre: string): string {
+  if (choice === 'didon') return CLINIQUE_CHOIX.didon
+  if (choice === 'amen') return CLINIQUE_CHOIX.amen
+  if (choice === 'autre') return autre.trim()
+  return ''
+}
+
+export function hotelNomFromChoice(choice: string, autre: string): string {
+  if (choice === 'mouradi') return HOTEL_CHOIX.mouradi
+  if (choice === 'darMarsa') return HOTEL_CHOIX.darMarsa
+  if (choice === 'autre') return autre.trim()
+  return ''
+}
+
+/** Restaure le choix liste / autre à partir d’un nom enregistré. */
+export function resolveCliniqueFromNom(nom: string): { choice: string; autre: string } {
+  const n = nom.trim()
+  if (!n) return { choice: '', autre: '' }
+  if (n === CLINIQUE_CHOIX.didon || /didon/i.test(n)) return { choice: 'didon', autre: '' }
+  if (n === CLINIQUE_CHOIX.amen || /amen/i.test(n)) return { choice: 'amen', autre: '' }
+  return { choice: 'autre', autre: n }
+}
+
+export function resolveHotelFromNom(nom: string): { choice: string; autre: string } {
+  const n = nom.trim()
+  if (!n) return { choice: '', autre: '' }
+  if (n === HOTEL_CHOIX.mouradi || /mouradi/i.test(n)) return { choice: 'mouradi', autre: '' }
+  if (n === HOTEL_CHOIX.darMarsa || /dar marsa|soukra/i.test(n)) return { choice: 'darMarsa', autre: '' }
+  return { choice: 'autre', autre: n }
+}
+
 export function parseSejourMeta(notes: string | null | undefined): ParsedSejourMeta {
   const lines = (notes ?? '').split('\n')
   return {

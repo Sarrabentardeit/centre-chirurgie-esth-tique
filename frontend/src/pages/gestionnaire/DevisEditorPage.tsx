@@ -7,28 +7,26 @@ import TextAlign from '@tiptap/extension-text-align'
 import { Color } from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
-import {
-  ArrowLeft, Printer, RotateCcw, CheckCircle2,
-  Bold, Italic, Underline as UnderlineIcon,
-  AlignLeft, AlignCenter, AlignRight,
-  List, ListOrdered, Undo2, Redo2, Palette, RefreshCw,
-} from 'lucide-react'
+import { ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw } from 'lucide-react'
+import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
 import { parseSejourMeta } from '@/lib/devisSejourNotes'
+import { formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
+import { buildDevisAmountSentence, replaceDevisAmountPlaceholders } from '@/lib/moneyWords'
+import { DEVIS_HEADER_SUBTITLE, DEVIS_SIGNATURE, buildDevisSignatureHtml } from '@/lib/devisBranding'
+import {
+  DEVIS_ACCENT,
+  DEVIS_CHARTE,
+  buildDevisPrintStyles,
+  devisFieldRow,
+  devisHighlightBox,
+  devisLabel,
+  devisSectionHeading,
+  devisSeparator,
+} from '@/lib/devisCharte'
+// RichDocToolbar — barre d'outils partagée avec Planning séjour
 
-/* ─────────────────────────────────────────────────────────
-   CONSTANTES
-───────────────────────────────────────────────────────── */
-const OG = '#c75000'
 const CONTENT_BREAK = '|||EDITOR_BREAK|||'
-
-const TOOLBAR_COLORS = [
-  { label: 'Noir',    value: '#1a1a1a' },
-  { label: 'Orange',  value: OG        },
-  { label: 'Rouge',   value: '#c0392b' },
-  { label: 'Bleu',    value: '#1d4ed8' },
-  { label: 'Gris',    value: '#6b7280' },
-]
 
 /* ─────────────────────────────────────────────────────────
    CSS GLOBAL (éditeur + impression)
@@ -38,7 +36,7 @@ const GLOBAL_CSS = `
   font-family: Arial, Helvetica, sans-serif;
   font-size: 12.5px;
   line-height: 1.6;
-  color: #1a1a1a;
+  color: ${DEVIS_CHARTE.charcoal};
   outline: none;
   min-height: 20px;
 }
@@ -46,11 +44,11 @@ const GLOBAL_CSS = `
 .ProseMirror ul,
 .ProseMirror ol { padding-left: 20px; margin: 3px 0; }
 .ProseMirror li { margin: 1px 0; }
-.ProseMirror hr { border: none; border-top: 1px solid #e5e7eb; margin: 14px 0 12px; }
+.ProseMirror hr { border: none; border-top: 1px solid ${DEVIS_CHARTE.rose}; margin: 14px 0 12px; }
 .ProseMirror strong { font-weight: 700; }
 .ProseMirror em { font-style: italic; }
 .ProseMirror u { text-decoration: underline; }
-.ProseMirror mark { background: #fde68a; padding: 0 1px; }
+.ProseMirror mark { background: ${DEVIS_CHARTE.cream}; padding: 0 1px; }
 .ProseMirror li { break-inside: avoid; page-break-inside: avoid; }
 .doc-shell .tiptap { min-height: 0; }
 
@@ -149,6 +147,39 @@ function sejourPdfFromPatient(p: GestionnairePatientDetail) {
   return { dureeHosp, cliniqueRetenue, postHospLabel, hotelSejour, dureeTotale, sejourLine }
 }
 
+const SEJOUR_CONV_START = '<!-- DEVIS_SEJOUR_CONV -->'
+const SEJOUR_CONV_END = '<!-- /DEVIS_SEJOUR_CONV -->'
+
+type SejourPdfValues = ReturnType<typeof sejourPdfFromPatient>
+
+function buildSejourConvalescenceHtml(sv: SejourPdfValues): string {
+  return `${SEJOUR_CONV_START}
+${devisSectionHeading('Détails de votre séjour de convalescence :')}
+${devisFieldRow('Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)}
+${devisFieldRow('Hôtel de séjour sélectionné :', sv.hotelSejour)}
+${devisFieldRow("Nombre d'adultes :", '1')}
+${devisFieldRow('Nbr Enfants (2 – 12 ans) :', '0')}
+${devisFieldRow('Type de chambre :', 'Single')}
+${devisFieldRow('Arrangement :', "Pension Complète (la pension n'inclut pas les dépenses personnelles tel que téléphone, boissons, les soins de beauté, les excursions…)")}
+${SEJOUR_CONV_END}`
+}
+
+/** Met à jour hôtel / nuits depuis le devis (même si le HTML a été sauvegardé avant). */
+function refreshConvalescenceInTopHtml(html: string, p: GestionnairePatientDetail): string {
+  const sv = sejourPdfFromPatient(p)
+  const fresh = buildSejourConvalescenceHtml(sv)
+  const blockRe = new RegExp(`${SEJOUR_CONV_START}[\\s\\S]*?${SEJOUR_CONV_END}`)
+  let out = blockRe.test(html) ? html.replace(blockRe, fresh) : html
+  out = out.replace(/<p>[^<]*Nbr Bébés[^<]*<\/p>\s*/gi, '')
+  if (!blockRe.test(html) && sv.hotelSejour !== '—') {
+    out = out.replace(
+      /(Hôtel de séjour sélectionné\s*:\s*<\/span>\s*<span[^>]*>)([^<]*)(<\/span>)/i,
+      `$1${sv.hotelSejour}$3`,
+    )
+  }
+  return out
+}
+
 /* ─────────────────────────────────────────────────────────
    GÉNÉRATION HTML PARTIE HAUTE
    (date → récap → diagnostic → détails → examens → offre de prix inclut/exclut)
@@ -201,12 +232,12 @@ function buildTopHtml(p: GestionnairePatientDetail): string {
   }
   examHtml += `<p>Prévoir une copie papier des rapports médicaux pour la constitution de votre dossier médical à l'entrée de la clinique.</p>`
 
-  /* Raccourcis HTML */
-  const o = (t: string) => `<span style="color:${OG};font-weight:700">${t}</span>`
-  const h = (t: string) => `<p style="margin-top:8px"><strong><u>${t}</u></strong></p>`
-  const f = (label: string, val: string) => `<p>${o(label)} <span style="color:#1a1a1a">${val}</span></p>`
-
-  const ref  = `Devis ${p.dossierNumber}/${new Date().getFullYear()}`
+  const activeDevis =
+    p.devis?.find((d) => d.statut === 'brouillon') ??
+    p.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut)) ??
+    p.devis?.[0] ??
+    null
+  const ref  = formatDevisTitle(activeDevis, p.dossierNumber)
   const date = `Tunis le ${todayFr()}`
 
   return `
@@ -216,49 +247,42 @@ function buildTopHtml(p: GestionnairePatientDetail): string {
 <p>Nous vous remercions de la confiance que vous nous avez accordée.</p>
 <p>Suite à votre demande de devis, nous avons le plaisir de vous faire parvenir ci-dessous notre meilleure offre pour l'organisation de votre séjour médical en Tunisie.</p>
 <p></p>
-<p style="text-align:center"><strong style="color:${OG}">${ref}</strong></p>
+<p style="text-align:center"><strong style="color:${DEVIS_ACCENT}">${ref}</strong></p>
 <p></p>
 
-${h('Récapitulatif de votre demande :')}
-${f('Intervention souhaitée :', inter)}
-${f('Nom Prénom :', nom)}
-${f('Âge / Mensurations :', ageMens)}
-${f('Traitement en cours :', trait)}
-${f('Allergie :', allerg)}
-${f('Antécédents médicaux :', antecMed)}
-${f('Antécédents chirurgicaux :', antecCh)}
-${f('Adresse :', adresse)}
-${f('Tél. Mobile :', tel)}
+${devisSectionHeading('Récapitulatif de votre demande :')}
+${devisFieldRow('Intervention souhaitée :', inter)}
+${devisFieldRow('Nom Prénom :', nom)}
+${devisFieldRow('Âge / Mensurations :', ageMens)}
+${devisFieldRow('Traitement en cours :', trait)}
+${devisFieldRow('Allergie :', allerg)}
+${devisFieldRow('Antécédents médicaux :', antecMed)}
+${devisFieldRow('Antécédents chirurgicaux :', antecCh)}
+${devisFieldRow('Adresse :', adresse)}
+${devisFieldRow('Tél. Mobile :', tel)}
 <p></p>
 
-${h('Diagnostic du chirurgien : Dr CHENNOUFI Mehdi')}
+${devisSectionHeading('Diagnostic du chirurgien : Dr CHENNOUFI Mehdi')}
 <p>${diagnostic.replace(/\n/g, '<br/>')}</p>
 <p></p>
-<p>${o('Durée TOTALE du séjour :')} <strong>${sv.dureeTotale}</strong></p>
+${devisHighlightBox('Durée TOTALE du séjour :', sv.dureeTotale)}
 
-<div style="height:0;margin:18px 0 14px;border-top:1px solid #e5e7eb" aria-hidden="true"></div>
+${devisSeparator()}
 
-${h("Détails de l'intervention :")}
-${f('Intervention proposée :', interRec)}
-${f("Type d'anesthésie :", anesthType)}
-${f("Durée d'Intervention :", '—')}
-${f("Durée d'Hospitalisation :", sv.dureeHosp)}
-${f('Clinique retenue :', sv.cliniqueRetenue)}
-${f("Durée d'arrêt de travail (depuis l'intervention) :", '15 jours en moyenne')}
-${f('Chirurgien traitant :', 'Dr. CHENNOUFI Mehdi')}
+${devisSectionHeading("Détails de l'intervention :")}
+${devisFieldRow('Intervention proposée :', interRec)}
+${devisFieldRow("Type d'anesthésie :", anesthType)}
+${devisFieldRow("Durée d'Intervention :", '—')}
+${devisFieldRow("Durée d'Hospitalisation :", sv.dureeHosp)}
+${devisFieldRow('Clinique retenue :', sv.cliniqueRetenue)}
+${devisFieldRow("Durée d'arrêt de travail (depuis l'intervention) :", '15 jours en moyenne')}
+${devisFieldRow('Chirurgien traitant :', 'Dr. CHENNOUFI Mehdi')}
 <p></p>
 
-${h('Détails de votre séjour de convalescence :')}
-${f('Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)}
-${f('Hôtel de séjour sélectionné :', sv.hotelSejour)}
-${f("Nombre d'adultes :", '1')}
-${f('Nbr Bébés (0 – 2 ans) :', '0')}
-${f('Nbr Enfants (2 – 12 ans) :', '0')}
-${f('Type de chambre :', 'Single')}
-${f('Arrangement :', "Pension Complète (la pension n'inclut pas les dépenses personnelles tel que téléphone, boissons, les soins de beauté, les excursions…)")}
+${buildSejourConvalescenceHtml(sv)}
 <p></p>
 
-${h("À titre de traitement préventif, prenez 2 semaines avant l'intervention :")}
+${devisSectionHeading("À titre de traitement préventif, prenez 2 semaines avant l'intervention :")}
 <ul>
 <li>Tardyferon 80mg : 2 comprimés par jour pour traitement préventif de l'Anémie</li>
 <li>Arnica montana 9 CH à raison de 5 granulés (4 fois par jour)</li>
@@ -266,12 +290,12 @@ ${h("À titre de traitement préventif, prenez 2 semaines avant l'intervention :
 </ul>
 <p></p>
 
-${h('Examens médicaux nécessaires avant votre arrivée en Tunisie : (Validité Maximum 3 mois)')}
+${devisSectionHeading('Examens médicaux nécessaires avant votre arrivée en Tunisie : (Validité Maximum 3 mois)')}
 ${examHtml}
 <p></p>
 
-${h('Offre de prix :')}
-<p>${o('Votre devis inclut :')}</p>
+${devisSectionHeading('Offre de prix :')}
+<p>${devisLabel('Votre devis inclut :')}</p>
 <ul>
 <li>Assistance depuis votre arrivée à l'aéroport de Tunis-Carthage et jusqu'à votre départ,</li>
 <li>Transferts multiples aéroport/hôtel et hôtel/clinique,</li>
@@ -286,7 +310,7 @@ ${h('Offre de prix :')}
 </ul>
 <p></p>
 
-<p>${o('Notre forfait exclut :')}</p>
+<p>${devisLabel('Notre forfait exclut :')}</p>
 <ul>
 <li>Les vols aller-retour,</li>
 <li>Les dépenses personnelles (extras à l'hôtel ou à la clinique tels que les boissons, téléphone, etc…),</li>
@@ -302,104 +326,20 @@ ${h('Offre de prix :')}
    (total en lettres → modalités → validité → clôture)
 ───────────────────────────────────────────────────────── */
 function buildBottomHtml(total: number): string {
-  const totalStr = fmtNum(total)
-  const o = (t: string) => `<span style="color:${OG};font-weight:700">${t}</span>`
+  const amountLine = buildDevisAmountSentence(total)
 
   return `
-<p>La totalité des frais de votre séjour médical s'élève à <em>[montant en lettres]</em> Dinars Tunisiens (${totalStr} dt) soit à peu près (selon le cours de change du jour amené à évoluer) <em>[montant en euros]</em> euros.</p>
+<p>${amountLine}</p>
 <p></p>
-<p><strong>${o('Modalités de paiement :')}</strong></p>
+<p><strong>${devisLabel('Modalités de paiement :')}</strong></p>
 <p>Elle devra être réglée en dinars tunisiens et en espèces et ce au moment de votre admission à la clinique en Tunisie.</p>
 <p>Les cartes de crédit ne sont pas acceptées.</p>
 <p></p>
-<p><strong>${o("Validité de l'offre :")}</strong></p>
+<p><strong>${devisLabel("Validité de l'offre :")}</strong></p>
 <p>La présente offre de prix sera valable pour une durée de trois (3) mois à compter de ce jour et seulement en période hors saison pour les hôtels (hors juillet/août et décembre).</p>
 <p></p>
 <p>Nous espérons que notre offre de prix vous agréera et nous tenons à votre entière disposition pour vous conseiller au mieux pour réussir votre séjour.</p>
 `
-}
-
-/* ─────────────────────────────────────────────────────────
-   BARRE D'OUTILS
-───────────────────────────────────────────────────────── */
-function ToolBtn({ active, onClick, title, children }: {
-  active?: boolean; onClick: () => void; title: string; children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onMouseDown={(e) => { e.preventDefault(); onClick() }}
-      className={`h-8 w-8 flex items-center justify-center rounded-lg text-sm transition-colors ${
-        active
-          ? 'bg-slate-900 text-white'
-          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-function ToolSep() {
-  return <div className="w-px h-5 bg-slate-200 mx-1 shrink-0" />
-}
-
-function Toolbar({ editor }: { editor: Editor | null }) {
-  const [colorOpen, setColorOpen] = useState(false)
-  if (!editor) return null
-
-  return (
-    <div className="no-print relative flex items-center gap-0.5 px-3 py-2 bg-white border-b border-slate-200 flex-wrap">
-      <ToolBtn title="Annuler"  onClick={() => editor.chain().focus().undo().run()}><Undo2  className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolBtn title="Refaire"  onClick={() => editor.chain().focus().redo().run()}><Redo2  className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolSep />
-      <ToolBtn active={editor.isActive('bold')}      title="Gras"      onClick={() => editor.chain().focus().toggleBold().run()}><Bold          className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolBtn active={editor.isActive('italic')}    title="Italique"  onClick={() => editor.chain().focus().toggleItalic().run()}><Italic        className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolBtn active={editor.isActive('underline')} title="Souligner" onClick={() => editor.chain().focus().toggleUnderline().run()}><UnderlineIcon className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolBtn active={editor.isActive('highlight')} title="Surligner" onClick={() => editor.chain().focus().toggleHighlight().run()}>
-        <span className="text-xs font-bold" style={{ background: '#fde68a', padding: '0 2px', borderRadius: 2 }}>A</span>
-      </ToolBtn>
-      <ToolSep />
-      <ToolBtn active={editor.isActive({ textAlign: 'left' })}   title="Aligner à gauche" onClick={() => editor.chain().focus().setTextAlign('left').run()}>  <AlignLeft  className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolBtn active={editor.isActive({ textAlign: 'center' })} title="Centrer"          onClick={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolBtn active={editor.isActive({ textAlign: 'right' })}  title="Aligner à droite" onClick={() => editor.chain().focus().setTextAlign('right').run()}> <AlignRight  className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolSep />
-      <ToolBtn active={editor.isActive('bulletList')}  title="Liste à puces"     onClick={() => editor.chain().focus().toggleBulletList().run()}>  <List        className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolBtn active={editor.isActive('orderedList')} title="Liste numérotée"   onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-3.5 w-3.5" /></ToolBtn>
-      <ToolSep />
-      <div className="relative">
-        <ToolBtn title="Couleur du texte" onClick={() => setColorOpen(v => !v)}>
-          <Palette className="h-3.5 w-3.5" />
-        </ToolBtn>
-        {colorOpen && (
-          <div
-            className="absolute top-full left-0 mt-1 z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-2 flex gap-1.5"
-            onMouseLeave={() => setColorOpen(false)}
-          >
-            {TOOLBAR_COLORS.map(c => (
-              <button
-                key={c.value}
-                title={c.label}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  editor.chain().focus().setColor(c.value).run()
-                  setColorOpen(false)
-                }}
-                className="w-6 h-6 rounded-full border-2 border-white shadow ring-1 ring-slate-200 hover:scale-110 transition-transform"
-                style={{ background: c.value }}
-              />
-            ))}
-            <input
-              type="color"
-              className="w-6 h-6 rounded cursor-pointer border border-slate-200"
-              title="Couleur personnalisée"
-              onInput={(e) => editor.chain().focus().setColor((e.target as HTMLInputElement).value).run()}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -452,10 +392,12 @@ export default function DevisEditorPage() {
       if (dv?.customContent?.trim()) {
         if (dv.customContent.includes(CONTENT_BREAK)) {
           const [top, bot] = dv.customContent.split(CONTENT_BREAK)
-          setInitialTopHtml(top ?? buildTopHtml(p))
-          setInitialBottomHtml(bot ?? buildBottomHtml(total))
+          const topRaw = refreshConvalescenceInTopHtml(top ?? buildTopHtml(p), p)
+          setInitialTopHtml(topRaw)
+          const bottomRaw = bot ?? buildBottomHtml(total)
+          setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total))
         } else {
-          setInitialTopHtml(dv.customContent)
+          setInitialTopHtml(refreshConvalescenceInTopHtml(dv.customContent, p))
           setInitialBottomHtml(buildBottomHtml(total))
         }
       } else {
@@ -552,10 +494,26 @@ export default function DevisEditorPage() {
       ?? patient.devis?.find(d => ['envoye', 'accepte'].includes(d.statut))
       ?? null
     const total = (dv?.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-    editorTop?.commands.setContent(buildTopHtml(patient))
+    editorTop?.commands.setContent(refreshConvalescenceInTopHtml(buildTopHtml(patient), patient))
     editorBot?.commands.setContent(buildBottomHtml(total))
     setSaved(false)
   }
+
+  /* Calculs financiers (utilisés par l’aperçu et l’export PDF) */
+  const dv = patient?.devis?.find((d) => d.statut === 'brouillon')
+    ?? patient?.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
+    ?? null
+  const rap = patient?.rapports?.[0]
+  const lignes = dv?.lignes ?? []
+  const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+  const devisHeaderRef =
+    getDevisDisplayNumber(dv, patient?.dossierNumber) || patient?.dossierNumber || ''
+
+  const interventionLabel = (rap?.interventionsRecommandees ?? []).filter(Boolean).join(' + ')
+  const sejourLine = patient ? sejourPdfFromPatient(patient).sejourLine : ''
+  const firstLigneLabel = lignes.find((l) => l.description?.trim())?.description.trim() ?? ''
+  const operationTitle =
+    interventionLabel || firstLigneLabel || 'Séjour médical personnalisé'
 
   /* Export PDF — HTML construit depuis le contenu TipTap (pas depuis le DOM React) */
   const handlePrint = () => {
@@ -582,7 +540,7 @@ export default function DevisEditorPage() {
     <thead>
       <tr>
         <th class="col-desc">Description</th>
-        <th class="col-price">Tarif en <span style="color:${OG}">dt</span><br/><span class="price-sub">(Ferme et définitif)</span></th>
+        <th class="col-price">Tarif en <span style="color:${DEVIS_ACCENT}">dt</span><br/><span class="price-sub">(Ferme et définitif)</span></th>
       </tr>
     </thead>
     <tbody>
@@ -601,91 +559,8 @@ export default function DevisEditorPage() {
 <html lang="fr">
 <head>
   <meta charset="utf-8"/>
-  <title>Devis ${patient?.dossierNumber ?? ''}</title>
-  <style>
-    /* ── Réinitialisation ── */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    /* ── Page : margin:0 supprime date/URL/titre du navigateur ── */
-    @page { size: A4 portrait; margin: 0mm; }
-    html, body {
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 12px;
-      line-height: 1.55;
-      color: #1a1a1a;
-      background: #fff;
-      margin: 0; padding: 0;
-    }
-
-    /* ── Table trick : thead se répète sur chaque page imprimée ── */
-    .page-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-
-    /* En-tête répété (logo + réf) */
-    .page-table > thead > tr > td {
-      padding: 8mm 14mm 5mm;
-      border-bottom: 1px solid #e5e7eb;
-    }
-
-    /* Corps du document */
-    .page-table > tbody > tr > td {
-      padding: 6mm 14mm 0;
-      vertical-align: top;
-    }
-
-    /* Pied vide répété (espace réservé en bas de chaque page) */
-    .page-table > tfoot > tr > td {
-      height: 10mm;
-      padding: 0 14mm;
-    }
-
-    /* ── Texte ── */
-    p  { margin: 2px 0; }
-    ul, ol { padding-left: 18px; margin: 4px 0; }
-    li { margin: 1px 0; }
-    strong { font-weight: 700; }
-    em { font-style: italic; }
-    u  { text-decoration: underline; }
-    mark { background: #fde68a; padding: 0 1px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-
-    /* ── En-tête ── */
-    .doc-header { display: flex; justify-content: space-between; align-items: center; }
-    .doc-header img.logo { width: 52px; height: 52px; object-fit: contain; }
-    .doc-header .header-right { text-align: right; font-size: 10px; color: #6b7280; line-height: 1.4; }
-    .doc-header .header-ref  { font-weight: 700; color: ${OG}; }
-
-    /* ── Corps (top + bottom TipTap) ── */
-    .doc-body p { margin: 2px 0; }
-    .doc-body ul, .doc-body ol { padding-left: 18px; margin: 4px 0; }
-    .doc-body li { margin: 1px 0; }
-    .doc-body hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0 10px; }
-
-    /* ── Tableau offre ── */
-    .section-hr { border: none; border-top: 1px solid #d1d5db; margin: 12px 0 10px; }
-    .section-title { font-weight: 700; text-decoration: underline; font-size: 12.5px; margin-bottom: 8px; }
-    .offer-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-    .offer-table th, .offer-table td {
-      border: 1.5px solid #374151;
-      padding: 7px 10px;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    .col-desc  { text-align: left; width: 72%; background: #f9fafb; font-weight: 700; }
-    .col-price { text-align: center; background: #f9fafb; font-weight: 700; }
-    .price-sub { display: block; font-size: 9px; font-weight: 500; color: #6b7280; }
-    .desc-cell { vertical-align: top; }
-    .price-cell { text-align: center; vertical-align: middle; font-weight: 700; font-size: 20px; letter-spacing: .02em; }
-    .op-title  { font-weight: 700; color: ${OG}; background: #f3f4f6; padding: 6px 10px; border-radius: 3px; }
-    .sejour-badge { display: inline-block; margin-top: 6px; font-weight: 600; font-size: 11px;
-                    color: #854d0e; background: #fef9c3; padding: 4px 10px; border-radius: 3px; }
-    .offer-block { break-inside: avoid; page-break-inside: avoid; }
-
-    /* ── Signature ── */
-    .signature-block { margin-top: 18px; text-align: right; break-inside: avoid; page-break-inside: avoid; break-before: avoid; page-break-before: avoid; }
-    .signature-block .sig-name { font-weight: 700; font-size: 12.5px; }
-    .signature-block .sig-sub  { font-size: 11px; color: #555; margin-top: 1px; }
-    .signature-block img.sig-img { width: 90px; height: 46px; object-fit: contain; display: block; margin-left: auto; margin-top: 4px; }
-    .signature-block .sig-line { width: 140px; height: 1px; border-bottom: 1px solid #d1d5db; margin-left: auto; margin-top: 4px; }
-  </style>
+  <title>Devis ${devisHeaderRef}</title>
+  <style>${buildDevisPrintStyles()}</style>
 </head>
 <body>
   <table class="page-table">
@@ -696,8 +571,8 @@ export default function DevisEditorPage() {
         <div class="doc-header">
           <img class="logo" src="${logoUrl}" alt="Logo" onerror="this.style.display='none'"/>
           <div class="header-right">
-            <div class="header-ref">${patient?.dossierNumber ?? ''}</div>
-            <div>Dr. CHENNOUFI Mehdi — Chirurgie Esthétique</div>
+            <div class="header-ref">${devisHeaderRef}</div>
+            <div class="header-sub">${DEVIS_HEADER_SUBTITLE}</div>
           </div>
         </div>
       </td></tr>
@@ -714,12 +589,7 @@ export default function DevisEditorPage() {
         <div class="doc-body">${topHtml}</div>
         ${tableHtml}
         <div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div>
-        <div class="signature-block">
-          <div class="sig-name">Dr CHENNOUFI Mehdi</div>
-          <div class="sig-sub">Chirurgie Esthétique</div>
-          <img class="sig-img" src="${sigUrl}" alt="Signature" onerror="this.style.display='none'"/>
-          <div class="sig-line"></div>
-        </div>
+        ${buildDevisSignatureHtml(sigUrl)}
       </td></tr>
     </tbody>
 
@@ -748,20 +618,6 @@ export default function DevisEditorPage() {
     }
     setTimeout(waitAndPrint, 200)
   }
-
-  /* Calculs financiers */
-  const dv = patient?.devis?.find(d => d.statut === 'brouillon')
-    ?? patient?.devis?.find(d => ['envoye', 'accepte'].includes(d.statut))
-    ?? null
-  const rap = patient?.rapports?.[0]
-  const lignes = dv?.lignes ?? []
-  const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-
-  const interventionLabel = (rap?.interventionsRecommandees ?? []).filter(Boolean).join(' + ')
-  const sejourLine = patient ? sejourPdfFromPatient(patient).sejourLine : ''
-  const firstLigneLabel = lignes.find((l) => l.description?.trim())?.description.trim() ?? ''
-  const operationTitle =
-    interventionLabel || firstLigneLabel || 'Séjour médical personnalisé'
 
   /* ── États chargement / erreur ── */
   if (loading) return (
@@ -824,7 +680,7 @@ export default function DevisEditorPage() {
           <button
             onClick={handlePrint}
             className="flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-white rounded-lg transition-colors"
-            style={{ background: OG }}
+            style={{ background: DEVIS_ACCENT }}
           >
             <Printer className="h-3.5 w-3.5" /> Exporter PDF
           </button>
@@ -841,7 +697,7 @@ export default function DevisEditorPage() {
       )}
 
       {/* ══ Toolbar ══ */}
-      <Toolbar editor={activeZone === 'top' ? editorTop : editorBot} />
+      <RichDocToolbar editor={activeZone === 'top' ? editorTop : editorBot} />
 
       {/* ══ Document A4 ══ */}
       <div className="editor-scroll flex-1 overflow-auto py-8 px-4 flex justify-center bg-white">
@@ -854,7 +710,7 @@ export default function DevisEditorPage() {
             fontFamily: 'Arial, Helvetica, sans-serif',
             fontSize: 12.5,
             lineHeight: 1.6,
-            color: '#1a1a1a',
+            color: DEVIS_CHARTE.charcoal,
             boxSizing: 'border-box',
             backgroundColor: '#ffffff',
             display: 'flex',
@@ -872,9 +728,9 @@ export default function DevisEditorPage() {
                 onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
               />
             </div>
-            <div style={{ textAlign: 'right', fontSize: 11, color: '#6b7280', lineHeight: 1.5 }}>
-              <p style={{ fontWeight: 700, color: OG, margin: 0 }}>{patient.dossierNumber}</p>
-              <p style={{ margin: '2px 0 0' }}>Dr. CHENNOUFI Mehdi — Chirurgie Esthétique</p>
+            <div style={{ textAlign: 'right', fontSize: 11, color: DEVIS_CHARTE.gray, lineHeight: 1.5 }}>
+              <p style={{ fontWeight: 700, color: DEVIS_ACCENT, margin: 0 }}>{devisHeaderRef}</p>
+              <p style={{ margin: '2px 0 0', color: DEVIS_CHARTE.gray }}>{DEVIS_HEADER_SUBTITLE}</p>
             </div>
           </div>
 
@@ -887,33 +743,34 @@ export default function DevisEditorPage() {
           {lignes.length > 0 && (
             <div className="avoid-break" style={{ flexShrink: 0 }}>
               <div style={{ height: 1, background: '#e5e7eb', margin: '0 0 12px' }} aria-hidden />
-              <p style={{ fontWeight: 700, textDecoration: 'underline', marginBottom: 10, fontSize: 13, color: '#1a1a1a' }}>
+              <p style={{ fontWeight: 700, textDecoration: 'underline', marginBottom: 10, fontSize: 13, color: DEVIS_CHARTE.teal }}>
                 Notre meilleure offre :
               </p>
               <table className="doc-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    <th style={{ border: '1.5px solid #374151', padding: '7px 10px', textAlign: 'left', fontWeight: 700, background: '#f9fafb', width: '72%' }}>
+                    <th style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '7px 10px', textAlign: 'left', fontWeight: 700, background: DEVIS_CHARTE.cream, color: DEVIS_CHARTE.teal, width: '72%' }}>
                       Description
                     </th>
-                    <th style={{ border: '1.5px solid #374151', padding: '7px 10px', textAlign: 'center', fontWeight: 700, background: '#f9fafb' }}>
-                      Tarif en <span style={{ color: OG }}>dt</span>
-                      <span style={{ display: 'block', fontSize: 10, fontWeight: 600, color: '#6b7280' }}>(Ferme et définitif)</span>
+                    <th style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '7px 10px', textAlign: 'center', fontWeight: 700, background: DEVIS_CHARTE.cream, color: DEVIS_CHARTE.teal }}>
+                      Tarif en <span style={{ color: DEVIS_ACCENT }}>dt</span>
+                      <span style={{ display: 'block', fontSize: 10, fontWeight: 600, color: DEVIS_CHARTE.gray }}>(Ferme et définitif)</span>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td style={{ border: '1.5px solid #374151', padding: '10px 10px', verticalAlign: 'top' }}>
+                    <td style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '10px 10px', verticalAlign: 'top' }}>
                       <p
                         style={{
                           margin: 0,
                           fontWeight: 700,
-                          color: OG,
+                          color: DEVIS_ACCENT,
                           lineHeight: 1.5,
-                          background: '#f3f4f6',
+                          background: DEVIS_CHARTE.cream,
                           padding: '8px 10px',
                           borderRadius: 4,
+                          borderLeft: `3px solid ${DEVIS_CHARTE.teal}`,
                         }}
                       >
                         {operationTitle}
@@ -924,8 +781,8 @@ export default function DevisEditorPage() {
                             margin: '8px 0 0',
                             fontWeight: 600,
                             fontSize: 12,
-                            color: '#854d0e',
-                            background: '#fef9c3',
+                          color: DEVIS_ACCENT,
+                          background: DEVIS_CHARTE.rose,
                             padding: '6px 10px',
                             borderRadius: 4,
                             display: 'inline-block',
@@ -936,7 +793,7 @@ export default function DevisEditorPage() {
                         </p>
                       ) : null}
                     </td>
-                    <td style={{ border: '1.5px solid #374151', padding: '10px', textAlign: 'center', verticalAlign: 'middle', fontWeight: 700, fontSize: 22, letterSpacing: '0.01em' }}>
+                    <td style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '10px', textAlign: 'center', verticalAlign: 'middle', fontWeight: 700, fontSize: 22, letterSpacing: '0.01em', color: DEVIS_CHARTE.charcoal }}>
                       {fmtNum(total)}
                     </td>
                   </tr>
@@ -952,8 +809,11 @@ export default function DevisEditorPage() {
 
           <div className="avoid-break" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
             <div style={{ textAlign: 'right' }}>
-              <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>Dr CHENNOUFI Mehdi</p>
-              <p style={{ fontSize: 12, color: '#555', margin: '2px 0 0' }}>Chirurgie Esthétique</p>
+              <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{DEVIS_SIGNATURE.cabinet}</p>
+              <p style={{ fontSize: 12, color: '#555', margin: '2px 0 0' }}>{DEVIS_SIGNATURE.specialty}</p>
+              <p style={{ fontSize: 11, color: DEVIS_ACCENT, fontWeight: 600, margin: '4px 0 0', letterSpacing: '0.03em' }}>
+                {DEVIS_SIGNATURE.tagline}
+              </p>
               <img
                 src="/signature.jpg"
                 alt="Signature"

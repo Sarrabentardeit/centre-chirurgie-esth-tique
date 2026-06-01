@@ -6,6 +6,7 @@ import { AppError } from '../../middleware/errorHandler.js'
 import {
   createUserByGestionnaireSchema,
   logistiqueSchema,
+  planningSejourSchema,
   refuseDevisSchema,
   saveDevisContentSchema,
   updateUserByGestionnaireSchema,
@@ -15,6 +16,7 @@ import {
 import { createAgendaEventSchema, updateAgendaEventSchema } from '../medecin/medecin.schema.js'
 import * as gestionnaireService from './gestionnaire.service.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
+import { getTndEurRate } from '../../lib/exchangeRate.js'
 
 function pid(v: string | string[] | undefined): string {
   const s = Array.isArray(v) ? v[0] : v
@@ -26,6 +28,15 @@ export const gestionnaireRouter = Router()
 
 gestionnaireRouter.use(requireAuth)
 gestionnaireRouter.use(requireRole('gestionnaire'))
+
+gestionnaireRouter.get('/taux-eur', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rate = await getTndEurRate()
+    res.json({ ok: true, ...rate })
+  } catch (e) {
+    next(e)
+  }
+})
 
 gestionnaireRouter.get('/dashboard', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -160,6 +171,50 @@ gestionnaireRouter.put(
     try {
       const result = await gestionnaireService.upsertLogistique(req.auth!.sub, pid(req.params.patientId), req.body)
       res.json(result)
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+gestionnaireRouter.get('/planning-sejour', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await gestionnaireService.getPlanningSejourPatients()
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+gestionnaireRouter.get('/planning-sejour/:patientId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await gestionnaireService.getPlanningSejourDetail(pid(req.params.patientId))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+gestionnaireRouter.post('/planning-sejour/:patientId/generer', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await gestionnaireService.generatePlanningSejour(req.auth!.sub, pid(req.params.patientId))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+gestionnaireRouter.put(
+  '/planning-sejour/:patientId',
+  validate(planningSejourSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.upsertPlanningSejour(
+        req.auth!.sub,
+        pid(req.params.patientId),
+        req.body
+      )
+      res.json({ ok: true, ...result })
     } catch (e) {
       next(e)
     }

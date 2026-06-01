@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import type {
   CreateUserByGestionnaireInput,
   LogistiqueInput,
+  PlanningSejourInput,
   RefuseDevisInput,
   UpdateUserByGestionnaireInput,
   UpdateTemplateInput,
@@ -11,6 +12,11 @@ import type {
 } from './gestionnaire.schema.js'
 import type { CreateAgendaEventInput, UpdateAgendaEventInput } from '../medecin/medecin.schema.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
+import { generateNextDevisNumber } from '../../lib/devisNumber.js'
+import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
+
+/** Liste planning séjour : uniquement dossiers « devis accepté » (pas les étapes suivantes). */
+const PLANNING_SEJOUR_STATUSES = ['devis_accepte'] as const
 
 const patientListInclude = {
   user: { select: { fullName: true, email: true, createdAt: true } },
@@ -141,6 +147,24 @@ function generateDossierNumber(): string {
   const year = new Date().getFullYear()
   const suffix = Math.floor(100000 + Math.random() * 900000)
   return `DOS-${year}-${suffix}`
+}
+
+async function assignNumeroDevisWithRetry(
+  createData: Parameters<typeof prisma.devis.create>[0]['data'],
+): Promise<Awaited<ReturnType<typeof prisma.devis.create>>> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const numeroDevis = await generateNextDevisNumber(prisma)
+    try {
+      return await prisma.devis.create({
+        data: { ...createData, numeroDevis },
+      })
+    } catch (err) {
+      const code = (err as { code?: string })?.code
+      if (code === 'P2002' && attempt < 4) continue
+      throw err
+    }
+  }
+  throw new Error('Impossible de générer un numéro de devis unique.')
 }
 
 export async function getDashboard(gestionnaireUserId: string) {
@@ -353,17 +377,21 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
 
   let devis
   if (draft) {
+    const updateData: Parameters<typeof prisma.devis.update>[0]['data'] = {
+      gestionnaireId,
+      lignes: lignesJson,
+      total: input.total,
+      planningMedical: input.planningMedical ?? null,
+      notesSejour: input.notesSejour ?? null,
+      currency: input.currency ?? 'EUR',
+      ...(dateValidite ? { dateValidite } : {}),
+    }
+    if (!draft.numeroDevis) {
+      updateData.numeroDevis = await generateNextDevisNumber(prisma)
+    }
     devis = await prisma.devis.update({
       where: { id: draft.id },
-      data: {
-        gestionnaireId,
-        lignes: lignesJson,
-        total: input.total,
-        planningMedical: input.planningMedical ?? null,
-        notesSejour: input.notesSejour ?? null,
-        currency: input.currency ?? 'EUR',
-        ...(dateValidite ? { dateValidite } : {}),
-      },
+      data: updateData,
     })
   } else {
     const last = await prisma.devis.findFirst({
@@ -372,19 +400,17 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       select: { version: true },
     })
     const version = (last?.version ?? 0) + 1
-    devis = await prisma.devis.create({
-      data: {
-        patientId,
-        gestionnaireId,
-        statut: 'brouillon',
-        version,
-        lignes: lignesJson,
-        total: input.total,
-        planningMedical: input.planningMedical ?? null,
-        notesSejour: input.notesSejour ?? null,
-        currency: input.currency ?? 'EUR',
-        dateValidite,
-      },
+    devis = await assignNumeroDevisWithRetry({
+      patientId,
+      gestionnaireId,
+      statut: 'brouillon',
+      version,
+      lignes: lignesJson,
+      total: input.total,
+      planningMedical: input.planningMedical ?? null,
+      notesSejour: input.notesSejour ?? null,
+      currency: input.currency ?? 'EUR',
+      dateValidite,
     })
   }
 
@@ -651,6 +677,227 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
   })
 
   return { ok: true as const }
+}
+
+async function loadPlanningSejourContext(patientId: string) {
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    include: {
+      user: { select: { fullName: true, email: true } },
+      rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
+      devis: {
+        where: { statut: { in: ['envoye', 'accepte'] } },
+        orderBy: { dateCreation: 'desc' },
+        take: 1,
+      },
+    },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const log = await prisma.logistique.findUnique({ where: { patientId } })
+  const rapport = patient.rapports[0] ?? null
+  const devis = patient.devis[0] ?? null
+
+  return {
+    patient,
+    rapport,
+    devis,
+    log,
+    source: {
+      fullName: patient.user.fullName,
+      dossierNumber: patient.dossierNumber,
+      ville: patient.ville,
+      pays: patient.pays,
+      phone: patient.phone,
+      dateNaissance: patient.dateNaissance,
+      rapport: rapport
+        ? {
+            interventionsRecommandees: rapport.interventionsRecommandees,
+            nuitsClinique: rapport.nuitsClinique,
+            notes: rapport.notes,
+          }
+        : null,
+      devis: devis
+        ? {
+            numeroDevis: devis.numeroDevis,
+            planningMedical: devis.planningMedical,
+            notesSejour: devis.notesSejour,
+          }
+        : null,
+      logistique: log
+        ? {
+            dateArrivee: log.dateArrivee,
+            dateDepart: log.dateDepart,
+            hebergement: log.hebergement,
+            transport: log.transport,
+            accompagnateur: log.accompagnateur,
+            notesClinique: log.notesClinique,
+          }
+        : null,
+    },
+  }
+}
+
+export async function getPlanningSejourPatients() {
+  const patients = await prisma.patient.findMany({
+    where: { status: { in: [...PLANNING_SEJOUR_STATUSES] } },
+    include: { user: { select: { fullName: true, email: true } } },
+    orderBy: { updatedAt: 'desc' },
+  })
+
+  const rows = await prisma.planningSejour.findMany({
+    where: { patientId: { in: patients.map((p) => p.id) } },
+  })
+  const map = new Map(rows.map((r) => [r.patientId, r]))
+
+  return {
+    patients: patients.map((p) => {
+      const pl = map.get(p.id)
+      return {
+        id: p.id,
+        dossierNumber: p.dossierNumber,
+        status: p.status,
+        ville: p.ville,
+        pays: p.pays,
+        user: p.user,
+        planning: pl
+          ? {
+              id: pl.id,
+              moisLabel: pl.moisLabel,
+              statut: pl.statut,
+              updatedAt: pl.updatedAt.toISOString(),
+              hasContent: Boolean(pl.content?.trim()),
+            }
+          : null,
+      }
+    }),
+  }
+}
+
+export async function getPlanningSejourDetail(patientId: string) {
+  const ctx = await loadPlanningSejourContext(patientId)
+  const row = await prisma.planningSejour.findUnique({ where: { patientId } })
+  const moisDefault = moisLabelFromDate(ctx.log?.dateArrivee ?? null)
+
+  return {
+    patient: {
+      id: ctx.patient.id,
+      dossierNumber: ctx.patient.dossierNumber,
+      status: ctx.patient.status,
+      ville: ctx.patient.ville,
+      pays: ctx.patient.pays,
+      user: ctx.patient.user,
+    },
+    planning: row
+      ? {
+          id: row.id,
+          content: row.content,
+          moisLabel: row.moisLabel ?? moisDefault,
+          statut: row.statut,
+          updatedAt: row.updatedAt.toISOString(),
+        }
+      : null,
+    moisLabelDefault: moisDefault,
+    logistique: ctx.log
+      ? {
+          dateArrivee: ctx.log.dateArrivee?.toISOString().slice(0, 10) ?? null,
+          dateDepart: ctx.log.dateDepart?.toISOString().slice(0, 10) ?? null,
+          hebergement: ctx.hebergement ?? null,
+          transport: ctx.log.transport ?? null,
+          accompagnateur: ctx.log.accompagnateur ?? null,
+        }
+      : null,
+  }
+}
+
+export async function generatePlanningSejour(gestionnaireId: string, patientId: string) {
+  const ctx = await loadPlanningSejourContext(patientId)
+  if (!PLANNING_SEJOUR_STATUSES.includes(ctx.patient.status as (typeof PLANNING_SEJOUR_STATUSES)[number])) {
+    throw new AppError(400, 'PATIENT_STATUS', 'Le planning séjour est disponible après acceptation du devis.')
+  }
+
+  const moisLabel = moisLabelFromDate(ctx.log?.dateArrivee ?? null)
+  const content = buildPlanningSejourHtml({ ...ctx.source, moisLabel })
+
+  const row = await prisma.planningSejour.upsert({
+    where: { patientId },
+    update: { content, moisLabel, statut: 'brouillon' },
+    create: { patientId, content, moisLabel, statut: 'brouillon' },
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'create',
+      entity: 'planning_sejour',
+      entityId: row.id,
+      after: { patientId, moisLabel } as never,
+    },
+  })
+
+  return {
+    planning: {
+      id: row.id,
+      content: row.content,
+      moisLabel: row.moisLabel,
+      statut: row.statut,
+      updatedAt: row.updatedAt.toISOString(),
+    },
+  }
+}
+
+export async function upsertPlanningSejour(
+  gestionnaireId: string,
+  patientId: string,
+  input: PlanningSejourInput
+) {
+  const ctx = await loadPlanningSejourContext(patientId)
+  if (!PLANNING_SEJOUR_STATUSES.includes(ctx.patient.status as (typeof PLANNING_SEJOUR_STATUSES)[number])) {
+    throw new AppError(400, 'PATIENT_STATUS', 'Le planning séjour est disponible après acceptation du devis.')
+  }
+
+  const existing = await prisma.planningSejour.findUnique({ where: { patientId } })
+  const moisLabel =
+    input.moisLabel !== undefined && input.moisLabel !== null
+      ? input.moisLabel
+      : (existing?.moisLabel ?? moisLabelFromDate(ctx.log?.dateArrivee ?? null))
+
+  const row = await prisma.planningSejour.upsert({
+    where: { patientId },
+    update: {
+      ...(input.content !== undefined ? { content: input.content } : {}),
+      moisLabel,
+      ...(input.statut ? { statut: input.statut } : {}),
+    },
+    create: {
+      patientId,
+      content: input.content ?? '',
+      moisLabel,
+      statut: input.statut ?? 'brouillon',
+    },
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'update',
+      entity: 'planning_sejour',
+      entityId: row.id,
+      after: { patientId, statut: row.statut } as never,
+    },
+  })
+
+  return {
+    planning: {
+      id: row.id,
+      content: row.content,
+      moisLabel: row.moisLabel,
+      statut: row.statut,
+      updatedAt: row.updatedAt.toISOString(),
+    },
+  }
 }
 
 export async function getCommunicationTemplates() {

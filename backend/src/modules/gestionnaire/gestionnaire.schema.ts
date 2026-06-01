@@ -40,6 +40,14 @@ export const logistiqueSchema = z.object({
 
 export type LogistiqueInput = z.infer<typeof logistiqueSchema>
 
+export const planningSejourSchema = z.object({
+  content: z.string().optional().nullable(),
+  moisLabel: z.string().optional().nullable(),
+  statut: z.enum(['brouillon', 'finalise']).optional(),
+})
+
+export type PlanningSejourInput = z.infer<typeof planningSejourSchema>
+
 const templateKeySchema = z.enum(['formulaireAck', 'devisSent', 'refus'])
 
 export const updateTemplateSchema = z.object({

@@ -134,6 +134,7 @@ model Patient {
   devis         Devis[]
   agendaEvents  AgendaEvent[]
   suiviPostOp   SuiviPostOp?
+  planningSejour PlanningSejour?
   messages      Message[]
 
   @@map("patients")
@@ -207,6 +208,8 @@ model Devis {
   id             String      @id @default(uuid())
   patientId      String      @map("patient_id")
   gestionnaireId String      @map("gestionnaire_id")
+  /** Référence affichée : MC-MM-NNN-AAAA */
+  numeroDevis    String?     @unique @map("numero_devis")
   statut         DevisStatut @default(brouillon)
   version        Int         @default(1)
   lignes         Json        @default("[]")
@@ -379,4 +382,22 @@ model Logistique {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@map("logistique")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLANNING SÉJOUR
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PlanningSejour {
+  id        String   @id @default(uuid())
+  patientId String   @unique @map("patient_id")
+  content   String?  @db.Text
+  moisLabel String?  @map("mois_label")
+  statut    String   @default("brouillon")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("planning_sejour")
 }

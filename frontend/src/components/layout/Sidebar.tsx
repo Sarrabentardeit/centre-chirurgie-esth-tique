@@ -2,7 +2,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar, MessageSquare,
   Bell, LogOut, Heart, ClipboardList, FileCheck,
-  Package, TrendingUp, Camera, X, UserPlus,
+  Package, TrendingUp, Camera, X, UserPlus, CalendarDays,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
@@ -44,6 +44,7 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
     { label: 'Patients', href: '/gestionnaire/patients', icon: Users },
     { label: 'Agenda', href: '/gestionnaire/agenda', icon: Calendar },
     { label: 'Devis', href: '/gestionnaire/devis', icon: FileCheck },
+    { label: 'Planning séjour', href: '/gestionnaire/planning-sejour', icon: CalendarDays },
     { label: 'Chat', href: '/gestionnaire/chat', icon: MessageSquare, badgeKey: 'chat' },
     { label: 'Communication', href: '/gestionnaire/communications', icon: MessageSquare },
     { label: 'Logistique', href: '/gestionnaire/logistique', icon: Package },

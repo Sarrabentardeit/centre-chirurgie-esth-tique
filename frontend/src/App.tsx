@@ -33,6 +33,8 @@ import DashboardGestionnairePage from './pages/gestionnaire/DashboardGestionnair
 import DevisGestionnairePage from './pages/gestionnaire/DevisGestionnairePage'
 import DevisEditorPage from './pages/gestionnaire/DevisEditorPage'
 import LogistiquePage from './pages/gestionnaire/LogistiquePage'
+import PlanningSejourPage from './pages/gestionnaire/PlanningSejourPage'
+import PlanningSejourEditorPage from './pages/gestionnaire/PlanningSejourEditorPage'
 import NotificationsPage from './pages/gestionnaire/NotificationsPage'
 import CommunicationPage from './pages/gestionnaire/CommunicationPage'
 import AnalyticsPage from './pages/gestionnaire/AnalyticsPage'
@@ -248,6 +250,22 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['gestionnaire']}>
                   <LogistiquePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/gestionnaire/planning-sejour"
+              element={
+                <ProtectedRoute allowedRoles={['gestionnaire']}>
+                  <PlanningSejourPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/gestionnaire/planning-sejour/:patientId/personnaliser"
+              element={
+                <ProtectedRoute allowedRoles={['gestionnaire']}>
+                  <PlanningSejourEditorPage />
                 </ProtectedRoute>
               }
             />

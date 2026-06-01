@@ -212,8 +212,12 @@ export async function getDevis(userId: string) {
   const patient = await prisma.patient.findUnique({ where: { userId } })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
 
+  // Seuls les devis envoyés au patient (pas les brouillons gestionnaire en cours).
   const devis = await prisma.devis.findMany({
-    where: { patientId: patient.id },
+    where: {
+      patientId: patient.id,
+      statut: { in: ['envoye', 'accepte', 'refuse'] },
+    },
     orderBy: { dateCreation: 'desc' },
   })
   return { devis }

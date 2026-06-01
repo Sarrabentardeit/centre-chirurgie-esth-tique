@@ -211,6 +211,7 @@ export interface DevisLigne {
 
 export interface Devis {
   id: string
+  numeroDevis?: string | null
   statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse'
   version: number
   lignes: DevisLigne[]
@@ -663,6 +664,32 @@ export interface GestionnaireLogistiquePatient {
   logistique: GestionnaireLogistiqueRow | null
 }
 
+export interface GestionnairePlanningSejourSummary {
+  id: string
+  moisLabel: string | null
+  statut: 'brouillon' | 'finalise'
+  updatedAt: string
+  hasContent: boolean
+}
+
+export interface GestionnairePlanningSejourPatient {
+  id: string
+  dossierNumber: string
+  status: string
+  ville: string | null
+  pays: string | null
+  user: { fullName: string; email: string }
+  planning: GestionnairePlanningSejourSummary | null
+}
+
+export interface GestionnairePlanningSejourDetail {
+  id: string
+  content: string | null
+  moisLabel: string | null
+  statut: 'brouillon' | 'finalise'
+  updatedAt: string
+}
+
 export interface GestionnaireTemplate {
   key: 'formulaireAck' | 'devisSent' | 'refus'
   title: string
@@ -717,7 +744,18 @@ export interface GestionnaireUsersStats {
   gestionnaires: number
 }
 
+export interface TndEurRateResponse {
+  ok: true
+  tndPerEur: number
+  eurPerTnd: number
+  date: string
+  source: 'exchangerate-api' | 'fallback'
+}
+
 export const gestionnaireApi = {
+  /** Taux TND → EUR (cache 24 h côté serveur, gestionnaire uniquement). */
+  getTauxEur: () => request<TndEurRateResponse>('/gestionnaire/taux-eur'),
+
   getDashboard: () =>
     request<{
       ok: true
@@ -805,6 +843,39 @@ export const gestionnaireApi = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+
+  getPlanningSejour: () =>
+    request<{ ok: true; patients: GestionnairePlanningSejourPatient[] }>('/gestionnaire/planning-sejour'),
+
+  getPlanningSejourDetail: (patientId: string) =>
+    request<{
+      ok: true
+      patient: Omit<GestionnairePlanningSejourPatient, 'planning'>
+      planning: GestionnairePlanningSejourDetail | null
+      moisLabelDefault: string
+      logistique: {
+        dateArrivee: string | null
+        dateDepart: string | null
+        hebergement: string | null
+        transport: string | null
+        accompagnateur: string | null
+      } | null
+    }>(`/gestionnaire/planning-sejour/${patientId}`),
+
+  generatePlanningSejour: (patientId: string) =>
+    request<{ ok: true; planning: GestionnairePlanningSejourDetail }>(
+      `/gestionnaire/planning-sejour/${patientId}/generer`,
+      { method: 'POST' }
+    ),
+
+  updatePlanningSejour: (
+    patientId: string,
+    body: { content?: string | null; moisLabel?: string | null; statut?: 'brouillon' | 'finalise' }
+  ) =>
+    request<{ ok: true; planning: GestionnairePlanningSejourDetail }>(
+      `/gestionnaire/planning-sejour/${patientId}`,
+      { method: 'PUT', body: JSON.stringify(body) }
+    ),
 
   getCommunicationTemplates: () =>
     request<{ ok: true; templates: GestionnaireTemplate[] }>('/gestionnaire/communication/templates'),

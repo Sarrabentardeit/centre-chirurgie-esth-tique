@@ -113,3 +113,21 @@ export function getPatientDossierNumber(patient: {
   const suffix = patient.id.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase().padStart(5, '0')
   return `DOS-${year}-${suffix}`
 }
+
+/** Référence affichée sur le PDF devis (MC-MM-NNN-AAAA). */
+export function getDevisDisplayNumber(
+  devis: { numeroDevis?: string | null } | null | undefined,
+  dossierNumber?: string | null,
+): string {
+  if (devis?.numeroDevis?.trim()) return devis.numeroDevis.trim()
+  if (dossierNumber?.trim()) return `${dossierNumber.trim()}/${new Date().getFullYear()}`
+  return ''
+}
+
+export function formatDevisTitle(
+  devis: { numeroDevis?: string | null } | null | undefined,
+  dossierNumber?: string | null,
+): string {
+  const num = getDevisDisplayNumber(devis, dossierNumber)
+  return num ? `Devis ${num}` : 'Devis'
+}

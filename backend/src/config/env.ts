@@ -30,6 +30,12 @@ const envSchema = z.object({
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined))
     .pipe(z.string().url().optional()),
+
+  /** ExchangeRate-API (v6) — conversion indicative TND → EUR (gestionnaire). */
+  EXCHANGE_RATE_API_KEY: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined)),
 })
 
 const parsed = envSchema.safeParse(process.env)

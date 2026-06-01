@@ -112,7 +112,7 @@ export function buildDevisPrintStyles(): string {
       print-color-adjust: exact;
     }
     .doc-header { display: flex; justify-content: space-between; align-items: center; }
-    .doc-header img.logo { width: 52px; height: 52px; object-fit: contain; }
+    .doc-header img.logo { width: 88px; height: 88px; object-fit: contain; }
     .doc-header .header-right { text-align: right; font-size: 10px; color: ${C.gray}; line-height: 1.4; }
     .doc-header .header-ref  { font-weight: 700; color: ${C.bronze}; }
     .doc-header .header-sub  { color: ${C.gray}; }

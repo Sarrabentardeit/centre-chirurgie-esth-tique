@@ -720,7 +720,7 @@ export default function DevisEditorPage() {
         >
           {/* ── En-tête : logo + numéro dossier ── */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0 }}>
-            <div style={{ width: 64, height: 64, overflow: 'hidden', borderRadius: 4, border: '1px solid #e5e7eb', background: '#f8f8f8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 96, height: 96, overflow: 'hidden', borderRadius: 4, border: '1px solid #e5e7eb', background: '#f8f8f8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <img
                 src="/acces-patient-logo1-crop.png"
                 alt="Logo"

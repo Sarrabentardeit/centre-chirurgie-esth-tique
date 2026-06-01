@@ -802,7 +802,7 @@ export async function getPlanningSejourDetail(patientId: string) {
       ? {
           dateArrivee: ctx.log.dateArrivee?.toISOString().slice(0, 10) ?? null,
           dateDepart: ctx.log.dateDepart?.toISOString().slice(0, 10) ?? null,
-          hebergement: ctx.hebergement ?? null,
+          hebergement: ctx.log.hebergement ?? null,
           transport: ctx.log.transport ?? null,
           accompagnateur: ctx.log.accompagnateur ?? null,
         }

@@ -13,7 +13,14 @@ import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
 import { parseSejourMeta } from '@/lib/devisSejourNotes'
 import { formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
 import { buildDevisAmountSentence, replaceDevisAmountPlaceholders } from '@/lib/moneyWords'
-import { DEVIS_HEADER_SUBTITLE, DEVIS_SIGNATURE, buildDevisSignatureHtml } from '@/lib/devisBranding'
+import {
+  DEVIS_HEADER_SUBTITLE,
+  DEVIS_LOGO_SRC,
+  DEVIS_SIGNATURE,
+  buildDevisContactFooterHtml,
+  buildDevisDocumentEndHtml,
+  buildDevisHeaderLogoHtml,
+} from '@/lib/devisBranding'
 import {
   DEVIS_ACCENT,
   DEVIS_CHARTE,
@@ -51,6 +58,42 @@ const GLOBAL_CSS = `
 .ProseMirror mark { background: ${DEVIS_CHARTE.cream}; padding: 0 1px; }
 .ProseMirror li { break-inside: avoid; page-break-inside: avoid; }
 .doc-shell .tiptap { min-height: 0; }
+
+.devis-contact-footer {
+  padding: 14px 0 4px;
+  border-top: 1px solid ${DEVIS_CHARTE.rose};
+  background: transparent;
+  text-align: center;
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+.devis-contact-footer .contact-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 3px 0;
+  color: ${DEVIS_CHARTE.charcoal};
+  text-decoration: none;
+}
+.devis-contact-footer svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke: ${DEVIS_ACCENT};
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.devis-logo-block { display: flex; flex-direction: column; align-items: center; max-width: 168px; }
+.devis-logo-block .logo-img { width: 158px; height: auto; display: block; object-fit: contain; border-radius: 6px; }
+.devis-logo-block .logo-slogan {
+  margin: 9px 0 0; padding-top: 8px; width: 100%; text-align: center;
+  font-size: 9px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
+  color: ${DEVIS_ACCENT}; border-top: 1px solid ${DEVIS_CHARTE.rose}; line-height: 1.35;
+}
 
 /* Impression directe (Ctrl+P depuis le navigateur — non utilisée normalement) */
 @media print {
@@ -177,6 +220,43 @@ function refreshConvalescenceInTopHtml(html: string, p: GestionnairePatientDetai
       `$1${sv.hotelSejour}$3`,
     )
   }
+  return out
+}
+
+/**
+ * Rafraîchit la valeur d'un champ « Label : valeur » dans le HTML sauvegardé,
+ * indépendamment des balises (robuste à la normalisation TipTap).
+ * Recherche le <p> dont le texte commence par `label` et reconstruit la ligne.
+ */
+function refreshDevisFieldByLabel(html: string, label: string, value: string): string {
+  if (typeof window === 'undefined' || !value || value === '—') return html
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const target = normalize(label)
+  let changed = false
+  for (const p of Array.from(root.querySelectorAll('p'))) {
+    if (normalize(p.textContent ?? '').startsWith(target)) {
+      const tmp = doc.createElement('div')
+      tmp.innerHTML = devisFieldRow(label, value)
+      const fresh = tmp.firstElementChild
+      if (fresh) {
+        p.replaceWith(fresh)
+        changed = true
+      }
+      break
+    }
+  }
+  return changed ? root.innerHTML : html
+}
+
+/** Synchronise clinique + hôtel (et conv.) depuis le devis actuel. */
+function refreshDossierFieldsInTopHtml(html: string, p: GestionnairePatientDetail): string {
+  const sv = sejourPdfFromPatient(p)
+  let out = refreshConvalescenceInTopHtml(html, p)
+  out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
+  out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
   return out
 }
 
@@ -392,12 +472,12 @@ export default function DevisEditorPage() {
       if (dv?.customContent?.trim()) {
         if (dv.customContent.includes(CONTENT_BREAK)) {
           const [top, bot] = dv.customContent.split(CONTENT_BREAK)
-          const topRaw = refreshConvalescenceInTopHtml(top ?? buildTopHtml(p), p)
+          const topRaw = refreshDossierFieldsInTopHtml(top ?? buildTopHtml(p), p)
           setInitialTopHtml(topRaw)
           const bottomRaw = bot ?? buildBottomHtml(total)
           setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total))
         } else {
-          setInitialTopHtml(refreshConvalescenceInTopHtml(dv.customContent, p))
+          setInitialTopHtml(refreshDossierFieldsInTopHtml(dv.customContent, p))
           setInitialBottomHtml(buildBottomHtml(total))
         }
       } else {
@@ -438,7 +518,7 @@ export default function DevisEditorPage() {
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       TextStyle,
       Color,
-      Highlight.configure({ multicolor: false }),
+      Highlight.configure({ multicolor: true }),
     ],
     content: initialTopHtml,
     onFocus: () => setActiveZone('top'),
@@ -451,7 +531,7 @@ export default function DevisEditorPage() {
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       TextStyle,
       Color,
-      Highlight.configure({ multicolor: false }),
+      Highlight.configure({ multicolor: true }),
     ],
     content: initialBottomHtml,
     onFocus: () => setActiveZone('bottom'),
@@ -528,7 +608,7 @@ export default function DevisEditorPage() {
     const popup = window.open('', '_blank', 'width=1050,height=960')
     if (!popup) { window.alert("Autorisez les popups pour exporter en PDF."); return }
 
-    const logoUrl = `${window.location.origin}/acces-patient-logo1-crop.png`
+    const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
     const sigUrl  = `${window.location.origin}/signature.jpg`
 
     /* Tableau « Notre meilleure offre » */
@@ -569,7 +649,7 @@ export default function DevisEditorPage() {
     <thead>
       <tr><td>
         <div class="doc-header">
-          <img class="logo" src="${logoUrl}" alt="Logo" onerror="this.style.display='none'"/>
+          ${buildDevisHeaderLogoHtml(logoUrl)}
           <div class="header-right">
             <div class="header-ref">${devisHeaderRef}</div>
             <div class="header-sub">${DEVIS_HEADER_SUBTITLE}</div>
@@ -589,7 +669,7 @@ export default function DevisEditorPage() {
         <div class="doc-body">${topHtml}</div>
         ${tableHtml}
         <div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div>
-        ${buildDevisSignatureHtml(sigUrl)}
+        ${buildDevisDocumentEndHtml(sigUrl)}
       </td></tr>
     </tbody>
 
@@ -689,9 +769,9 @@ export default function DevisEditorPage() {
 
       {showStaleLetterHint && (
         <div className="no-print shrink-0 mx-4 sm:mx-6 mb-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900 leading-snug">
-          <strong className="font-semibold">Contenu figé.</strong>{' '}
-          Le texte au-dessus du tableau de prix vient de votre dernière sauvegarde ici : il ne se met pas à jour tout seul
-          si vous modifiez ensuite le devis (clinique, hôtel, etc.). Pour régénérer ce bloc à partir du dossier actuel,
+          <strong className="font-semibold">Contenu personnalisable.</strong>{' '}
+          La <strong>clinique</strong> et l'<strong>hôtel</strong> se synchronisent automatiquement depuis le devis à chaque
+          ouverture. Le reste du texte vient de votre dernière sauvegarde ici. Pour tout régénérer à partir du dossier actuel,
           cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
         </div>
       )}
@@ -720,14 +800,11 @@ export default function DevisEditorPage() {
         >
           {/* ── En-tête : logo + numéro dossier ── */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0 }}>
-            <div style={{ width: 96, height: 96, overflow: 'hidden', borderRadius: 4, border: '1px solid #e5e7eb', background: '#f8f8f8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <img
-                src="/acces-patient-logo1-crop.png"
-                alt="Logo"
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-              />
-            </div>
+            <div
+              dangerouslySetInnerHTML={{
+                __html: buildDevisHeaderLogoHtml(DEVIS_LOGO_SRC),
+              }}
+            />
             <div style={{ textAlign: 'right', fontSize: 11, color: DEVIS_CHARTE.gray, lineHeight: 1.5 }}>
               <p style={{ fontWeight: 700, color: DEVIS_ACCENT, margin: 0 }}>{devisHeaderRef}</p>
               <p style={{ margin: '2px 0 0', color: DEVIS_CHARTE.gray }}>{DEVIS_HEADER_SUBTITLE}</p>
@@ -811,9 +888,6 @@ export default function DevisEditorPage() {
             <div style={{ textAlign: 'right' }}>
               <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{DEVIS_SIGNATURE.cabinet}</p>
               <p style={{ fontSize: 12, color: '#555', margin: '2px 0 0' }}>{DEVIS_SIGNATURE.specialty}</p>
-              <p style={{ fontSize: 11, color: DEVIS_ACCENT, fontWeight: 600, margin: '4px 0 0', letterSpacing: '0.03em' }}>
-                {DEVIS_SIGNATURE.tagline}
-              </p>
               <img
                 src="/signature.jpg"
                 alt="Signature"
@@ -827,6 +901,12 @@ export default function DevisEditorPage() {
               <div style={{ marginTop: 6, width: 150, height: 1, borderBottom: '1px solid #d1d5db', marginLeft: 'auto' }} />
             </div>
           </div>
+
+          <div
+            className="no-print-devis-footer"
+            dangerouslySetInnerHTML={{ __html: buildDevisContactFooterHtml() }}
+            style={{ marginTop: 20 }}
+          />
 
         </div>
       </div>

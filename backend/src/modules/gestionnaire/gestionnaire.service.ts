@@ -900,6 +900,31 @@ export async function upsertPlanningSejour(
   }
 }
 
+export async function deletePlanningSejour(gestionnaireId: string, patientId: string) {
+  const patient = await prisma.patient.findUnique({ where: { id: patientId } })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const existing = await prisma.planningSejour.findUnique({ where: { patientId } })
+  if (!existing) {
+    throw new AppError(404, 'PLANNING_NOT_FOUND', 'Aucun planning séjour enregistré pour cette patiente.')
+  }
+
+  await prisma.planningSejour.delete({ where: { patientId } })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'delete',
+      entity: 'planning_sejour',
+      entityId: existing.id,
+      before: { patientId, moisLabel: existing.moisLabel, statut: existing.statut } as never,
+    },
+  })
+
+  return { ok: true as const }
+}
+
 export async function getCommunicationTemplates() {
   const map = await getTemplateMap()
   return { templates: Object.values(map) }

@@ -877,6 +877,9 @@ export const gestionnaireApi = {
       { method: 'PUT', body: JSON.stringify(body) }
     ),
 
+  deletePlanningSejour: (patientId: string) =>
+    request<{ ok: true }>(`/gestionnaire/planning-sejour/${patientId}`, { method: 'DELETE' }),
+
   getCommunicationTemplates: () =>
     request<{ ok: true; templates: GestionnaireTemplate[] }>('/gestionnaire/communication/templates'),
 

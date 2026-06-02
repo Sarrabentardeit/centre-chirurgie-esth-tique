@@ -15,7 +15,7 @@ import type { Devis } from '@/lib/api'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { formatDevisSejourNotesForDisplay, parseSejourMeta } from '@/lib/devisSejourNotes'
 import { downloadDevisPdf } from '@/lib/pdf'
-import { DEVIS_HEADER_SUBTITLE, buildDevisSignatureHtml } from '@/lib/devisBranding'
+import { DEVIS_HEADER_SUBTITLE, DEVIS_LOGO_SRC, buildDevisDocumentEndHtml, buildDevisHeaderLogoHtml } from '@/lib/devisBranding'
 import { DEVIS_ACCENT, buildDevisPrintStyles } from '@/lib/devisCharte'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ export default function DevisPage() {
       const jours = totalNights + 1
       const sejourLine = totalNights > 0 ? `Séjour ${totalNights} nuit${totalNights > 1 ? 's' : ''} / ${jours} jour${jours > 1 ? 's' : ''}` : ''
       const fmtNum = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(n || 0))
-      const logoUrl = `${window.location.origin}/acces-patient-logo1-crop.png`
+      const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
       const sigUrl = `${window.location.origin}/signature.jpg`
       const tableHtml = lignes.length > 0 ? `
 <div class="offer-block">
@@ -157,8 +157,8 @@ export default function DevisPage() {
       const html = `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"/><title>Devis ${patientIdentity.dossierNumber}</title>
 <style>${buildDevisPrintStyles()}</style></head>
-<body><table class="page-table"><thead><tr><td><div class="doc-header"><img class="logo" src="${logoUrl}" alt="Logo" onerror="this.style.display='none'"/><div class="header-right"><div class="header-ref">${patientIdentity.dossierNumber}</div><div class="header-sub">${DEVIS_HEADER_SUBTITLE}</div></div></div></td></tr></thead>
-<tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="doc-body">${topHtml}</div>${tableHtml}<div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div>${buildDevisSignatureHtml(sigUrl)}</td></tr></tbody></table></body></html>`
+<body><table class="page-table"><thead><tr><td><div class="doc-header">${buildDevisHeaderLogoHtml(logoUrl)}<div class="header-right"><div class="header-ref">${patientIdentity.dossierNumber}</div><div class="header-sub">${DEVIS_HEADER_SUBTITLE}</div></div></div></td></tr></thead>
+<tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="doc-body">${topHtml}</div>${tableHtml}<div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div>${buildDevisDocumentEndHtml(sigUrl)}</td></tr></tbody></table></body></html>`
       const popup = window.open('', '_blank', 'width=1050,height=960')
       if (!popup) {
         setError("Autorisez les popups pour exporter en PDF.")

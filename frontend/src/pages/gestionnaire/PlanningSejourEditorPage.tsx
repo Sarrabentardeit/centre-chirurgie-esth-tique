@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
 import { DEVIS_ACCENT } from '@/lib/devisCharte'
-import { ensurePlanningDocShell } from '@/lib/planningSejourBranding'
+import { ensurePlanningDocShell, PLANNING_HIGHLIGHT_COLORS } from '@/lib/planningSejourBranding'
 import { buildPlanningSejourPrintPage, buildPlanningSejourPrintStyles } from '@/lib/planningSejourPrint'
 import { DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import {
@@ -281,7 +281,7 @@ export default function PlanningSejourEditorPage() {
         Après modification du devis ou de la logistique, cliquez <strong>Réinitialiser</strong> pour régénérer depuis le dossier.
       </div>
 
-      <RichDocToolbar editor={editor} />
+      <RichDocToolbar editor={editor} highlightColors={PLANNING_HIGHLIGHT_COLORS} />
 
       <div className="editor-scroll flex-1 overflow-auto py-8 px-4 flex justify-center bg-white">
         <div

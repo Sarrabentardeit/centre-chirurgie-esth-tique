@@ -96,8 +96,8 @@ export function buildDevisPrintStyles(): string {
       vertical-align: top;
     }
     .page-table > tfoot > tr > td {
-      height: 10mm;
-      padding: 0 14mm;
+      padding: 0;
+      vertical-align: bottom;
     }
     p  { margin: 2px 0; }
     ul, ol { padding-left: 18px; margin: 4px 0; }
@@ -111,8 +111,30 @@ export function buildDevisPrintStyles(): string {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .doc-header { display: flex; justify-content: space-between; align-items: center; }
-    .doc-header img.logo { width: 88px; height: 88px; object-fit: contain; }
+    .doc-header { display: flex; justify-content: space-between; align-items: flex-start; }
+    .devis-logo-block { display: flex; flex-direction: column; align-items: center; max-width: 168px; }
+    .devis-logo-block .logo-img {
+      width: 158px;
+      height: auto;
+      display: block;
+      object-fit: contain;
+      border-radius: 6px;
+    }
+    .devis-logo-block .logo-slogan {
+      margin: 9px 0 0;
+      padding-top: 8px;
+      width: 100%;
+      text-align: center;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: ${C.bronze};
+      border-top: 1px solid ${C.rose};
+      line-height: 1.35;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
     .doc-header .header-right { text-align: right; font-size: 10px; color: ${C.gray}; line-height: 1.4; }
     .doc-header .header-ref  { font-weight: 700; color: ${C.bronze}; }
     .doc-header .header-sub  { color: ${C.gray}; }
@@ -169,8 +191,43 @@ export function buildDevisPrintStyles(): string {
     }
     .signature-block .sig-name { font-weight: 700; font-size: 12.5px; color: ${C.charcoal}; }
     .signature-block .sig-sub  { font-size: 11px; color: ${C.gray}; margin-top: 1px; }
-    .signature-block .sig-tagline { font-size: 11px; color: ${C.bronze}; font-weight: 600; margin-top: 3px; letter-spacing: 0.03em; }
     .signature-block img.sig-img { width: 90px; height: 46px; object-fit: contain; display: block; margin-left: auto; margin-top: 4px; }
     .signature-block .sig-line { width: 140px; height: 1px; border-bottom: 1px solid ${C.rose}; margin-left: auto; margin-top: 4px; }
+    .devis-contact-footer {
+      margin-top: 20px;
+      padding: 14px 0 4px;
+      border-top: 1px solid ${C.rose};
+      background: transparent;
+      color: ${C.gray};
+      text-align: center;
+      font-size: 10.5px;
+      line-height: 1.55;
+      letter-spacing: 0.02em;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .devis-contact-footer .contact-line {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin: 3px 0;
+      color: ${C.charcoal};
+      text-decoration: none;
+    }
+    .devis-contact-footer a.contact-line:hover { color: ${C.bronze}; }
+    .devis-contact-footer svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      stroke: ${C.bronze};
+      fill: none;
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .devis-contact-footer svg path,
+    .devis-contact-footer svg polyline,
+    .devis-contact-footer svg circle { stroke: inherit; fill: none; }
   `
 }

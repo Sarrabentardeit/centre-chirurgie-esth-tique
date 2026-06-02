@@ -221,6 +221,18 @@ gestionnaireRouter.put(
   }
 )
 
+gestionnaireRouter.delete('/planning-sejour/:patientId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await gestionnaireService.deletePlanningSejour(
+      req.auth!.sub,
+      pid(req.params.patientId),
+    )
+    res.json(result)
+  } catch (e) {
+    next(e)
+  }
+})
+
 gestionnaireRouter.get('/communication/templates', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await gestionnaireService.getCommunicationTemplates()

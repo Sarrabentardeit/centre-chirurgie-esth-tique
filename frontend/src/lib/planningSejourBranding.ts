@@ -16,6 +16,18 @@ export const PLANNING_DOC = {
 export const PLANNING_HEADER_LOGO = '/planning-header-logo.png'
 export const PLANNING_FOOTER_IMAGE = '/planning-bon-sejour.png'
 
+/** Couleurs de surlignage (fluo) — barre d’outils planning séjour (+ autre couleur au sélecteur). */
+export const PLANNING_HIGHLIGHT_COLORS = [
+  { label: 'Gris clair (Word)', value: '#D9D9D9' },
+  { label: 'Jaune', value: '#FFF59D' },
+  { label: 'Saumon clair', value: '#FFE8E4' },
+  { label: 'Rose pâle', value: '#FDEADA' },
+  { label: 'Or pâle', value: '#FFF3CD' },
+  { label: 'Vert clair', value: '#E8F5E9' },
+  { label: 'Bleu clair', value: '#E3F2FD' },
+  { label: 'Lavande', value: '#EDE7F6' },
+] as const
+
 const C = PLANNING_DOC
 
 function esc(text: string): string {

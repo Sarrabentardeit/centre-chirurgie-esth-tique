@@ -6,14 +6,9 @@ import { env } from '../../config/env.js'
 import { AppError } from '../../middleware/errorHandler.js'
 import type { RegisterInput, LoginInput } from './auth.schema.js'
 import type { UserRole, JwtPayload, RefreshPayload } from './auth.types.js'
+import { generateNextMcReference } from '../../lib/devisNumber.js'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function generateDossierNumber(): string {
-  const year = new Date().getFullYear()
-  const suffix = Math.floor(100000 + Math.random() * 900000)
-  return `DOS-${year}-${suffix}`
-}
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex')
@@ -114,8 +109,8 @@ export async function register(
     },
   })
 
-  // Générer numéro dossier unique
-  let dossierNumber = generateDossierNumber()
+  // Générer numéro dossier unique (MC-MM-NNN-AAAA)
+  let dossierNumber = await generateNextMcReference(prisma)
   let patientCreated = false
   while (!patientCreated) {
     try {
@@ -135,7 +130,7 @@ export async function register(
     } catch (e: unknown) {
       const err = e as { code?: string }
       if (err?.code === 'P2002') {
-        dossierNumber = generateDossierNumber()
+        dossierNumber = await generateNextMcReference(prisma)
       } else {
         throw e
       }

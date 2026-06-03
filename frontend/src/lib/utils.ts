@@ -103,11 +103,30 @@ export function formatCurrency(amount: number, _currency: CurrencyUnit | string 
   }).format(amount)
 }
 
+const MC_REFERENCE_RE = /^MC-\d{2}-\d{3}-\d{4}$/
+
+function isMcReference(value: string | null | undefined): boolean {
+  return !!value?.trim() && MC_REFERENCE_RE.test(value.trim())
+}
+
+/** Référence dossier affichée (MC-MM-NNN-AAAA, alignée sur le devis). */
+export function getPatientDisplayReference(patient: {
+  dossierNumber: string
+  devis?: Array<{ numeroDevis?: string | null }>
+}): string {
+  const numeroDevis = patient.devis?.[0]?.numeroDevis
+  if (numeroDevis?.trim() && isMcReference(numeroDevis)) return numeroDevis.trim()
+  if (isMcReference(patient.dossierNumber)) return patient.dossierNumber.trim()
+  return patient.dossierNumber
+}
+
 export function getPatientDossierNumber(patient: {
   numeroDossier?: string
+  dossierNumber?: string
   id: string
   dateCreation?: string
 }): string {
+  if (patient.dossierNumber?.trim()) return patient.dossierNumber.trim()
   if (patient.numeroDossier?.trim()) return patient.numeroDossier
   const year = patient.dateCreation?.slice(0, 4) || String(new Date().getFullYear())
   const suffix = patient.id.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase().padStart(5, '0')
@@ -120,7 +139,7 @@ export function getDevisDisplayNumber(
   dossierNumber?: string | null,
 ): string {
   if (devis?.numeroDevis?.trim()) return devis.numeroDevis.trim()
-  if (dossierNumber?.trim()) return `${dossierNumber.trim()}/${new Date().getFullYear()}`
+  if (dossierNumber?.trim() && isMcReference(dossierNumber)) return dossierNumber.trim()
   return ''
 }
 

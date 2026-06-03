@@ -9,6 +9,11 @@ import type {
 } from './medecin.schema.js'
 import bcrypt from 'bcryptjs'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
+import {
+  generateNextMcReference,
+  resolvePatientReference,
+  syncPatientDossierFromDevis,
+} from '../../lib/devisNumber.js'
 
 async function notifyGestionnaires(input: {
   titre: string
@@ -89,10 +94,19 @@ async function syncPostOpReminders(userId: string, dateIntervention: Date) {
   }
 }
 
-function generateDossierNumber(): string {
-  const year = new Date().getFullYear()
-  const suffix = Math.floor(100000 + Math.random() * 900000)
-  return `DOS-${year}-${suffix}`
+function mapPatientListRow<T extends {
+  dossierNumber: string
+  devis?: Array<{ numeroDevis?: string | null }>
+}>(patient: T): T {
+  const numeroDevis = patient.devis?.[0]?.numeroDevis
+  return {
+    ...patient,
+    dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
+    devis: patient.devis?.map((d) => ({
+      ...d,
+      numeroDevis: d.numeroDevis ?? undefined,
+    })),
+  }
 }
 
 function buildPlaceholderEmail() {
@@ -360,8 +374,14 @@ export async function getPatients(search?: string, status?: string) {
     },
     orderBy: { updatedAt: 'desc' },
   })
+  await Promise.all(
+    patients
+      .filter((p) => p.devis?.[0]?.numeroDevis)
+      .map((p) => syncPatientDossierFromDevis(prisma, p.id, p.devis![0].numeroDevis!)),
+  )
+
   const query = search?.trim().toLowerCase()
-  if (!query) return { patients }
+  if (!query) return { patients: patients.map(mapPatientListRow) }
 
   // Support recherche par date (YYYY-MM-DD ou DD/MM/YYYY)
   const normalizedDate = (() => {
@@ -381,10 +401,13 @@ export async function getPatients(search?: string, status?: string) {
     const attentes = typeof payload.attentes === 'string' ? payload.attentes : ''
     const dateSouhaitee = typeof payload.dateSouhaitee === 'string' ? payload.dateSouhaitee : ''
 
+    const ref = resolvePatientReference(p.dossierNumber, p.devis?.[0]?.numeroDevis)
     const haystack = [
       p.user.fullName,
       p.user.email,
       p.dossierNumber,
+      ref,
+      p.devis?.[0]?.numeroDevis ?? '',
       p.phone ?? '',
       p.ville ?? '',
       p.pays ?? '',
@@ -406,7 +429,7 @@ export async function getPatients(search?: string, status?: string) {
     return false
   })
 
-  return { patients: filtered }
+  return { patients: filtered.map(mapPatientListRow) }
 }
 
 export async function createPreDossier(medecinId: string, input: CreatePreDossierInput) {
@@ -426,6 +449,7 @@ export async function createPreDossier(medecinId: string, input: CreatePreDossie
 
   for (let i = 0; i < 6; i += 1) {
     try {
+      const dossierNumber = await generateNextMcReference(prisma)
       createdPatient = await prisma.$transaction(async (tx) => {
         const user = await tx.user.create({
           data: {
@@ -438,7 +462,7 @@ export async function createPreDossier(medecinId: string, input: CreatePreDossie
         return tx.patient.create({
           data: {
             userId: user.id,
-            dossierNumber: generateDossierNumber(),
+            dossierNumber,
             phone: input.phone?.trim() || null,
             ville: input.ville?.trim() || null,
             pays: input.pays?.trim() || null,
@@ -497,7 +521,16 @@ export async function getPatientById(patientId: string) {
     },
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
-  return { patient }
+  const numeroDevis = patient.devis[0]?.numeroDevis
+  if (numeroDevis) {
+    await syncPatientDossierFromDevis(prisma, patientId, numeroDevis)
+  }
+  return {
+    patient: mapPatientListRow({
+      ...patient,
+      dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
+    }),
+  }
 }
 
 export async function updatePatient(patientId: string, input: {

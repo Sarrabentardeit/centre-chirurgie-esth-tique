@@ -12,7 +12,12 @@ import type {
 } from './gestionnaire.schema.js'
 import type { CreateAgendaEventInput, UpdateAgendaEventInput } from '../medecin/medecin.schema.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
-import { generateNextDevisNumber } from '../../lib/devisNumber.js'
+import {
+  generateNextDevisNumber,
+  generateNextMcReference,
+  resolvePatientReference,
+  syncPatientDossierFromDevis,
+} from '../../lib/devisNumber.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
 
 /** Liste planning séjour : uniquement dossiers « devis accepté » (pas les étapes suivantes). */
@@ -143,10 +148,15 @@ async function notifyGestionnaires(input: {
   }
 }
 
-function generateDossierNumber(): string {
-  const year = new Date().getFullYear()
-  const suffix = Math.floor(100000 + Math.random() * 900000)
-  return `DOS-${year}-${suffix}`
+function mapPatientListRow<T extends {
+  dossierNumber: string
+  devis?: Array<{ numeroDevis?: string | null }>
+}>(patient: T): T {
+  const numeroDevis = patient.devis?.[0]?.numeroDevis
+  return {
+    ...patient,
+    dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
+  }
 }
 
 async function assignNumeroDevisWithRetry(
@@ -250,7 +260,14 @@ export async function getPatients(search?: string, status?: string) {
     include: patientListInclude,
     orderBy: { updatedAt: 'desc' },
   })
-  return { patients }
+
+  await Promise.all(
+    patients
+      .filter((p) => p.devis?.[0]?.numeroDevis)
+      .map((p) => syncPatientDossierFromDevis(prisma, p.id, p.devis![0].numeroDevis!)),
+  )
+
+  return { patients: patients.map(mapPatientListRow) }
 }
 
 export async function getPatientById(patientId: string) {
@@ -264,7 +281,16 @@ export async function getPatientById(patientId: string) {
     },
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
-  return { patient }
+  const numeroDevis = patient.devis[0]?.numeroDevis
+  if (numeroDevis) {
+    await syncPatientDossierFromDevis(prisma, patientId, numeroDevis)
+  }
+  return {
+    patient: mapPatientListRow({
+      ...patient,
+      dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
+    }),
+  }
 }
 
 function assertPatientReadyForDevis(status: string) {
@@ -393,6 +419,9 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       where: { id: draft.id },
       data: updateData,
     })
+    if (updateData.numeroDevis && typeof updateData.numeroDevis === 'string') {
+      await syncPatientDossierFromDevis(prisma, patientId, updateData.numeroDevis)
+    }
   } else {
     const last = await prisma.devis.findFirst({
       where: { patientId },
@@ -419,6 +448,10 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       where: { id: patientId },
       data: { status: 'devis_preparation' },
     })
+  }
+
+  if (devis.numeroDevis) {
+    await syncPatientDossierFromDevis(prisma, patientId, devis.numeroDevis)
   }
 
   return { devis }
@@ -1140,7 +1173,7 @@ export async function createUserByGestionnaire(actorId: string, input: CreateUse
 
   let patient = null as null | { id: string; dossierNumber: string }
   if (input.role === 'patient') {
-    let dossierNumber = generateDossierNumber()
+    let dossierNumber = await generateNextMcReference(prisma)
     for (let i = 0; i < 6; i += 1) {
       try {
         patient = await prisma.patient.create({
@@ -1160,7 +1193,7 @@ export async function createUserByGestionnaire(actorId: string, input: CreateUse
       } catch (e: unknown) {
         const err = e as { code?: string }
         if (err?.code === 'P2002') {
-          dossierNumber = generateDossierNumber()
+          dossierNumber = await generateNextMcReference(prisma)
           continue
         }
         throw e

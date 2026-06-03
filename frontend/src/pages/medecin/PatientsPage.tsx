@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { STATUS_LABELS, STATUS_COLORS, formatRelative } from '@/lib/utils'
+import { STATUS_LABELS, STATUS_COLORS, formatRelative, getPatientDisplayReference } from '@/lib/utils'
 import type { DossierStatus } from '@/types'
 import { medecinApi, gestionnaireApi } from '@/lib/api'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
@@ -139,7 +139,7 @@ function EditModal({ patient, onClose, onSaved }: {
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <div>
             <p className="font-bold text-base">Modifier le patient</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{patient.dossierNumber}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{getPatientDisplayReference(patient)}</p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="h-5 w-5" />
@@ -228,7 +228,7 @@ function DeleteModal({ patient, onClose, onDeleted }: {
           </div>
           <div className="rounded-xl bg-muted/50 border px-4 py-3">
             <p className="font-semibold text-sm">{patient.user.fullName}</p>
-            <p className="text-xs text-muted-foreground">{patient.user.email} · {patient.dossierNumber}</p>
+            <p className="text-xs text-muted-foreground">{patient.user.email} · {getPatientDisplayReference(patient)}</p>
           </div>
           <p className="text-xs text-muted-foreground mt-3">
             Le compte, le dossier, le formulaire, les rapports et tous les fichiers associés seront définitivement supprimés.
@@ -497,7 +497,7 @@ export default function PatientsPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-sm leading-tight">{p.user.fullName}</p>
                       <span className="text-[11px] font-mono text-brand-700 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded">
-                        {p.dossierNumber}
+                        {getPatientDisplayReference(p)}
                       </span>
                       {source && (
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${source.color}`}>

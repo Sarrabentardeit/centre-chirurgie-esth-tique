@@ -340,7 +340,7 @@ export interface PatientListItem {
   updatedAt: string
   user: { fullName: string; email: string; createdAt: string }
   formulaires: Array<{ id: string; status: string; submittedAt: string | null }>
-  devis: Array<{ id: string; statut: string; total: number; dateCreation: string; updatedAt?: string; vuParPatientAt?: string | null }>
+  devis: Array<{ id: string; statut: string; total: number; dateCreation: string; numeroDevis?: string | null; updatedAt?: string; vuParPatientAt?: string | null }>
 }
 
 export interface AgendaEvent {

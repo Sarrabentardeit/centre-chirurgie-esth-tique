@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { STATUS_LABELS, STATUS_COLORS, formatRelative, getPatientDisplayReference } from '@/lib/utils'
+import { STATUS_LABELS, STATUS_COLORS, getPatientDisplayReference } from '@/lib/utils'
 import type { DossierStatus } from '@/types'
 import { medecinApi, gestionnaireApi } from '@/lib/api'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
@@ -299,12 +299,12 @@ export default function PatientsPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5 p-4 sm:p-6">
+    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-5">
 
       {/* ── Header ── */}
       <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">Patients</h2>
+        <div className="min-w-0">
+          <h2 className="text-lg sm:text-xl font-bold tracking-tight">Patients</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             {loading ? '—' : `${stats.total} patient${stats.total > 1 ? 's' : ''} enregistré${stats.total > 1 ? 's' : ''}`}
           </p>
@@ -363,14 +363,14 @@ export default function PatientsPage() {
         ].map(({ label, value, icon: Icon, iconClass, bgClass, borderClass, pulse }) => (
           <div
             key={label}
-            className={`relative rounded-2xl border ${borderClass} ${bgClass} px-4 py-4 flex items-center gap-3 overflow-hidden`}
+            className={`relative rounded-2xl border ${borderClass} ${bgClass} px-3 py-3 sm:px-4 sm:py-4 flex items-center gap-2 sm:gap-3 overflow-hidden`}
           >
-            <div className={`rounded-xl p-2.5 bg-white/80 shadow-sm ${iconClass} shrink-0`}>
+            <div className={`rounded-xl p-2 sm:p-2.5 bg-white/80 shadow-sm ${iconClass} shrink-0`}>
               <Icon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <p className="text-2xl font-bold leading-none">{loading ? '—' : value}</p>
-              <p className="text-[11px] text-muted-foreground mt-1 leading-tight">{label}</p>
+              <p className="text-xl sm:text-2xl font-bold leading-none">{loading ? '—' : value}</p>
+              <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-1 leading-tight">{label}</p>
             </div>
             {pulse && (
               <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
@@ -400,13 +400,13 @@ export default function PatientsPage() {
             </div>
           </div>
 
-          {/* Filtres pill */}
-          <div className="flex gap-1.5 flex-wrap">
+          {/* Filtres pill — scroll horizontal sur mobile */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
             {STATUS_FILTERS.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setStatusFilter(f.key)}
-                className={`rounded-full px-3 py-1 text-xs font-medium border transition-all ${
+                className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium border transition-all ${
                   statusFilter === f.key
                     ? f.key === 'all'
                       ? 'bg-foreground text-background border-foreground'
@@ -473,7 +473,7 @@ export default function PatientsPage() {
               return (
                 <div
                   key={p.id}
-                  className={`group flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4 cursor-pointer transition-all duration-150
+                  className={`group flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer transition-all duration-150
                     ${isUrgent ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-muted/40'}
                     ${idx === 0 ? '' : ''}`}
                   onClick={() =>
@@ -482,8 +482,8 @@ export default function PatientsPage() {
                 >
                   {/* Avatar */}
                   <div className="relative shrink-0">
-                    <Avatar className="h-11 w-11">
-                      <AvatarFallback className={`text-sm font-bold ${avatarCls}`}>
+                    <Avatar className="h-9 w-9 sm:h-11 sm:w-11">
+                      <AvatarFallback className={`text-xs sm:text-sm font-bold ${avatarCls}`}>
                         {getInitials(p.user.fullName)}
                       </AvatarFallback>
                     </Avatar>
@@ -493,12 +493,20 @@ export default function PatientsPage() {
                   </div>
 
                   {/* Infos principales */}
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-sm leading-tight">{p.user.fullName}</p>
-                      <span className="text-[11px] font-mono text-brand-700 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded">
-                        {getPatientDisplayReference(p)}
-                      </span>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    {/* Nom (ligne 1) */}
+                    <p className="font-semibold text-sm leading-snug truncate">{p.user.fullName}</p>
+
+                    {/* Référence dossier — toujours sur une seule ligne */}
+                    <p className="text-[10px] font-mono text-brand-700 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded w-fit whitespace-nowrap">
+                      {getPatientDisplayReference(p)}
+                    </p>
+
+                    {/* Statut + source */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Badge className={`text-[10px] font-medium ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
+                        {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
+                      </Badge>
                       {source && (
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${source.color}`}>
                           {source.label}
@@ -506,11 +514,11 @@ export default function PatientsPage() {
                       )}
                     </div>
 
-                    {/* Coordonnées */}
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    {/* Coordonnées — tablette+ */}
+                    <div className="hidden sm:flex items-center gap-2 flex-wrap">
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground min-w-0">
                         <Mail className="h-3 w-3 shrink-0" />
-                        <span className="truncate max-w-[160px]">{p.user.email}</span>
+                        <span className="truncate max-w-[180px]">{p.user.email}</span>
                       </span>
                       {p.phone && (
                         <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -527,34 +535,19 @@ export default function PatientsPage() {
                     </div>
                   </div>
 
-                  {/* Statut + dates */}
-                  <div className="shrink-0 hidden sm:flex flex-col items-end gap-1.5">
-                    <Badge className={`text-[11px] font-medium ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-                      {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
-                    </Badge>
-                    <p className="text-[10px] text-muted-foreground">{formatRelative(p.updatedAt)}</p>
-                  </div>
-
-                  {/* Badge mobile uniquement */}
-                  <div className="shrink-0 sm:hidden">
-                    <Badge className={`text-[10px] ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-                      {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
-                    </Badge>
-                  </div>
-
-                  {/* Actions (visibles au hover) */}
+                  {/* Actions — masquées sur mobile (tap = navigation vers détail) */}
                   <div className="shrink-0 flex items-center gap-1">
                     {!isGestionnaire && (
                       <>
                         <button
-                          className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                          className="h-8 w-8 hidden sm:flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                           title="Modifier"
                           onClick={(e) => { e.stopPropagation(); setEditTarget(p) }}
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                          className="h-8 w-8 hidden sm:flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                           title="Supprimer"
                           onClick={(e) => { e.stopPropagation(); setDeleteTarget(p) }}
                         >
@@ -562,7 +555,7 @@ export default function PatientsPage() {
                         </button>
                       </>
                     )}
-                    <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors hidden sm:block" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
                   </div>
                 </div>
               )

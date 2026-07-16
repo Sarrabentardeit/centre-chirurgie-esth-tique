@@ -85,12 +85,12 @@ export default function DashboardMedecinPage() {
   const urgents = derniersPatients.filter((p) => p.status === 'formulaire_complete').slice(0, 5)
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto p-3 sm:p-6">
+    <div className="space-y-5 max-w-6xl mx-auto">
 
       {/* ── Header ── */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">Bonjour, Dr. {user?.name}</h2>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div className="min-w-0">
+          <h2 className="text-xl sm:text-2xl font-bold truncate">Bonjour, Dr. {user?.name}</h2>
           <p className="text-muted-foreground text-sm mt-0.5">
             {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>

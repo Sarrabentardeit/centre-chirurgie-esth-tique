@@ -867,26 +867,24 @@ export default function DevisGestionnairePage() {
                   key={p.id}
                   type="button"
                   onClick={() => openDetail(p.id)}
-                  className="w-full bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all text-left px-5 py-4 flex items-center gap-4 group"
+                  className="w-full bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all text-left px-3 sm:px-5 py-3 sm:py-4 flex items-center gap-2 sm:gap-4 group"
                 >
                   {/* Avatar */}
-                  <Avatar className="h-11 w-11 shrink-0">
-                    <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-sm">
+                  <Avatar className="h-9 w-9 sm:h-11 sm:w-11 shrink-0">
+                    <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-xs sm:text-sm">
                       {initials(p.user.fullName)}
                     </AvatarFallback>
                   </Avatar>
 
                   {/* Info principale */}
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <p className="text-sm font-bold text-slate-900 truncate">{p.user.fullName}</p>
+                    <p className="text-[10px] font-mono text-slate-500 whitespace-nowrap w-fit">{p.dossierNumber}</p>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-bold text-slate-900">{p.user.fullName}</p>
-                      <span className="text-xs font-mono text-slate-400">{p.dossierNumber}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <Badge className={`text-[10px] font-medium ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
                         {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
                       </Badge>
-                      {p.user.email && <span className="text-xs text-slate-400 hidden sm:inline">{p.user.email}</span>}
+                      {p.user.email && <span className="text-xs text-slate-400 hidden sm:inline truncate max-w-[180px]">{p.user.email}</span>}
                     </div>
                   </div>
 

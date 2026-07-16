@@ -1204,7 +1204,7 @@ export default function FormulairePage() {
           >
             {/* Numbered stepper */}
             <div className="overflow-x-auto pb-1 -mx-1 px-1 sm:mx-0 sm:px-0">
-            <div className="relative flex min-w-[520px] sm:min-w-0 items-start justify-between">
+            <div className="relative flex min-w-[420px] sm:min-w-0 items-start justify-between gap-1">
               {/* Connecting line behind the circles */}
               <div
                 className="absolute top-4 left-0 right-0 h-px"

@@ -191,11 +191,11 @@ export default function AgendaPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 p-3 sm:p-6">
+    <div className="max-w-3xl mx-auto space-y-5 sm:space-y-6">
 
       {/* ── Bannière blocage ── */}
       {!canBook && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4 flex items-start gap-3">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 sm:px-5 py-4 flex items-start gap-3">
           <Lock className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-blue-800">Réservation non disponible pour l'instant</p>

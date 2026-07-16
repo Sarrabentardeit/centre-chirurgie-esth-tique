@@ -107,7 +107,7 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
 
       {/* Title */}
       {title && (
-        <h1 className="text-lg font-semibold text-foreground hidden sm:block">{title}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground sm:flex-none sm:text-lg">{title}</h1>
       )}
 
       {/* Search bar — backoffice uniquement */}

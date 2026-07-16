@@ -130,7 +130,7 @@ export default function DossierPage() {
 
       {/* ── En-tête de bienvenue ── */}
       <div
-        className="rounded-2xl p-6 shadow-lg relative overflow-hidden"
+        className="rounded-2xl p-4 sm:p-6 shadow-lg relative overflow-hidden"
         style={{ background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 55%, #1a4a3a 100%)' }}
       >
         {/* Décoration background */}
@@ -145,7 +145,7 @@ export default function DossierPage() {
         <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <p className="text-sm mb-1" style={{ color: 'rgba(228,200,189,0.7)' }}>Bonjour,</p>
-            <h2 className="text-2xl font-bold" style={{ color: '#fdeada' }}>
+            <h2 className="text-xl sm:text-2xl font-bold" style={{ color: '#fdeada' }}>
               {patient.prenom} {patient.nom}
             </h2>
             <p className="text-sm mt-1" style={{ color: 'rgba(228,200,189,0.6)' }}>
@@ -189,7 +189,7 @@ export default function DossierPage() {
       {/* ── Alertes contextuelles ── */}
       <div className="space-y-2">
         {showFormulaireAlert && (
-          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 sm:px-4 py-3">
             <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-amber-800">
@@ -198,11 +198,19 @@ export default function DossierPage() {
               <p className="text-xs text-amber-700 mt-0.5">
                 Veuillez compléter et soumettre votre formulaire pour que votre dossier soit traité.
               </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-amber-700 hover:bg-amber-100 mt-2 h-8 px-2 sm:hidden"
+                onClick={() => navigate('/patient/formulaire')}
+              >
+                Compléter
+              </Button>
             </div>
             <Button
               variant="ghost"
               size="sm"
-              className="text-amber-700 hover:bg-amber-100 shrink-0"
+              className="text-amber-700 hover:bg-amber-100 shrink-0 hidden sm:inline-flex"
               onClick={() => navigate('/patient/formulaire')}
             >
               Compléter
@@ -211,7 +219,7 @@ export default function DossierPage() {
         )}
 
         {showDevisAlert && (
-          <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 sm:px-4 py-3">
             <CheckCircle2 className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-emerald-800">
@@ -220,11 +228,19 @@ export default function DossierPage() {
               <p className="text-xs text-emerald-700 mt-0.5">
                 Un devis personnalisé vous a été envoyé. Consultez-le et donnez votre réponse.
               </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-emerald-700 hover:bg-emerald-100 mt-2 h-8 px-2 sm:hidden"
+                onClick={() => navigate('/patient/devis')}
+              >
+                Voir le devis
+              </Button>
             </div>
             <Button
               variant="ghost"
               size="sm"
-              className="text-emerald-700 hover:bg-emerald-100 shrink-0"
+              className="text-emerald-700 hover:bg-emerald-100 shrink-0 hidden sm:inline-flex"
               onClick={() => navigate('/patient/devis')}
             >
               Voir le devis

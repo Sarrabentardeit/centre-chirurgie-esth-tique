@@ -331,7 +331,7 @@ export default function RapportsPage() {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
-              <p className="text-[11px] font-mono text-brand-600">{p.dossierNumber}</p>
+              <p className="text-[11px] font-mono text-brand-600 whitespace-nowrap">{p.dossierNumber}</p>
             </div>
           </div>
         </td>
@@ -394,12 +394,12 @@ export default function RapportsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-5 p-4 sm:p-6">
+    <div className="max-w-7xl mx-auto space-y-4 sm:space-y-5">
 
       {/* ── Header ── */}
       <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">Rapports Médicaux</h2>
+        <div className="min-w-0">
+          <h2 className="text-lg sm:text-xl font-bold tracking-tight">Rapports Médicaux</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             {loading ? '—' : `${patients.length} patient(s) · ${stats.total} rapport(s) · ${stats.avecForfait} avec forfait`}
           </p>
@@ -562,7 +562,7 @@ export default function RapportsPage() {
                   <div className="min-w-0">
                     <p className="font-bold text-white text-base leading-tight truncate">{selected.user.fullName}</p>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <span className="text-[11px] font-mono bg-white/10 text-white/80 px-2 py-0.5 rounded border border-white/20">
+                      <span className="text-[11px] font-mono bg-white/10 text-white/80 px-2 py-0.5 rounded border border-white/20 whitespace-nowrap">
                         {selected.dossierNumber}
                       </span>
                       <Badge className={`text-[10px] ${STATUS_COLORS[selected.status as keyof typeof STATUS_COLORS] ?? ''}`}>

@@ -257,10 +257,10 @@ export default function DossierPatientPage() {
     })
 
   return (
-    <div className="max-w-5xl mx-auto space-y-0 p-3 sm:p-6">
+    <div className="max-w-5xl mx-auto space-y-0">
 
       {/* ── Sticky Header ── */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border mb-5 -mx-3 sm:-mx-6 px-3 sm:px-6 py-3">
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border mb-4 sm:mb-5 -mx-3 sm:-mx-4 lg:-mx-6 px-3 sm:px-4 lg:px-6 py-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate('/medecin/patients')}>
             <ArrowLeft className="h-4 w-4" />

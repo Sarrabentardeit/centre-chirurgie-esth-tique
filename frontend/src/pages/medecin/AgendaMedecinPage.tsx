@@ -1263,8 +1263,8 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
               )}
 
               {/* Calendar grid */}
-              <div className="rounded-lg border border-border overflow-x-auto">
-                <div className="min-w-[760px]">
+              <div className="rounded-lg border border-border overflow-x-auto -mx-1 sm:mx-0">
+                <div className={viewMode === 'day' ? 'min-w-0' : 'min-w-[640px] sm:min-w-[760px]'}>
                   <div
                     className="grid bg-muted/40 border-b border-border"
                     style={{ gridTemplateColumns: `90px repeat(${visibleDays.length}, minmax(0, 1fr))` }}

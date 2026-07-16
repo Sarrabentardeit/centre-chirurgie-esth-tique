@@ -30,13 +30,28 @@
     @apply border-border;
   }
 
+  html {
+    scroll-behavior: smooth;
+    overflow-x: clip;
+  }
+
   body {
     @apply bg-background text-foreground font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: clip;
+    min-width: 0;
+    -webkit-text-size-adjust: 100%;
   }
 
-  html {
-    scroll-behavior: smooth;
+  /* Empêche les tableaux / flex trop larges de faire déborder toute l'app */
+  #root {
+    min-width: 0;
+    max-width: 100vw;
+    overflow-x: clip;
+  }
+
+  img, video, canvas, svg {
+    max-width: 100%;
   }
 }
 

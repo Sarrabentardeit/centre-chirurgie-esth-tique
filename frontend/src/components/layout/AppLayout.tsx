@@ -123,12 +123,12 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-[100dvh] max-w-[100vw] overflow-hidden bg-slate-50">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Navbar onMenuClick={() => setSidebarOpen(true)} title={title} />
-        <main className="flex-1 overflow-y-auto">
-          <div className="p-4 lg:p-6 pb-24 lg:pb-6 animate-fade-in">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="animate-fade-in px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-6">
             <Outlet />
           </div>
         </main>
@@ -138,7 +138,7 @@ export function AppLayout() {
       {!isChatRoute && user?.role === 'patient' && (
         <>
           {chatOpen && (
-            <div className="fixed bottom-20 left-3 right-3 z-40 rounded-2xl border border-border bg-white shadow-xl overflow-hidden lg:bottom-6 lg:left-auto lg:right-6 lg:w-[340px] lg:max-w-[calc(100vw-2rem)]">
+            <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-3 z-40 rounded-2xl border border-border bg-white shadow-xl overflow-hidden lg:bottom-6 lg:left-auto lg:right-6 lg:w-[340px] lg:max-w-[calc(100vw-2rem)]">
               <div className="flex items-center justify-between bg-brand-600 px-4 py-3 text-white">
                 <div className="flex items-center gap-2">
                   <Bot className="h-4 w-4" />
@@ -197,7 +197,7 @@ export function AppLayout() {
           <Button
             variant="brand"
             size="icon"
-            className="fixed bottom-20 right-4 h-12 w-12 rounded-full shadow-lg z-40 lg:bottom-6 lg:right-6 lg:h-14 lg:w-14"
+            className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-3 h-12 w-12 rounded-full shadow-lg z-40 sm:right-4 lg:bottom-6 lg:right-6 lg:h-14 lg:w-14"
             onClick={() => setChatOpen((v) => !v)}
             aria-label="Ouvrir le chat"
           >
@@ -210,7 +210,7 @@ export function AppLayout() {
         <Button
           variant="brand"
           size="icon"
-          className="fixed bottom-20 right-4 h-12 w-12 rounded-full shadow-lg z-40 lg:bottom-6 lg:right-6 lg:h-14 lg:w-14"
+          className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-3 h-12 w-12 rounded-full shadow-lg z-40 sm:right-4 lg:bottom-6 lg:right-6 lg:h-14 lg:w-14"
           onClick={() => navigate(getChatPath())}
           aria-label="Ouvrir le chat"
         >

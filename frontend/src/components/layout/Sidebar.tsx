@@ -143,7 +143,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white border-r border-border shadow-lg transition-transform duration-300 lg:translate-x-0 lg:static lg:shadow-none',
+          'fixed inset-y-0 left-0 z-50 flex w-[min(16rem,85vw)] flex-col bg-white border-r border-border shadow-lg transition-transform duration-300 lg:translate-x-0 lg:static lg:w-64 lg:shadow-none',
           isOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >

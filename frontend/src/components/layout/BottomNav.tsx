@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar,
   Bell, Heart, ClipboardList, FileCheck,
-  Package, MessageSquare, CalendarDays, UserPlus,
+  CalendarDays,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'

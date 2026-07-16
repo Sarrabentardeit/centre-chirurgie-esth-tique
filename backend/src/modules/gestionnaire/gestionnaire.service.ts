@@ -18,6 +18,7 @@ import {
   resolvePatientReference,
   syncPatientDossierFromDevis,
 } from '../../lib/devisNumber.js'
+import { sendNotificationEmail } from '../../lib/mailer.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
 
 /** Liste planning séjour : uniquement dossiers « devis accepté » (pas les étapes suivantes). */
@@ -122,9 +123,8 @@ async function notifyGestionnaires(input: {
     where: { role: 'gestionnaire' },
     select: { id: true },
   })
-  if (gestionnaires.length === 0) return
 
-  for (const gestionnaire of gestionnaires) {
+  const notifPromises = gestionnaires.map(async (gestionnaire) => {
     const exists = await prisma.notification.findFirst({
       where: {
         userId: gestionnaire.id,
@@ -134,7 +134,7 @@ async function notifyGestionnaires(input: {
       },
       select: { id: true },
     })
-    if (exists) continue
+    if (exists) return
 
     await prisma.notification.create({
       data: {
@@ -145,7 +145,12 @@ async function notifyGestionnaires(input: {
         lienAction: input.lienAction ?? null,
       },
     })
-  }
+  })
+
+  await Promise.all([
+    ...notifPromises,
+    sendNotificationEmail(input),
+  ])
 }
 
 function mapPatientListRow<T extends {

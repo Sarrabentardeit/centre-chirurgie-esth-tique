@@ -36,6 +36,14 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined)),
+
+  /** SMTP — notifications email automatiques. */
+  SMTP_HOST: z.string().optional().default('ssl0.ovh.net'),
+  SMTP_PORT: z.coerce.number().optional().default(465),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  /** Destinataires séparés par des virgules. */
+  NOTIFICATION_EMAILS: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

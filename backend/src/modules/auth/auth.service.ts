@@ -7,6 +7,7 @@ import { AppError } from '../../middleware/errorHandler.js'
 import type { RegisterInput, LoginInput } from './auth.schema.js'
 import type { UserRole, JwtPayload, RefreshPayload } from './auth.types.js'
 import { generateNextMcReference } from '../../lib/devisNumber.js'
+import { sendNotificationEmail } from '../../lib/mailer.js'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -24,9 +25,8 @@ async function notifyGestionnaires(input: {
     where: { role: 'gestionnaire' },
     select: { id: true },
   })
-  if (gestionnaires.length === 0) return
 
-  for (const gestionnaire of gestionnaires) {
+  const notifPromises = gestionnaires.map(async (gestionnaire) => {
     const exists = await prisma.notification.findFirst({
       where: {
         userId: gestionnaire.id,
@@ -36,7 +36,7 @@ async function notifyGestionnaires(input: {
       },
       select: { id: true },
     })
-    if (exists) continue
+    if (exists) return
 
     await prisma.notification.create({
       data: {
@@ -47,7 +47,12 @@ async function notifyGestionnaires(input: {
         lienAction: input.lienAction ?? null,
       },
     })
-  }
+  })
+
+  await Promise.all([
+    ...notifPromises,
+    sendNotificationEmail(input),
+  ])
 }
 
 function signAccessToken(user: { id: string; email: string; role: UserRole }): string {

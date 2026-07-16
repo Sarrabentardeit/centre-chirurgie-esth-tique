@@ -191,7 +191,7 @@ export default function AgendaPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 p-6">
+    <div className="max-w-3xl mx-auto space-y-6 p-3 sm:p-6">
 
       {/* ── Bannière blocage ── */}
       {!canBook && (

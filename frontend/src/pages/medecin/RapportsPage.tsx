@@ -458,7 +458,7 @@ export default function RapportsPage() {
       )}
 
       {/* ── Layout : tableau + drawer ── */}
-      <div className={`flex gap-5 transition-all duration-300 ${drawerOpen ? 'items-start' : ''}`}>
+      <div className={`flex flex-col lg:flex-row gap-5 transition-all duration-300 ${drawerOpen ? 'lg:items-start' : ''}`}>
 
         {/* ── TABLEAU ── */}
         <div className={`flex-1 min-w-0 rounded-2xl border border-border bg-card shadow-sm overflow-hidden transition-all duration-300 ${drawerOpen ? 'hidden lg:block' : ''}`}>
@@ -548,7 +548,7 @@ export default function RapportsPage() {
 
         {/* ── DRAWER / ÉDITEUR ── */}
         {drawerOpen && selected && (
-          <div className="w-full lg:w-[480px] xl:w-[520px] shrink-0 rounded-2xl border border-border bg-card shadow-lg overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100vh - 140px)', position: 'sticky', top: 80 }}>
+          <div className="w-full lg:w-[480px] xl:w-[520px] shrink-0 rounded-2xl border border-border bg-card shadow-lg overflow-hidden flex flex-col lg:sticky lg:top-20" style={{ maxHeight: 'calc(100vh - 140px)' }}>
 
             {/* En-tête patient */}
             <div className="border-b border-border shrink-0" style={{ background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 60%, #1a4a3a 100%)' }}>

@@ -890,6 +890,16 @@ export default function DevisGestionnairePage() {
                     </div>
                   </div>
 
+                  {/* Bloc devis mobile — badge seul */}
+                  <div className="sm:hidden shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${devisConfig.dot}`} />
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${devisConfig.cls}`}>
+                        {devisConfig.label}
+                      </span>
+                    </div>
+                  </div>
+
                   {/* Bloc devis — statut + indicateurs lecture/décision */}
                   <div className="hidden sm:flex flex-col items-end gap-1.5 shrink-0 min-w-[200px]">
 
@@ -982,23 +992,23 @@ export default function DevisGestionnairePage() {
               Retour à la liste
             </button>
 
-            {/* Identité + actions */}
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-4">
-                <Avatar className="h-14 w-14 shrink-0">
-                  <AvatarFallback className="bg-brand-100 text-brand-700 text-lg font-bold">
+              {/* Identité + actions */}
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <Avatar className="h-10 w-10 sm:h-14 sm:w-14 shrink-0">
+                  <AvatarFallback className="bg-brand-100 text-brand-700 text-base sm:text-lg font-bold">
                     {initials(patientRow.user.fullName)}
                   </AvatarFallback>
                 </Avatar>
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">{patientRow.user.fullName}</h2>
+                <div className="min-w-0">
+                  <h2 className="text-base sm:text-xl font-bold text-slate-900 truncate">{patientRow.user.fullName}</h2>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <span className="text-sm font-mono text-slate-400">{patientRow.dossierNumber}</span>
+                    <span className="text-xs sm:text-sm font-mono text-slate-400">{patientRow.dossierNumber}</span>
                     <Badge className={`text-xs font-medium ${STATUS_COLORS[patientRow.status as keyof typeof STATUS_COLORS] ?? ''}`}>
                       {STATUS_LABELS[patientRow.status as keyof typeof STATUS_LABELS] ?? patientRow.status}
                     </Badge>
                     {patientRow.user.email && (
-                      <span className="text-sm text-slate-400 hidden sm:inline">{patientRow.user.email}</span>
+                      <span className="text-xs text-slate-400 hidden sm:inline">{patientRow.user.email}</span>
                     )}
                   </div>
                 </div>

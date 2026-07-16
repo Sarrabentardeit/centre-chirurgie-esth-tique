@@ -149,15 +149,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       >
         {/* Logo Header */}
         <div className="flex items-center justify-between px-4 py-4 border-b border-border bg-white">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <img
               src="/brand-logo-teal.png"
               alt="Logo Dr. Mehdi Chennoufi"
-              className="h-16 w-40 rounded-xl object-contain"
+              className="h-12 w-32 rounded-xl object-contain shrink-0"
             />
-            <div>
-              <p className="text-sm font-bold text-foreground leading-none">Dr. Mehdi Chennoufi</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Chirurgie Esthétique</p>
+            <div className="min-w-0 hidden xs:block">
+              <p className="text-xs font-bold text-foreground leading-tight truncate">Dr. Mehdi Chennoufi</p>
+              <p className="text-[10px] text-muted-foreground">Chirurgie Esthétique</p>
             </div>
           </div>
           <Button
@@ -188,7 +188,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </div>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation — masquée sur mobile (remplacée par BottomNav) */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon

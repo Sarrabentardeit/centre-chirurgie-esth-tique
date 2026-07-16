@@ -68,7 +68,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#061a1f]">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="relative overflow-hidden border-b border-[#1f3a3f] lg:border-b-0 lg:border-r">
+        <section className="relative overflow-hidden border-b border-[#1f3a3f] lg:border-b-0 lg:border-r order-2 lg:order-1 hidden lg:block">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(228,200,189,0.14),transparent_40%),radial-gradient(circle_at_80%_70%,rgba(129,87,45,0.2),transparent_45%)]" />
           <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'linear-gradient(rgba(228,200,189,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(228,200,189,0.12) 1px, transparent 1px)', backgroundSize: '34px 34px' }} />
           <div className="relative z-10 flex h-full flex-col justify-between p-8 sm:p-10 lg:p-14">
@@ -119,7 +119,7 @@ export default function LoginPage() {
           </div>
         </section>
 
-        <section className="relative flex items-center justify-center px-4 py-8 sm:px-6 lg:px-10">
+        <section className="relative flex items-center justify-center px-4 py-8 sm:px-6 lg:px-10 order-1 lg:order-2">
           <div
             className="absolute inset-0"
             style={{

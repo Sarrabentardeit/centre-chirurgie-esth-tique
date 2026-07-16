@@ -54,7 +54,7 @@ export default function NouveauPatientPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-5">
+    <div className="max-w-3xl mx-auto p-3 sm:p-6 space-y-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold">Nouveau pré-dossier patient</h2>

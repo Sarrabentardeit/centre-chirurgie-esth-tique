@@ -144,6 +144,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <aside
         className={cn(
           'fixed inset-y-0 left-0 z-50 flex w-[min(16rem,85vw)] flex-col bg-white border-r border-border shadow-lg transition-transform duration-300 lg:translate-x-0 lg:static lg:w-64 lg:shadow-none',
+          // Laisse de la place pour la BottomNav + safe area (sinon Déconnexion est cachée)
+          'pb-[calc(4.25rem+env(safe-area-inset-bottom))] lg:pb-0',
           isOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -219,17 +221,18 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           })}
         </nav>
 
-        {/* Footer */}
-        <div className="px-3 py-4 border-t border-border space-y-1">
+        {/* Footer — toujours visible */}
+        <div className="shrink-0 px-3 py-3 border-t border-border bg-white">
           <button
+            type="button"
             onClick={() => {
               const redirectPath = user.role === 'patient' ? '/acces-patient' : '/login'
               logout()
               navigate(redirectPath, { replace: true })
             }}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-all"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-all"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-4 w-4 shrink-0" />
             Déconnexion
           </button>
         </div>

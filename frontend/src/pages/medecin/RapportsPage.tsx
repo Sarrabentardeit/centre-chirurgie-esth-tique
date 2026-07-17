@@ -50,6 +50,16 @@ function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
+/** Rapport présent en base, ou statut déjà passé à « rapport généré » (et suites). */
+const STATUSES_WITH_RAPPORT = new Set([
+  'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
+  'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
+])
+
+function patientHasRapport(p: { rapport?: Rapport | null; status: string }): boolean {
+  return !!p.rapport || STATUSES_WITH_RAPPORT.has(p.status)
+}
+
 function completionScore(
   diagnostic: string,
   examensDemandes: string[],
@@ -167,13 +177,19 @@ export default function RapportsPage() {
       const res = await medecinApi.getPatients()
       const eligible = res.patients.filter((p) =>
         ['formulaire_complete', 'en_analyse', 'rapport_genere', 'devis_preparation',
-          'devis_envoye', 'devis_accepte', 'date_reservee', 'intervention', 'post_op', 'suivi_termine'].includes(p.status)
+          'devis_envoye', 'devis_accepte', 'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine'].includes(p.status)
       )
       const sorted: PatientWithRapport[] = eligible
-        .map((p) => ({ ...p, rapport: null }))
+        .map((p) => ({
+          ...p,
+          // Sync avec la page Patients : utiliser le rapport réel s'il existe
+          rapport: (p.rapports?.[0] as Rapport | undefined) ?? null,
+        }))
         .sort((a, b) => {
-          if (a.status === 'formulaire_complete' && b.status !== 'formulaire_complete') return -1
-          if (b.status === 'formulaire_complete' && a.status !== 'formulaire_complete') return 1
+          const aNeeds = !a.rapport && (a.status === 'formulaire_complete' || a.status === 'en_analyse')
+          const bNeeds = !b.rapport && (b.status === 'formulaire_complete' || b.status === 'en_analyse')
+          if (aNeeds && !bNeeds) return -1
+          if (bNeeds && !aNeeds) return 1
           return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
         })
       setPatients(sorted)
@@ -282,8 +298,8 @@ export default function RapportsPage() {
   const pct = completionScore(diagnostic, examensDemandes, examensAutreChecked, interventions, forfait, valeur, notes, nuitsClinique)
 
   const stats = {
-    aAnalyser:   patients.filter((p) => p.status === 'formulaire_complete').length,
-    total:       patients.filter((p) => p.rapport).length,
+    aAnalyser:   patients.filter((p) => !patientHasRapport(p) && (p.status === 'formulaire_complete' || p.status === 'en_analyse')).length,
+    total:       patients.filter((p) => patientHasRapport(p)).length,
     avecForfait: patients.filter((p) => p.rapport?.forfaitPropose).length,
   }
 
@@ -291,20 +307,20 @@ export default function RapportsPage() {
 
   function TableRow({ p }: { p: PatientWithRapport }) {
     const isSelected    = p.id === selectedId
-    const hasRapport    = !!p.rapport
-    const needsAnalysis = p.status === 'formulaire_complete'
-    const rowPct = hasRapport
+    const hasRapport    = patientHasRapport(p)
+    const needsAnalysis = !hasRapport && (p.status === 'formulaire_complete' || p.status === 'en_analyse')
+    const rowPct = p.rapport
       ? completionScore(
-          p.rapport!.diagnostic ?? '',
-          p.rapport!.examensDemandes ?? [],
+          p.rapport.diagnostic ?? '',
+          p.rapport.examensDemandes ?? [],
           false,
-          (p.rapport!.interventionsRecommandees ?? []).join('\n'),
-          p.rapport!.forfaitPropose?.toString() ?? '',
-          p.rapport!.valeurMedicale ?? '',
-          p.rapport!.notes ?? '',
-          p.rapport!.nuitsClinique?.toString() ?? '',
+          (p.rapport.interventionsRecommandees ?? []).join('\n'),
+          p.rapport.forfaitPropose?.toString() ?? '',
+          p.rapport.valeurMedicale ?? '',
+          p.rapport.notes ?? '',
+          p.rapport.nuitsClinique?.toString() ?? '',
         )
-      : 0
+      : hasRapport ? 50 : 0
 
     return (
       <tr
@@ -386,7 +402,7 @@ export default function RapportsPage() {
             className={`h-7 text-xs gap-1 ${!hasRapport && !isSelected ? 'text-amber-600 border border-amber-200 bg-amber-50 hover:bg-amber-100' : ''}`}
             onClick={(e) => { e.stopPropagation(); void handleSelect(p.id) }}
           >
-            {hasRapport ? 'Modifier' : 'Rédiger'}
+            {hasRapport ? 'À modifier' : 'À rédiger'}
           </Button>
         </td>
       </tr>
@@ -410,11 +426,11 @@ export default function RapportsPage() {
         </Button>
       </div>
 
-      {/* ── KPIs ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* ── KPIs — bandeau compact sur mobile ── */}
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {[
           {
-            label: 'Dossiers à analyser', value: stats.aAnalyser,
+            label: 'À analyser', value: stats.aAnalyser,
             icon: AlertTriangle, sub: 'Nécessitent un rapport',
             iconCls: stats.aAnalyser > 0 ? 'text-amber-600 bg-amber-100' : 'text-slate-400 bg-slate-100',
             cardCls: stats.aAnalyser > 0 ? 'border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50/30' : 'border-slate-200 bg-slate-50',
@@ -422,30 +438,30 @@ export default function RapportsPage() {
             pulse: stats.aAnalyser > 0,
           },
           {
-            label: 'Rapports rédigés', value: stats.total,
+            label: 'Rédigés', value: stats.total,
             icon: FileText, sub: 'Rapports enregistrés',
             iconCls: 'text-indigo-600 bg-indigo-100',
             cardCls: 'border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-purple-50/20',
             valCls: 'text-indigo-700', pulse: false,
           },
           {
-            label: 'Avec forfait', value: stats.avecForfait,
+            label: 'Forfait', value: stats.avecForfait,
             icon: TrendingUp, sub: 'Prêts pour devis',
             iconCls: 'text-emerald-600 bg-emerald-100',
             cardCls: 'border-emerald-100 bg-gradient-to-br from-emerald-50/60 to-teal-50/20',
             valCls: 'text-emerald-700', pulse: false,
           },
         ].map(({ label, value, icon: Icon, sub, iconCls, cardCls, valCls, pulse }) => (
-          <div key={label} className={`relative rounded-2xl border px-5 py-4 flex items-center gap-4 ${cardCls}`}>
-            <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>
-              <Icon className="h-5 w-5" />
+          <div key={label} className={`relative rounded-xl sm:rounded-2xl border px-2.5 py-2.5 sm:px-5 sm:py-4 flex flex-col sm:flex-row items-start sm:items-center gap-1.5 sm:gap-4 ${cardCls}`}>
+            <div className={`h-8 w-8 sm:h-11 sm:w-11 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>
+              <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
-            <div>
-              <p className={`text-2xl font-bold leading-none ${valCls}`}>{loading ? '—' : value}</p>
-              <p className="text-xs font-semibold text-foreground mt-1">{label}</p>
-              <p className="text-[11px] text-muted-foreground">{sub}</p>
+            <div className="min-w-0">
+              <p className={`text-lg sm:text-2xl font-bold leading-none ${valCls}`}>{loading ? '—' : value}</p>
+              <p className="text-[10px] sm:text-xs font-semibold text-foreground mt-0.5 sm:mt-1 leading-tight">{label}</p>
+              <p className="text-[11px] text-muted-foreground hidden sm:block">{sub}</p>
             </div>
-            {pulse && <span className="absolute top-3 right-3 h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" />}
+            {pulse && <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-amber-500 animate-pulse" />}
           </div>
         ))}
       </div>
@@ -484,13 +500,70 @@ export default function RapportsPage() {
             </span>
           </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto">
+          {/* Liste mobile (cards) */}
+          <div className="sm:hidden divide-y divide-border">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-3 py-3">
+                  <Skeleton className="h-9 w-9 rounded-full shrink-0" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-3.5 w-36" />
+                    <Skeleton className="h-2.5 w-24" />
+                  </div>
+                  <Skeleton className="h-7 w-16 rounded-md" />
+                </div>
+              ))
+            ) : filtered.length === 0 ? (
+              <div className="px-4 py-14 text-center">
+                <ClipboardPlus className="h-10 w-10 text-muted-foreground/30 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">Aucun patient trouvé</p>
+              </div>
+            ) : (
+              filtered.map((p) => {
+                const hasRapport = patientHasRapport(p)
+                const needsAnalysis = !hasRapport && (p.status === 'formulaire_complete' || p.status === 'en_analyse')
+                const isSelected = selected?.id === p.id
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => void handleSelect(p.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
+                      isSelected ? 'bg-brand-50' : 'active:bg-muted/50'
+                    }`}
+                  >
+                    <Avatar className="h-9 w-9 shrink-0">
+                      <AvatarFallback className={`text-xs font-bold ${
+                        needsAnalysis ? 'bg-amber-100 text-amber-700' :
+                        hasRapport ? 'bg-emerald-100 text-emerald-700' : 'bg-brand-100 text-brand-700'
+                      }`}>
+                        {getInitials(p.user.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
+                      <p className="text-[10px] font-mono text-brand-600 whitespace-nowrap">{p.dossierNumber}</p>
+                    </div>
+                    <span className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
+                      hasRapport
+                        ? 'border-border text-foreground bg-background'
+                        : 'text-amber-700 border-amber-200 bg-amber-50'
+                    }`}>
+                      {hasRapport ? 'À modifier' : 'À rédiger'}
+                    </span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+
+          {/* Table desktop */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/10">
                   <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Patient</th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">Statut</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Statut</th>
                   <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">Complétion</th>
                   <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">Forfait</th>
                   <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">Activité</th>
@@ -510,7 +583,7 @@ export default function RapportsPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-3 hidden sm:table-cell"><Skeleton className="h-5 w-20 rounded-full" /></td>
+                      <td className="px-3 py-3"><Skeleton className="h-5 w-20 rounded-full" /></td>
                       <td className="px-3 py-3 hidden md:table-cell"><Skeleton className="h-2 w-20 rounded-full" /></td>
                       <td className="px-3 py-3 hidden lg:table-cell"><Skeleton className="h-3.5 w-16" /></td>
                       <td className="px-3 py-3 hidden lg:table-cell"><Skeleton className="h-3 w-24" /></td>
@@ -535,11 +608,11 @@ export default function RapportsPage() {
 
           {/* Footer tableau */}
           {!loading && patients.length > 0 && (
-            <div className="px-4 py-2.5 border-t border-border/60 bg-muted/10 flex items-center justify-between">
+            <div className="px-3 sm:px-4 py-2.5 border-t border-border/60 bg-muted/10 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground">{patients.length} patient(s) éligibles</p>
-              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-3 text-[10px] sm:text-[11px] text-muted-foreground flex-wrap">
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400 inline-block" /> À rédiger</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> Complété</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> À modifier</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-indigo-500 inline-block" /> En cours</span>
               </div>
             </div>
@@ -548,7 +621,11 @@ export default function RapportsPage() {
 
         {/* ── DRAWER / ÉDITEUR ── */}
         {drawerOpen && selected && (
-          <div className="w-full lg:w-[480px] xl:w-[520px] shrink-0 rounded-2xl border border-border bg-card shadow-lg overflow-hidden flex flex-col lg:sticky lg:top-20" style={{ maxHeight: 'calc(100vh - 140px)' }}>
+          <div
+            className="fixed inset-0 z-50 flex flex-col bg-card lg:static lg:z-auto lg:w-[480px] xl:w-[520px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border lg:shadow-lg lg:overflow-hidden lg:sticky lg:top-20"
+            style={{ maxHeight: undefined }}
+          >
+            <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-[calc(100vh-140px)] overflow-hidden">
 
             {/* En-tête patient */}
             <div className="border-b border-border shrink-0" style={{ background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 60%, #1a4a3a 100%)' }}>
@@ -580,20 +657,21 @@ export default function RapportsPage() {
               </div>
 
               {/* Infos compactes */}
-              <div className="px-5 pb-3 flex items-center gap-4 flex-wrap">
+              <div className="px-4 sm:px-5 pb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
                 {selected.user.email && (
-                  <span className="flex items-center gap-1 text-[11px] text-white/60">
-                    <Mail className="h-3 w-3" />{selected.user.email}
+                  <span className="flex items-center gap-1 text-[11px] text-white/60 min-w-0">
+                    <Mail className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{selected.user.email}</span>
                   </span>
                 )}
                 {selected.phone && (
                   <span className="flex items-center gap-1 text-[11px] text-white/60">
-                    <Phone className="h-3 w-3" />{selected.phone}
+                    <Phone className="h-3 w-3 shrink-0" />{selected.phone}
                   </span>
                 )}
                 {(selected.ville || selected.pays) && (
                   <span className="flex items-center gap-1 text-[11px] text-white/60">
-                    <MapPin className="h-3 w-3" />{[selected.ville, selected.pays].filter(Boolean).join(', ')}
+                    <MapPin className="h-3 w-3 shrink-0" />{[selected.ville, selected.pays].filter(Boolean).join(', ')}
                   </span>
                 )}
               </div>
@@ -844,7 +922,7 @@ export default function RapportsPage() {
             </div>
 
             {/* Footer actions */}
-            <div className="px-4 py-3.5 border-t border-border bg-muted/10 shrink-0">
+            <div className="px-4 py-3.5 border-t border-border bg-muted/10 shrink-0 pb-[calc(0.875rem+env(safe-area-inset-bottom))] lg:pb-3.5">
               {saveError && null}
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -901,6 +979,7 @@ export default function RapportsPage() {
                   </p>
                 </div>
               </div>
+            </div>
             </div>
           </div>
         )}

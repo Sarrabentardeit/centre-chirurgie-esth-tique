@@ -341,6 +341,18 @@ export interface PatientListItem {
   user: { fullName: string; email: string; createdAt: string }
   formulaires: Array<{ id: string; status: string; submittedAt: string | null }>
   devis: Array<{ id: string; statut: string; total: number; dateCreation: string; numeroDevis?: string | null; updatedAt?: string; vuParPatientAt?: string | null }>
+  rapports?: Array<{
+    id: string
+    diagnostic: string | null
+    examensDemandes?: string[]
+    interventionsRecommandees: string[]
+    valeurMedicale: string | null
+    forfaitPropose: number | null
+    nuitsClinique?: number | null
+    anesthesieGenerale?: boolean | null
+    notes: string | null
+    createdAt: string
+  }>
 }
 
 export interface AgendaEvent {

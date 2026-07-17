@@ -376,6 +376,7 @@ export async function getPatients(search?: string, status?: string) {
       user: { select: { fullName: true, email: true, createdAt: true } },
       formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
       devis: { orderBy: { dateCreation: 'desc' }, take: 1 },
+      rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
     },
     orderBy: { updatedAt: 'desc' },
   })

@@ -56,10 +56,12 @@ function PhotoThumb({ url, fileName }: { url: string; fileName: string }) {
 
 export function InfoRow({ label, value, icon }: { label: string; value?: string | null; icon?: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border/50 last:border-0">
-      {icon && <span className="mt-0.5 text-muted-foreground shrink-0">{icon}</span>}
-      <span className="text-muted-foreground text-sm min-w-[130px] shrink-0">{label}</span>
-      <span className="text-sm font-medium ml-auto text-right">
+    <div className="flex flex-col gap-0.5 py-2.5 border-b border-border/50 last:border-0 sm:flex-row sm:items-start sm:gap-3">
+      <div className="flex items-center gap-2 sm:min-w-[130px] sm:shrink-0">
+        {icon && <span className="text-muted-foreground shrink-0">{icon}</span>}
+        <span className="text-muted-foreground text-xs sm:text-sm">{label}</span>
+      </div>
+      <span className="text-sm font-medium break-words min-w-0 sm:ml-auto sm:text-right pl-6 sm:pl-0">
         {value || <span className="text-muted-foreground/70">-</span>}
       </span>
     </div>

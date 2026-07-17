@@ -261,43 +261,57 @@ export default function DossierPatientPage() {
 
       {/* ── Sticky Header ── */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border mb-4 sm:mb-5 -mx-3 sm:-mx-4 lg:-mx-6 px-3 sm:px-4 lg:px-6 py-3">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate('/medecin/patients')}>
+        <div className="flex items-start gap-2 sm:items-center sm:gap-3">
+          <Button variant="ghost" size="icon" className="shrink-0 mt-0.5" onClick={() => navigate('/medecin/patients')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <Avatar className="h-10 w-10 shrink-0">
+          <Avatar className="h-9 w-9 sm:h-10 sm:w-10 shrink-0">
             <AvatarFallback className="bg-brand-100 text-brand-700 font-bold text-sm">
               {getInitials(patient.user.fullName)}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold">{patient.user.fullName}</h2>
-              <span className="text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200 px-2 py-0.5 rounded">
+              <h2 className="text-sm sm:text-base font-bold truncate max-w-full">{patient.user.fullName}</h2>
+              <span className="text-[10px] sm:text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200 px-1.5 py-0.5 rounded whitespace-nowrap">
                 {patient.dossierNumber}
               </span>
-              <Badge className={`text-xs ${STATUS_COLORS[patient.status as keyof typeof STATUS_COLORS] ?? ''}`}>
+              <Badge className={`text-[10px] sm:text-xs ${STATUS_COLORS[patient.status as keyof typeof STATUS_COLORS] ?? ''}`}>
                 {STATUS_LABELS[patient.status as keyof typeof STATUS_LABELS] ?? patient.status}
               </Badge>
-            </div>
-            <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
-              <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{patient.user.email}</span>
-              {patient.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{patient.phone}</span>}
-              {(patient.ville || patient.pays) && (
-                <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{[patient.ville, patient.pays].filter(Boolean).join(', ')}</span>
+              {patient.sourceContact && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                    SOURCE_COLORS[patient.sourceContact] ?? SOURCE_COLORS[patient.sourceContact.toLowerCase()] ?? ''
+                  }`}
+                >
+                  {formatSourceConnaissanceLabel(patient.sourceContact)}
+                </span>
               )}
-              <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />Créé le {formatDate(patient.user.createdAt)}</span>
+            </div>
+            <div className="flex flex-col gap-0.5 mt-1 text-[11px] sm:text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-3 sm:flex-wrap">
+              <span className="flex items-center gap-1 min-w-0">
+                <Mail className="h-3 w-3 shrink-0" />
+                <span className="truncate">{patient.user.email}</span>
+              </span>
+              {patient.phone && (
+                <span className="flex items-center gap-1">
+                  <Phone className="h-3 w-3 shrink-0" />
+                  {patient.phone}
+                </span>
+              )}
+              {(patient.ville || patient.pays) && (
+                <span className="flex items-center gap-1">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  {[patient.ville, patient.pays].filter(Boolean).join(', ')}
+                </span>
+              )}
+              <span className="hidden sm:flex items-center gap-1">
+                <Calendar className="h-3 w-3 shrink-0" />
+                Créé le {formatDate(patient.user.createdAt)}
+              </span>
             </div>
           </div>
-          {patient.sourceContact && (
-            <span
-              className={`text-xs px-2 py-1 rounded border font-medium shrink-0 ${
-                SOURCE_COLORS[patient.sourceContact] ?? SOURCE_COLORS[patient.sourceContact.toLowerCase()] ?? ''
-              }`}
-            >
-              {formatSourceConnaissanceLabel(patient.sourceContact)}
-            </span>
-          )}
         </div>
       </div>
 

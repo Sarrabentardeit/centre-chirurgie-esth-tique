@@ -210,7 +210,7 @@ export function AppLayout() {
         <Button
           variant="brand"
           size="icon"
-          className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-3 h-12 w-12 rounded-full shadow-lg z-40 sm:right-4 lg:bottom-6 lg:right-6 lg:h-14 lg:w-14"
+          className="hidden lg:flex fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-40"
           onClick={() => navigate(getChatPath())}
           aria-label="Ouvrir le chat"
         >

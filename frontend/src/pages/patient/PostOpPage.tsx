@@ -550,13 +550,13 @@ function PatientView() {
       <div className="rounded-2xl border border-rose-200 overflow-hidden"
         style={{ background: 'linear-gradient(135deg, #fff1f2 0%, #fce7f3 100%)' }}
       >
-        <div className="px-5 py-4">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+        <div className="px-4 sm:px-5 py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
+            <div className="min-w-0">
               <p className="text-sm font-bold text-rose-800">Suivi Post-Opératoire</p>
               <p className="text-xs text-rose-600 mt-0.5">Intervention le {formatDate(suivi.dateIntervention)}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge className="bg-rose-100 text-rose-700 border-rose-300 text-sm font-bold px-3">J+{jours}</Badge>
               <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-sm font-bold px-3">
                 Score {recoveryScore}/100
@@ -564,7 +564,7 @@ function PatientView() {
             </div>
           </div>
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-rose-700">
+            <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between text-xs text-rose-700">
               <span>Suivi gratuit — 6 mois</span>
               <span className="font-semibold">{progress}% ({Math.max(0, daysLeft)} jours restants)</span>
             </div>

@@ -195,10 +195,11 @@ export function AppLayout() {
       </div>
       <BottomNav />
 
+      {/* FAB chat : desktop uniquement — sur mobile le chat est dans la BottomNav */}
       {!isChatRoute && user?.role === 'patient' && (
         <>
           {chatOpen && (
-            <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-3 z-40 rounded-2xl border border-border bg-white shadow-xl overflow-hidden lg:bottom-6 lg:left-auto lg:right-6 lg:w-[340px] lg:max-w-[calc(100vw-2rem)]">
+            <div className="hidden lg:block fixed bottom-6 right-6 z-40 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-white shadow-xl overflow-hidden">
               <div className="flex items-center justify-between bg-brand-600 px-4 py-3 text-white">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="h-4 w-4" />
@@ -271,11 +272,11 @@ export function AppLayout() {
             </div>
           )}
 
-          <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-3 z-40 sm:right-4 lg:bottom-6 lg:right-6">
+          <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
             <Button
               variant="brand"
               size="icon"
-              className="relative h-12 w-12 rounded-full shadow-lg lg:h-14 lg:w-14"
+              className="relative h-14 w-14 rounded-full shadow-lg"
               onClick={() => setChatOpen((v) => !v)}
               aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
             >

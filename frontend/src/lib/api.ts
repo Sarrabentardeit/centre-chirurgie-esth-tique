@@ -596,6 +596,8 @@ export const medecinApi = {
       pushCalendarSummary?: string | null
       syncCalendarCount?: number
       lastSyncAt?: string | null
+      needsReconnect?: boolean
+      message?: string
     }>('/medecin/google/status'),
 
   listGoogleCalendars: () =>
@@ -1024,6 +1026,8 @@ export const gestionnaireApi = {
       pushCalendarSummary?: string | null
       syncCalendarCount?: number
       lastSyncAt?: string | null
+      needsReconnect?: boolean
+      message?: string
     }>(`/gestionnaire/google/status?medecinId=${encodeURIComponent(medecinId)}`),
 
   listGoogleCalendars: (medecinId: string) =>

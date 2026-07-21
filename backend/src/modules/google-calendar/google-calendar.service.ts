@@ -160,11 +160,11 @@ function verifyState(state: string): { medecinId: string; returnPath: string } {
 
 export async function getConnectUrl(medecinId: string, returnPath: string): Promise<string> {
   const oauth2 = createOAuth2Client()
-  const existing = await prisma.googleCalendarSync.findUnique({ where: { medecinId } })
   return oauth2.generateAuthUrl({
     access_type: 'offline',
-    // Ne redemander le consentement que lors de la première liaison.
-    ...(existing?.refreshToken ? {} : { prompt: 'consent' as const }),
+    // Toujours demander le consentement pour obtenir un refresh_token valide
+    // (sinon Google ne renvoie pas de nouveau jeton et la sync reste cassée).
+    prompt: 'consent',
     scope: SCOPES,
     state: signState({ medecinId, returnPath }),
   })
@@ -228,25 +228,41 @@ export async function getSyncStatus(medecinId: string) {
     return { configured: false, linked: false }
   }
   const row = await prisma.googleCalendarSync.findUnique({ where: { medecinId } })
-  const syncIds = parseStoredSyncCalendarIds(row?.syncCalendarIds)
+  if (!row) {
+    return { configured: true, linked: false }
+  }
+
+  const syncIds = parseStoredSyncCalendarIds(row.syncCalendarIds)
   let pushCalendarSummary: string | null = null
-  if (row) {
+  try {
     const client = await getCalendarClient(medecinId)
     if (client) {
+      // Ping léger : liste des agendas — échoue si invalid_grant
       const entries = await listCalendarEntries(client.calendar)
       pushCalendarSummary =
         entries.find((e) => e.id === row.googleCalendarId)?.summary ?? row.googleCalendarId
     }
+  } catch (err) {
+    if (await revokeLinkIfAuthDead(medecinId, err)) {
+      return {
+        configured: true,
+        linked: false,
+        needsReconnect: true,
+        message: 'La connexion Google a expiré. Veuillez relier Google Calendar.',
+      }
+    }
+    logger.warn({ err, medecinId }, '[google-calendar] getSyncStatus')
   }
+
   return {
     configured: true,
-    linked: !!row,
-    googleCalendarId: row?.googleCalendarId ?? null,
+    linked: true,
+    googleCalendarId: row.googleCalendarId ?? null,
     pushCalendarSummary,
     syncCalendarIds: syncIds,
     syncCalendarCount: syncIds.length,
     bidirectional: true,
-    lastSyncAt: row?.lastSyncAt?.toISOString() ?? null,
+    lastSyncAt: row.lastSyncAt?.toISOString() ?? null,
   }
 }
 
@@ -282,6 +298,29 @@ export async function disconnectGoogle(medecinId: string) {
   return { disconnected: true }
 }
 
+function isInvalidGrantError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { message?: string; response?: { data?: { error?: string } }; code?: number | string }
+  const msg = String(e.message ?? '')
+  const dataErr = e.response?.data?.error
+  return (
+    dataErr === 'invalid_grant' ||
+    msg.includes('invalid_grant') ||
+    msg.toLowerCase().includes('invalid grant')
+  )
+}
+
+/** Si le refresh token Google est révoqué/expiré → délier pour forcer une reconnexion. */
+async function revokeLinkIfAuthDead(medecinId: string, err: unknown): Promise<boolean> {
+  if (!isInvalidGrantError(err)) return false
+  logger.warn(
+    { medecinId },
+    '[google-calendar] jeton Google invalide (invalid_grant) — liaison supprimée, reconnexion requise',
+  )
+  await prisma.googleCalendarSync.deleteMany({ where: { medecinId } })
+  return true
+}
+
 async function getCalendarClient(medecinId: string) {
   const sync = await prisma.googleCalendarSync.findUnique({ where: { medecinId } })
   if (!sync) return null
@@ -295,14 +334,18 @@ async function getCalendarClient(medecinId: string) {
 
   oauth2.on('tokens', async (tokens) => {
     if (!tokens.access_token) return
-    await prisma.googleCalendarSync.update({
-      where: { medecinId },
-      data: {
-        accessToken: tokens.access_token,
-        tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
-        ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
-      },
-    })
+    try {
+      await prisma.googleCalendarSync.update({
+        where: { medecinId },
+        data: {
+          accessToken: tokens.access_token,
+          tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+          ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
+        },
+      })
+    } catch {
+      /* ligne peut avoir été supprimée */
+    }
   })
 
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
@@ -692,10 +735,21 @@ export type FullSyncResult = {
 
 /** Synchronisation bidirectionnelle complète sur les mêmes agendas Google cochés. */
 export async function fullSync(medecinId: string): Promise<FullSyncResult> {
-  await refreshSyncCalendarIds(medecinId)
-  const push = await pushAllEventsToGoogle(medecinId)
-  const pull = await pullFromGoogle(medecinId)
-  return { ...push, ...pull }
+  try {
+    await refreshSyncCalendarIds(medecinId)
+    const push = await pushAllEventsToGoogle(medecinId)
+    const pull = await pullFromGoogle(medecinId)
+    return { ...push, ...pull }
+  } catch (err) {
+    if (await revokeLinkIfAuthDead(medecinId, err)) {
+      throw new AppError(
+        401,
+        'GOOGLE_REAUTH_REQUIRED',
+        'La connexion Google Calendar a expiré. Reliez Google Calendar dans l’Agenda.',
+      )
+    }
+    throw err
+  }
 }
 
 const autoSyncLastRun = new Map<string, number>()

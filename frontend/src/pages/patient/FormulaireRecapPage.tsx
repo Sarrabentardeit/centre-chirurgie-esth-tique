@@ -363,20 +363,20 @@ export default function FormulaireRecapPage() {
   const isEmpty = !formulaire
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 sm:space-y-6">
 
       {/* ── Bannière de statut ── */}
       {isSubmitted && (
         <div
-          className="rounded-2xl p-5 shadow-sm relative overflow-hidden"
+          className="rounded-2xl p-4 sm:p-5 shadow-sm relative overflow-hidden"
           style={{ background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 60%, #1a4a3a 100%)' }}
         >
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20 border border-emerald-400/30">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20 border border-emerald-400/30 shrink-0">
                 <CheckCircle2 className="h-5 w-5 text-emerald-400" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="font-semibold" style={{ color: '#fdeada' }}>Formulaire soumis avec succès</p>
                 <p className="text-xs mt-0.5" style={{ color: 'rgba(228,200,189,0.6)' }}>
                   Soumis le {formulaire?.submittedAt ? formatDateTime(formulaire.submittedAt) : '—'} · En cours d'examen par l'équipe médicale
@@ -386,7 +386,7 @@ export default function FormulaireRecapPage() {
             <Button
               variant="outline"
               size="sm"
-              className="border-white/20 text-white hover:bg-white/10 shrink-0"
+              className="border-white/20 text-white hover:bg-white/10 shrink-0 w-full sm:w-auto"
               style={{ color: '#fdeada' }}
               onClick={() => navigate('/formulaire')}
             >
@@ -398,17 +398,19 @@ export default function FormulaireRecapPage() {
       )}
 
       {isDraft && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
-          <Clock className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-amber-800">Formulaire en cours de remplissage</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              Vous avez un brouillon enregistré. Finalisez-le pour que votre dossier soit traité.
-            </p>
+        <div className="flex flex-col sm:flex-row sm:items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <Clock className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-800">Formulaire en cours de remplissage</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Vous avez un brouillon enregistré. Finalisez-le pour que votre dossier soit traité.
+              </p>
+            </div>
           </div>
           <Button
             size="sm"
-            className="bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+            className="bg-amber-600 hover:bg-amber-700 text-white shrink-0 w-full sm:w-auto"
             onClick={() => navigate('/formulaire')}
           >
             Continuer <ChevronRight className="h-4 w-4 ml-1" />

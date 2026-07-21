@@ -181,14 +181,21 @@ export default function ChatPage() {
         : 'Choisissez un patient pour démarrer'
 
   return (
-    <div className={cn('mx-auto flex min-h-[calc(100vh-8rem)]', isPatient ? 'max-w-2xl flex-col' : 'max-w-5xl flex-col gap-4 lg:flex-row')}>
+    <div
+      className={cn(
+        'mx-auto flex w-full',
+        isPatient
+          ? 'max-w-2xl flex-col h-[calc(100dvh-8.5rem)] lg:h-[calc(100dvh-6rem)]'
+          : 'max-w-5xl flex-col gap-3 lg:gap-4 lg:flex-row min-h-[calc(100dvh-8.5rem)] lg:min-h-[calc(100dvh-6rem)]',
+      )}
+    >
       {isStaff && (
-        <div className="w-full shrink-0 rounded-xl border border-border bg-white p-3 lg:w-80">
+        <div className="w-full shrink-0 rounded-xl border border-border bg-white p-3 lg:w-80 max-h-[40vh] lg:max-h-none overflow-y-auto">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
             <Users className="h-3.5 w-3.5" /> Conversations
           </p>
 
-          <div className="space-y-1 max-h-52 overflow-y-auto lg:max-h-[40vh] mb-3">
+          <div className="space-y-1 max-h-40 overflow-y-auto lg:max-h-[40vh] mb-3">
             {conversations.length === 0 ? (
               <p className="text-xs text-muted-foreground px-2 py-3">Aucune conversation pour le moment.</p>
             ) : (
@@ -198,7 +205,7 @@ export default function ChatPage() {
                   type="button"
                   onClick={() => setSelectedPatientId(c.patientId)}
                   className={cn(
-                    'w-full text-left rounded-lg px-3 py-2 text-sm transition-all',
+                    'w-full text-left rounded-lg px-3 py-2.5 text-sm transition-all min-h-11',
                     selectedPatientId === c.patientId ? 'bg-brand-50 text-brand-700' : 'hover:bg-muted'
                   )}
                 >
@@ -221,16 +228,16 @@ export default function ChatPage() {
             value={searchPatient}
             onChange={(e) => setSearchPatient(e.target.value)}
             placeholder="Chercher un patient…"
-            className="h-8 text-sm mb-2"
+            className="h-10 text-sm mb-2"
           />
-          <div className="space-y-1 max-h-40 overflow-y-auto">
+          <div className="space-y-1 max-h-36 overflow-y-auto">
             {filteredPatients.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => setSelectedPatientId(p.id)}
                 className={cn(
-                  'w-full text-left rounded-lg px-3 py-2 text-sm transition-all',
+                  'w-full text-left rounded-lg px-3 py-2.5 text-sm transition-all min-h-11',
                   selectedPatientId === p.id ? 'bg-brand-50 text-brand-700' : 'hover:bg-muted'
                 )}
               >
@@ -243,27 +250,27 @@ export default function ChatPage() {
       )}
 
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        <div className="rounded-xl bg-white border border-border p-4 flex items-center gap-3 mb-4 shadow-sm">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-100">
+        <div className="rounded-xl bg-white border border-border p-3 sm:p-4 flex items-center gap-3 mb-3 shadow-sm shrink-0">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-100 shrink-0">
             <MessageSquare className="h-5 w-5 text-brand-700" />
           </div>
           <div className="min-w-0">
             <p className="font-semibold text-sm truncate">{headerTitle}</p>
             <div className="flex items-center gap-1.5">
-              <div className="h-2 w-2 rounded-full bg-emerald-500" />
+              <div className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
               <p className="text-xs text-muted-foreground truncate">{headerSub}</p>
             </div>
           </div>
         </div>
 
         {error && (
-          <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive shrink-0">
             {error}
           </div>
         )}
 
-        <div className="flex-1 rounded-xl border border-border bg-white overflow-hidden flex flex-col min-h-[320px]">
-          <ScrollArea className="flex-1 p-4">
+        <div className="flex-1 rounded-xl border border-border bg-white overflow-hidden flex flex-col min-h-0">
+          <ScrollArea className="flex-1 p-3 sm:p-4">
             {loading && messages.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-10">Chargement…</p>
             ) : messages.length === 0 ? (
@@ -296,7 +303,7 @@ export default function ChatPage() {
                         </AvatarFallback>
                       </Avatar>
                       <div className={cn('max-w-[85%] sm:max-w-[75%] space-y-1', own ? 'items-end' : 'items-start')}>
-                        <div className="flex items-center gap-2 px-1">
+                        <div className="flex items-center gap-2 px-1 flex-wrap">
                           <span className="text-[11px] font-medium text-muted-foreground">
                             {own ? 'Vous' : (m.expediteurNom ?? (
                               m.expediteurRole === 'medecin' ? 'Médecin' :
@@ -306,7 +313,7 @@ export default function ChatPage() {
                           <span className="text-[10px] text-muted-foreground">{formatDateTime(m.dateEnvoi)}</span>
                         </div>
                         <div className={cn(
-                          'rounded-2xl px-3.5 py-2 text-sm leading-relaxed',
+                          'rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words',
                           own ? 'bg-brand-600 text-white rounded-tr-md' : 'bg-muted text-foreground rounded-tl-md'
                         )}>
                           {m.contenu}
@@ -320,7 +327,7 @@ export default function ChatPage() {
             )}
           </ScrollArea>
 
-          <div className="border-t border-border p-3 flex items-center gap-2">
+          <div className="border-t border-border p-2.5 sm:p-3 flex items-center gap-2 shrink-0 bg-white">
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -336,11 +343,12 @@ export default function ChatPage() {
                   : 'Écrire un message…'
               }
               disabled={sending || (isStaff && !selectedPatientId)}
-              className="flex-1"
+              className="flex-1 min-h-11"
             />
             <Button
               variant="brand"
               size="icon"
+              className="h-11 w-11 shrink-0"
               onClick={() => void handleSend()}
               disabled={sending || !input.trim() || (isStaff && !selectedPatientId)}
               aria-label="Envoyer"

@@ -231,7 +231,7 @@ export default function DevisPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 p-6">
+    <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
       <div>
         <h2 className="text-lg font-semibold">Mes Devis</h2>
         <p className="text-sm text-muted-foreground">{devis.length} devis disponible(s)</p>
@@ -246,47 +246,47 @@ export default function DevisPage() {
         return (
           <Card key={d.id} className="overflow-hidden">
             {/* ── Header ── */}
-            <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-6 py-4 border-b">
+            <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-4 sm:px-6 py-4 border-b">
               <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground mb-1 truncate">
                     Devis N° {d.id.slice(0, 8).toUpperCase()} — Version {d.version}
                   </p>
                   <p className="font-semibold text-foreground">Offre de soins personnalisée</p>
                 </div>
-                <Badge variant={statusInfo.color as 'info' | 'success' | 'secondary' | 'destructive'} className="gap-1">
+                <Badge variant={statusInfo.color as 'info' | 'success' | 'secondary' | 'destructive'} className="gap-1 shrink-0">
                   <StatusIcon className="h-3 w-3" />
                   {statusInfo.label}
                 </Badge>
               </div>
-              <div className="flex flex-wrap gap-6 mt-3 text-xs text-muted-foreground">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-muted-foreground">
                 <span>Créé le {formatDate(d.dateCreation)}</span>
                 {d.dateValidite && <span>Valable jusqu'au {formatDate(d.dateValidite)}</span>}
               </div>
             </div>
 
-            <CardContent className="pt-5 space-y-5">
+            <CardContent className="pt-5 space-y-5 px-4 sm:px-6">
               {/* ── Lignes ── */}
               {lignes.length > 0 ? (
-                <div>
-                  <table className="w-full text-sm">
+                <div className="overflow-x-auto -mx-1 px-1">
+                  <table className="w-full text-sm min-w-[320px]">
                     <thead>
                       <tr className="text-xs text-muted-foreground border-b">
                         <th className="text-left pb-2 font-medium">Prestation</th>
                         <th className="text-center pb-2 font-medium w-12">Qté</th>
-                        <th className="text-right pb-2 font-medium w-24">P.U.</th>
-                        <th className="text-right pb-2 font-medium w-24">Total</th>
+                        <th className="text-right pb-2 font-medium w-20 sm:w-24">P.U.</th>
+                        <th className="text-right pb-2 font-medium w-20 sm:w-24">Total</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {lignes.map((ligne, i) => (
                         <tr key={i}>
-                          <td className="py-3 font-medium">{ligne.description}</td>
+                          <td className="py-3 font-medium pr-2 break-words">{ligne.description}</td>
                           <td className="text-center text-muted-foreground">{ligne.quantite}</td>
-                          <td className="text-right text-muted-foreground">
+                          <td className="text-right text-muted-foreground whitespace-nowrap">
                             {ligne.prixUnitaire === 0 ? 'Inclus' : formatCurrency(ligne.prixUnitaire)}
                           </td>
-                          <td className="text-right font-semibold">
+                          <td className="text-right font-semibold whitespace-nowrap">
                             {ligne.total === 0
                               ? <Badge variant="success" className="text-xs">Offert</Badge>
                               : formatCurrency(ligne.total)}
@@ -334,12 +334,12 @@ export default function DevisPage() {
               )}
 
               {/* ── Actions ── */}
-              <div className="flex flex-wrap gap-3 pt-1">
+              <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3 pt-1">
                 {isPending && (
                   <>
                     <Button
                       variant="brand"
-                      className="gap-2"
+                      className="gap-2 w-full sm:w-auto min-h-11"
                       disabled={submitting}
                       onClick={() => handleRepondre(d.id, 'accepte')}
                     >
@@ -348,7 +348,7 @@ export default function DevisPage() {
                     </Button>
                     <Button
                       variant="outline"
-                      className="gap-2 text-destructive border-destructive/40 hover:bg-destructive/5"
+                      className="gap-2 text-destructive border-destructive/40 hover:bg-destructive/5 w-full sm:w-auto min-h-11"
                       disabled={submitting}
                       onClick={() => setRepondingId((p) => p === d.id ? null : d.id)}
                     >
@@ -359,7 +359,7 @@ export default function DevisPage() {
                 )}
                 <Button
                   variant="outline"
-                  className="gap-2"
+                  className="gap-2 w-full sm:w-auto min-h-11"
                   onClick={() => navigate('/patient/chat')}
                 >
                   <MessageSquare className="h-4 w-4" />
@@ -367,7 +367,7 @@ export default function DevisPage() {
                 </Button>
                 <Button
                   variant="ghost"
-                  className="gap-2 text-muted-foreground"
+                  className="gap-2 text-muted-foreground w-full sm:w-auto min-h-11"
                   onClick={() => handleDownloadPdf(d)}
                 >
                   <Download className="h-4 w-4" />

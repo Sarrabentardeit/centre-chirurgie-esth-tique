@@ -133,6 +133,8 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
     lastSyncAt: string | null
     pushCalendarSummary?: string | null
     syncCalendarCount?: number
+    needsReconnect?: boolean
+    message?: string
   } | null>(null)
   const [googlePushCalendars, setGooglePushCalendars] = useState<
     { id: string; summary: string }[]
@@ -227,7 +229,14 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
         lastSyncAt: r.lastSyncAt ?? null,
         pushCalendarSummary: r.pushCalendarSummary ?? null,
         syncCalendarCount: r.syncCalendarCount,
+        needsReconnect: Boolean(r.needsReconnect),
+        message: r.message,
       })
+      if (r.needsReconnect) {
+        setGoogleMessage(
+          r.message ?? 'La connexion Google a expiré. Veuillez relier Google Calendar.',
+        )
+      }
     } catch {
       setGoogleStatus(null)
     }
@@ -725,7 +734,9 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Liez une seule fois le Google Calendar du médecin ; la synchro se fera ensuite automatiquement.
+                  {googleStatus.needsReconnect
+                    ? 'La connexion Google a expiré. Cliquez sur « Lier Google Calendar » pour reconnecter le compte du médecin.'
+                    : 'Liez une seule fois le Google Calendar du médecin ; la synchro se fera ensuite automatiquement.'}
                 </p>
               )}
               {googleMessage && (

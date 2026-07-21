@@ -16,6 +16,7 @@ import { patientRouter } from './modules/patient/patient.routes.js'
 import { medecinRouter } from './modules/medecin/medecin.routes.js'
 import { gestionnaireRouter } from './modules/gestionnaire/gestionnaire.routes.js'
 import { publicRouter } from './modules/public/public.routes.js'
+import { chatRouter } from './modules/chat/chat.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { startGoogleCalendarScheduler } from './modules/google-calendar/google-calendar.scheduler.js'
 
@@ -117,6 +118,7 @@ app.get('/api/uploads/:filename', (req, res) => {
 app.use('/api', healthRouter)
 app.use('/api/auth', authRouter)
 app.use('/api/public', publicRouter)
+app.use('/api/chat', chatRouter)
 
 app.use('/api/patient', patientRouter)
 app.use('/api/medecin', medecinRouter)

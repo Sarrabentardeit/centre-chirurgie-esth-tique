@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useEffect, useMemo, useState } from 'react'
 import type { UserRole } from '@/types'
-import { gestionnaireApi } from '@/lib/api'
+import { chatApi, gestionnaireApi } from '@/lib/api'
 
 interface NavItem {
   label: string
@@ -63,10 +63,33 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const messagesStore = useDemoStore((s) => s.messages)
   const notificationsStore = useDemoStore((s) => s.notifications)
-  const patients = useDemoStore((s) => s.patients)
+  const [chatUnread, setChatUnread] = useState(0)
   const [gestionnaireNotifUnread, setGestionnaireNotifUnread] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!user) {
+      setChatUnread(0)
+      return
+    }
+    let cancelled = false
+    const load = () => {
+      void chatApi
+        .getUnread()
+        .then((r) => {
+          if (!cancelled) setChatUnread(r.unread)
+        })
+        .catch(() => {
+          if (!cancelled) setChatUnread(0)
+        })
+    }
+    load()
+    const id = window.setInterval(load, 15000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [user?.id, user?.role, location.pathname])
 
   useEffect(() => {
     if (user?.role !== 'gestionnaire') {
@@ -90,28 +113,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const badges = useMemo(() => {
     if (!user) return { chat: 0, notifications: 0 }
 
-    let chatCount = 0
-    if (user.role === 'patient') {
-      const ownPatient = patients.find((p) => p.userId === user.id)
-      if (ownPatient) {
-        chatCount = messagesStore.filter(
-          (m) => m.dossierPatientId === ownPatient.id && !m.lu && m.expediteurId !== user.id
-        ).length
-      }
-    } else {
-      // For medecin/gestionnaire: unread messages sent by patients
-      chatCount = messagesStore.filter(
-        (m) => !m.lu && m.expediteurId !== user.id && m.expediteurRole === 'patient'
-      ).length
-    }
-
     const notifCount =
       user.role === 'gestionnaire' && gestionnaireNotifUnread !== null
         ? gestionnaireNotifUnread
         : notificationsStore.filter((n) => n.userId === user.id && !n.lu).length
 
-    return { chat: chatCount, notifications: notifCount }
-  }, [user, messagesStore, notificationsStore, patients, gestionnaireNotifUnread])
+    return { chat: chatUnread, notifications: notifCount }
+  }, [user, chatUnread, notificationsStore, gestionnaireNotifUnread])
 
   if (!user) return null
 

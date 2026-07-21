@@ -554,18 +554,39 @@ export default function FormulairePage() {
     // Patient connecté → /patient/upload ; formulaire public → /public/upload (avant inscription)
     const uploadFn = user ? uploadFile : uploadFilePublic
     setUploading(true)
+    setStep4Error('')
     try {
       const results = await Promise.allSettled(files.map((f) => uploadFn(f)))
+      const failed: string[] = []
       setter((prev) => {
         const updated = [...prev]
         results.forEach((r, i) => {
+          const preview = previews[i]
+          const idx = updated.findIndex((u) => u.name === preview.name && u.url === preview.url)
           if (r.status === 'fulfilled') {
-            const idx = updated.findIndex((u) => u.name === previews[i].name && u.url === previews[i].url)
             if (idx !== -1) updated[idx] = { url: r.value.url, name: r.value.name }
+          } else {
+            failed.push(preview.name)
+            if (idx !== -1) {
+              URL.revokeObjectURL(updated[idx].url)
+              updated.splice(idx, 1)
+            }
           }
         })
         return updated
       })
+      if (failed.length > 0) {
+        const firstErr = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+        const detail =
+          firstErr?.reason instanceof Error
+            ? firstErr.reason.message
+            : 'Envoi impossible.'
+        setStep4Error(
+          failed.length === 1
+            ? `Échec pour « ${failed[0]} » : ${detail}`
+            : `${failed.length} fichier(s) non envoyés. ${detail}`,
+        )
+      }
     } finally {
       setUploading(false)
     }
@@ -1781,6 +1802,9 @@ export default function FormulairePage() {
                         <Upload className="h-7 w-7 mx-auto mb-3" style={{ color: '#81572d' }} />
                         <p className="text-sm font-medium text-foreground">Cliquez pour ajouter</p>
                         <p className="text-xs mt-1" style={{ color: '#929292' }}>{hint}</p>
+                        <p className="text-[10px] mt-1.5" style={{ color: '#929292' }}>
+                          Max. ~15 Mo par fichier · photos compressées automatiquement
+                        </p>
                       </div>
                       {uploading && (
                         <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground px-1">

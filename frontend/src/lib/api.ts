@@ -122,7 +122,24 @@ async function request<T>(
     throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
   }
 
-  const data = await res.json()
+  const raw = await res.text()
+  let data: unknown
+  try {
+    data = raw ? JSON.parse(raw) : {}
+  } catch {
+    if (res.status === 413 || /Request Entity Too Large/i.test(raw)) {
+      throw new ApiRequestError(
+        413,
+        'PAYLOAD_TOO_LARGE',
+        'Données trop volumineuses. Réduisez la taille des photos/documents et réessayez.',
+      )
+    }
+    throw new ApiRequestError(
+      res.status || 502,
+      'INVALID_RESPONSE',
+      'Réponse serveur invalide. Réessayez dans un instant.',
+    )
+  }
   if (!res.ok) {
     const err = data as ApiError
     throw new ApiRequestError(res.status, err.code ?? 'API_ERROR', err.message ?? 'Erreur serveur.', err.issues)
@@ -274,6 +291,54 @@ export interface PostOpPatient {
   updatedAt: string
   user: { fullName: string; email: string; createdAt: string }
   suiviPostOp: SuiviPostOp | null
+}
+
+export interface ChatMessage {
+  id: string
+  dossierPatientId: string
+  patientId: string
+  expediteurId: string
+  expediteurRole: 'patient' | 'medecin' | 'gestionnaire'
+  expediteurNom?: string | null
+  contenu: string
+  dateEnvoi: string
+  lu: boolean
+}
+
+export interface ChatConversation {
+  patientId: string
+  dossierNumber: string
+  fullName: string
+  email: string
+  unreadCount: number
+  lastMessageAt: string
+  lastMessagePreview: string
+  lastExpediteurRole: string | null
+}
+
+export const chatApi = {
+  getUnread: () =>
+    request<{ ok: true; unread: number }>('/chat/unread'),
+
+  getConversations: () =>
+    request<{ ok: true; conversations: ChatConversation[] }>('/chat/conversations'),
+
+  getMessages: (patientId?: string) => {
+    const q = patientId ? `?patientId=${encodeURIComponent(patientId)}` : ''
+    return request<{ ok: true; patientId: string; messages: ChatMessage[] }>(`/chat/messages${q}`)
+  },
+
+  sendMessage: (body: { contenu: string; patientId?: string }) =>
+    request<{ ok: true; message: ChatMessage }>('/chat/messages', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  markRead: (patientId?: string) =>
+    request<{ ok: true }>('/chat/messages/read', {
+      method: 'POST',
+      body: JSON.stringify(patientId ? { patientId } : {}),
+    }),
 }
 
 export const patientApi = {
@@ -1085,10 +1150,61 @@ export interface UploadResponse {
   size: number
 }
 
+async function readUploadError(res: Response): Promise<never> {
+  const text = await res.text()
+  let message = 'Erreur lors de l’envoi du fichier.'
+  try {
+    const parsed = JSON.parse(text) as { code?: string; message?: string }
+    if (parsed.message) message = parsed.message
+    throw new ApiRequestError(res.status, parsed.code ?? 'UPLOAD_ERROR', message)
+  } catch (e) {
+    if (e instanceof ApiRequestError) throw e
+  }
+  if (res.status === 413 || /413|Request Entity Too Large|html/i.test(text.slice(0, 200))) {
+    throw new ApiRequestError(
+      413,
+      'FILE_TOO_LARGE',
+      'Fichier trop volumineux. Choisissez une photo plus légère (idéalement < 10 Mo) ou compressez-la.',
+    )
+  }
+  throw new ApiRequestError(res.status, 'UPLOAD_ERROR', message)
+}
+
+/** Réduit les photos téléphone trop lourdes avant upload (évite les 413 nginx). */
+export async function compressImageForUpload(file: File, maxSide = 1920, quality = 0.82): Promise<File> {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file
+  // PDF et petits fichiers : pas de recompression
+  if (file.size <= 900_000) return file
+
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+    const w = Math.max(1, Math.round(bitmap.width * scale))
+    const h = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+    ctx.drawImage(bitmap, 0, 0, w, h)
+    bitmap.close()
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', quality)
+    )
+    if (!blob || blob.size >= file.size) return file
+    const base = file.name.replace(/\.[^.]+$/, '') || 'photo'
+    return new File([blob], `${base}.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
+  } catch {
+    return file
+  }
+}
+
 export async function uploadMedecinFile(file: File): Promise<UploadResponse> {
+  const prepared = await compressImageForUpload(file)
   const { access } = getTokens()
   const formData = new FormData()
-  formData.append('file', file)
+  formData.append('file', prepared)
   const headers: Record<string, string> = {}
   if (access) headers['Authorization'] = `Bearer ${access}`
 
@@ -1098,22 +1214,20 @@ export async function uploadMedecinFile(file: File): Promise<UploadResponse> {
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`
       const retry = await fetch(`${BASE_URL}/medecin/upload`, { method: 'POST', headers, body: formData })
-      if (!retry.ok) throw new ApiRequestError(retry.status, 'UPLOAD_ERROR', 'Erreur upload fichier.')
+      if (!retry.ok) await readUploadError(retry)
       return (await retry.json()) as UploadResponse
     }
     throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
   }
-  if (!res.ok) {
-    const err = await res.json() as { code?: string; message?: string }
-    throw new ApiRequestError(res.status, err.code ?? 'UPLOAD_ERROR', err.message ?? 'Erreur upload.')
-  }
+  if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse
 }
 
 export async function uploadPostOpPhoto(file: File, note?: string): Promise<UploadResponse & { suivi?: SuiviPostOp }> {
+  const prepared = await compressImageForUpload(file)
   const { access } = getTokens()
   const formData = new FormData()
-  formData.append('file', file)
+  formData.append('file', prepared)
   if (note) formData.append('note', note)
 
   const headers: Record<string, string> = {}
@@ -1125,22 +1239,20 @@ export async function uploadPostOpPhoto(file: File, note?: string): Promise<Uplo
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`
       const retry = await fetch(`${BASE_URL}/patient/post-op/photos`, { method: 'POST', headers, body: formData })
-      if (!retry.ok) throw new ApiRequestError(retry.status, 'UPLOAD_ERROR', 'Erreur upload photo.')
+      if (!retry.ok) await readUploadError(retry)
       return (await retry.json()) as UploadResponse & { suivi?: SuiviPostOp }
     }
     throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
   }
-  if (!res.ok) {
-    const err = await res.json() as { code?: string; message?: string }
-    throw new ApiRequestError(res.status, err.code ?? 'UPLOAD_ERROR', err.message ?? 'Erreur upload.')
-  }
+  if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse & { suivi?: SuiviPostOp }
 }
 
 export async function uploadFile(file: File): Promise<UploadResponse> {
+  const prepared = await compressImageForUpload(file)
   const { access } = getTokens()
   const formData = new FormData()
-  formData.append('file', file)
+  formData.append('file', prepared)
 
   const headers: Record<string, string> = {}
   if (access) headers['Authorization'] = `Bearer ${access}`
@@ -1160,34 +1272,27 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
         headers,
         body: formData,
       })
-      if (!retry.ok) throw new ApiRequestError(retry.status, 'UPLOAD_ERROR', 'Erreur upload fichier.')
+      if (!retry.ok) await readUploadError(retry)
       return (await retry.json()) as UploadResponse
     }
     throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
   }
 
-  if (!res.ok) {
-    const err = await res.json() as { code?: string; message?: string }
-    throw new ApiRequestError(res.status, err.code ?? 'UPLOAD_ERROR', err.message ?? 'Erreur upload.')
-  }
-
+  if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse
 }
 
 /** Upload sans JWT (formulaire public avant inscription). Mêmes types que l’upload patient. */
 export async function uploadFilePublic(file: File): Promise<UploadResponse> {
+  const prepared = await compressImageForUpload(file)
   const formData = new FormData()
-  formData.append('file', file)
+  formData.append('file', prepared)
 
   const res = await fetch(`${BASE_URL}/public/upload`, {
     method: 'POST',
     body: formData,
   })
 
-  if (!res.ok) {
-    const err = await res.json() as { code?: string; message?: string }
-    throw new ApiRequestError(res.status, err.code ?? 'UPLOAD_ERROR', err.message ?? 'Erreur upload.')
-  }
-
+  if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse
 }

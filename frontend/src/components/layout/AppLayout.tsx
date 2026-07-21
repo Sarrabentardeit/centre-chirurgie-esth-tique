@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Navbar } from './Navbar'
 import { BottomNav } from './BottomNav'
 import { useDemoStore } from '@/store/demoStore'
 import { useAuthStore } from '@/store/authStore'
+import { chatApi, type ChatMessage } from '@/lib/api'
+import { playMessageSound, unlockNotificationAudio } from '@/lib/notificationSounds'
 import { Button } from '@/components/ui/button'
-import { MessageCircle, Send, X, Bot } from 'lucide-react'
+import { MessageCircle, MessageSquare, Send, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
@@ -36,25 +38,83 @@ const ROUTE_TITLES: Record<string, string> = {
   '/gestionnaire/analytics': 'Analytics',
 }
 
+function ChatUnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shadow ring-2 ring-white">
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatInput, setChatInput] = useState('')
-  const [typing, setTyping] = useState(false)
+  const [widgetMessages, setWidgetMessages] = useState<ChatMessage[]>([])
+  const [sending, setSending] = useState(false)
+  const [chatUnread, setChatUnread] = useState(0)
+  const prevChatUnreadRef = useRef<number | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuthStore()
-  const patients = useDemoStore((s) => s.patients)
-  const messagesStore = useDemoStore((s) => s.messages)
   const ensurePatientForUser = useDemoStore((s) => s.ensurePatientForUser)
-  const addChatMessage = useDemoStore((s) => s.addChatMessage)
 
   const title = Object.entries(ROUTE_TITLES).find(([path]) =>
     location.pathname.startsWith(path)
   )?.[1]
 
+  const isChatRoute = location.pathname.endsWith('/chat')
+
+  // Autoriser le son après le premier clic / touche (politique navigateurs)
+  useEffect(() => {
+    const unlock = () => unlockNotificationAudio()
+    window.addEventListener('pointerdown', unlock, { once: true })
+    window.addEventListener('keydown', unlock, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!user) {
+      setChatUnread(0)
+      prevChatUnreadRef.current = null
+      return
+    }
+    // Sur la page chat, les messages sont marqués lus → badge à 0
+    if (isChatRoute) {
+      setChatUnread(0)
+      prevChatUnreadRef.current = 0
+      return
+    }
+    let cancelled = false
+    const load = () => {
+      void chatApi
+        .getUnread()
+        .then((r) => {
+          if (cancelled) return
+          const prev = prevChatUnreadRef.current
+          if (prev !== null && r.unread > prev) {
+            playMessageSound()
+          }
+          prevChatUnreadRef.current = r.unread
+          setChatUnread(r.unread)
+        })
+        .catch(() => {
+          if (!cancelled) setChatUnread(0)
+        })
+    }
+    load()
+    const id = window.setInterval(load, 8000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [user?.id, user?.role, isChatRoute, location.pathname])
+
   // Démo "envoi auto" du questionnaire à J+1 (24h après retour).
-  // Important : ça ne dépend plus du fait que `PostOpPage` soit ouverte.
   useEffect(() => {
     const tick = () => {
       const st = useDemoStore.getState()
@@ -73,8 +133,8 @@ export function AppLayout() {
       }
     }
 
-    tick() // exécution immédiate au montage
-    const intervalId = window.setInterval(tick, 20000) // toutes les 20s (démo)
+    tick()
+    const intervalId = window.setInterval(tick, 20000)
     return () => window.clearInterval(intervalId)
   }, [])
 
@@ -83,19 +143,22 @@ export function AppLayout() {
     ensurePatientForUser(user, { sourceContact: 'direct' })
   }, [ensurePatientForUser, user])
 
-  const patient = useMemo(() => {
-    if (!user || user.role !== 'patient') return undefined
-    return patients.find((p) => p.userId === user.id)
-  }, [patients, user?.id, user?.role])
+  const loadWidgetMessages = useCallback(async () => {
+    if (!user || user.role !== 'patient') return
+    try {
+      const res = await chatApi.getMessages()
+      setWidgetMessages(res.messages.slice(-8))
+    } catch {
+      /* silent */
+    }
+  }, [user])
 
-  const widgetMessages = useMemo(() => {
-    if (!patient) return []
-    return messagesStore
-      .filter((m) => m.dossierPatientId === patient.id)
-      .slice()
-      .sort((a, b) => new Date(a.dateEnvoi).getTime() - new Date(b.dateEnvoi).getTime())
-      .slice(-8)
-  }, [messagesStore, patient?.id])
+  useEffect(() => {
+    if (!chatOpen || user?.role !== 'patient') return
+    void loadWidgetMessages()
+    const id = window.setInterval(() => void loadWidgetMessages(), 5000)
+    return () => window.clearInterval(id)
+  }, [chatOpen, user?.role, loadWidgetMessages])
 
   const getChatPath = () => {
     if (!user) return '/acces-patient'
@@ -104,22 +167,19 @@ export function AppLayout() {
     return '/gestionnaire/chat'
   }
 
-  const isChatRoute = location.pathname.endsWith('/chat')
-
-  const handleWidgetSend = () => {
-    if (!chatInput.trim() || !user || !patient) return
-    addChatMessage(patient.id, user.id, user.role, chatInput.trim())
-    setChatInput('')
-    setTyping(true)
-    window.setTimeout(() => {
-      setTyping(false)
-      addChatMessage(
-        patient.id,
-        'bot',
-        'bot',
-        "Merci pour votre message. Je l'ai bien reçu et je le transmets à l'équipe."
-      )
-    }, 1000)
+  const handleWidgetSend = async () => {
+    const contenu = chatInput.trim()
+    if (!contenu || !user || user.role !== 'patient') return
+    setSending(true)
+    try {
+      const res = await chatApi.sendMessage({ contenu })
+      setWidgetMessages((prev) => [...prev.slice(-7), res.message])
+      setChatInput('')
+    } catch {
+      /* silent — page chat complète pour le détail d’erreur */
+    } finally {
+      setSending(false)
+    }
   }
 
   return (
@@ -141,8 +201,8 @@ export function AppLayout() {
             <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-3 z-40 rounded-2xl border border-border bg-white shadow-xl overflow-hidden lg:bottom-6 lg:left-auto lg:right-6 lg:w-[340px] lg:max-w-[calc(100vw-2rem)]">
               <div className="flex items-center justify-between bg-brand-600 px-4 py-3 text-white">
                 <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4" />
-                  <p className="font-semibold text-sm">Assistant clinique</p>
+                  <MessageSquare className="h-4 w-4" />
+                  <p className="font-semibold text-sm">Messages cabinet</p>
                 </div>
                 <button
                   className="rounded p-1 hover:bg-white/20"
@@ -155,25 +215,26 @@ export function AppLayout() {
 
               <ScrollArea className="h-64 p-3">
                 <div className="space-y-2">
-                  {widgetMessages.map((m) => {
-                    const own = m.expediteurId === user?.id
-                    return (
-                      <div
-                        key={m.id}
-                        className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                          own
-                            ? 'ml-auto bg-brand-600 text-white'
-                            : 'mr-auto bg-muted text-foreground'
-                        }`}
-                      >
-                        {m.contenu}
-                      </div>
-                    )
-                  })}
-                  {typing && (
-                    <div className="max-w-[85%] rounded-xl px-3 py-2 text-sm mr-auto bg-muted text-foreground">
-                      ...
-                    </div>
+                  {widgetMessages.length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center py-6">
+                      Écrivez pour contacter l’équipe.
+                    </p>
+                  ) : (
+                    widgetMessages.map((m) => {
+                      const own = m.expediteurId === user?.id
+                      return (
+                        <div
+                          key={m.id}
+                          className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                            own
+                              ? 'ml-auto bg-brand-600 text-white'
+                              : 'mr-auto bg-muted text-foreground'
+                          }`}
+                        >
+                          {m.contenu}
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               </ScrollArea>
@@ -183,39 +244,61 @@ export function AppLayout() {
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleWidgetSend()
+                    if (e.key === 'Enter') void handleWidgetSend()
                   }}
-                  placeholder="Écrivez votre question..."
+                  placeholder="Écrivez votre message…"
+                  disabled={sending}
                 />
-                <Button size="sm" variant="brand" onClick={handleWidgetSend} disabled={!chatInput.trim()}>
+                <Button
+                  size="sm"
+                  variant="brand"
+                  onClick={() => void handleWidgetSend()}
+                  disabled={sending || !chatInput.trim()}
+                >
                   <Send className="h-4 w-4" />
                 </Button>
               </div>
+              <button
+                type="button"
+                className="w-full text-center text-xs text-brand-700 py-2 border-t border-border hover:bg-muted"
+                onClick={() => {
+                  setChatOpen(false)
+                  navigate('/patient/chat')
+                }}
+              >
+                Ouvrir la conversation complète
+              </button>
             </div>
           )}
 
-          <Button
-            variant="brand"
-            size="icon"
-            className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-3 h-12 w-12 rounded-full shadow-lg z-40 sm:right-4 lg:bottom-6 lg:right-6 lg:h-14 lg:w-14"
-            onClick={() => setChatOpen((v) => !v)}
-            aria-label="Ouvrir le chat"
-          >
-            <MessageCircle className="h-6 w-6" />
-          </Button>
+          <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-3 z-40 sm:right-4 lg:bottom-6 lg:right-6">
+            <Button
+              variant="brand"
+              size="icon"
+              className="relative h-12 w-12 rounded-full shadow-lg lg:h-14 lg:w-14"
+              onClick={() => setChatOpen((v) => !v)}
+              aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
+            >
+              <MessageCircle className="h-6 w-6" />
+              <ChatUnreadBadge count={chatUnread} />
+            </Button>
+          </div>
         </>
       )}
 
       {!isChatRoute && (user?.role === 'medecin' || user?.role === 'gestionnaire') && (
-        <Button
-          variant="brand"
-          size="icon"
-          className="hidden lg:flex fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-40"
-          onClick={() => navigate(getChatPath())}
-          aria-label="Ouvrir le chat"
-        >
-          <MessageCircle className="h-6 w-6" />
-        </Button>
+        <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
+          <Button
+            variant="brand"
+            size="icon"
+            className="relative h-14 w-14 rounded-full shadow-lg"
+            onClick={() => navigate(getChatPath())}
+            aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
+          >
+            <MessageCircle className="h-6 w-6" />
+            <ChatUnreadBadge count={chatUnread} />
+          </Button>
+        </div>
       )}
     </div>
   )

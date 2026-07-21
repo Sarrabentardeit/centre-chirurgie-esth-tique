@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuthStore } from '@/store/authStore'
 import { useDemoStore } from '@/store/demoStore'
 import { formatRelative } from '@/lib/utils'
+import { playNotificationSound, unlockNotificationAudio } from '@/lib/notificationSounds'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { gestionnaireApi, type GestionnaireNotificationRow } from '@/lib/api'
@@ -19,6 +20,7 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
   const [openNotif, setOpenNotif] = useState(false)
   const notifRef = useRef<HTMLDivElement | null>(null)
   const [gestionnaireNotifs, setGestionnaireNotifs] = useState<GestionnaireNotificationRow[]>([])
+  const prevNotifUnreadRef = useRef<number | null>(null)
 
   const notifications = useDemoStore((s) => s.notifications)
   const markNotificationRead = useDemoStore((s) => s.markNotificationRead)
@@ -53,6 +55,30 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
     }
     return notifications.filter((n) => n.userId === user.id && !n.lu).length
   }, [gestionnaireNotifs, notifications, user])
+
+  /** Compte hors messages chat (le son message est déjà géré à part). */
+  const nonChatUnreadCount = useMemo(() => {
+    if (!user) return 0
+    const isChatNotif = (titre: string) => /message chat|nouveau message/i.test(titre)
+    if (user.role === 'gestionnaire') {
+      return gestionnaireNotifs.filter((n) => !n.lu && !isChatNotif(n.titre)).length
+    }
+    return notifications.filter((n) => n.userId === user.id && !n.lu && !isChatNotif(n.titre)).length
+  }, [gestionnaireNotifs, notifications, user])
+
+  // Son quand une nouvelle notification (hors chat) arrive
+  useEffect(() => {
+    if (!user) {
+      prevNotifUnreadRef.current = null
+      return
+    }
+    const prev = prevNotifUnreadRef.current
+    if (prev !== null && nonChatUnreadCount > prev) {
+      unlockNotificationAudio()
+      playNotificationSound()
+    }
+    prevNotifUnreadRef.current = nonChatUnreadCount
+  }, [nonChatUnreadCount, user])
 
   const userNotifications = useMemo(() => {
     if (!user) return []

@@ -272,6 +272,7 @@ export function AppLayout() {
             </div>
           )}
 
+          {/* Desktop : widget + FAB */}
           <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
             <Button
               variant="brand"
@@ -284,22 +285,52 @@ export function AppLayout() {
               <ChatUnreadBadge count={chatUnread} />
             </Button>
           </div>
+
+          {/* Mobile : bouton rond au-dessus de la BottomNav → page Chat */}
+          <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-3 z-[60] lg:hidden">
+            <Button
+              variant="brand"
+              size="icon"
+              className="relative h-12 w-12 rounded-full shadow-lg"
+              onClick={() => navigate('/patient/chat')}
+              aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
+            >
+              <MessageCircle className="h-6 w-6" />
+              <ChatUnreadBadge count={chatUnread} />
+            </Button>
+          </div>
         </>
       )}
 
       {!isChatRoute && (user?.role === 'medecin' || user?.role === 'gestionnaire') && (
-        <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
-          <Button
-            variant="brand"
-            size="icon"
-            className="relative h-14 w-14 rounded-full shadow-lg"
-            onClick={() => navigate(getChatPath())}
-            aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
-          >
-            <MessageCircle className="h-6 w-6" />
-            <ChatUnreadBadge count={chatUnread} />
-          </Button>
-        </div>
+        <>
+          {/* Desktop */}
+          <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
+            <Button
+              variant="brand"
+              size="icon"
+              className="relative h-14 w-14 rounded-full shadow-lg"
+              onClick={() => navigate(getChatPath())}
+              aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
+            >
+              <MessageCircle className="h-6 w-6" />
+              <ChatUnreadBadge count={chatUnread} />
+            </Button>
+          </div>
+          {/* Mobile — bouton flottant visible au-dessus de la barre */}
+          <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-3 z-[60] lg:hidden">
+            <Button
+              variant="brand"
+              size="icon"
+              className="relative h-12 w-12 rounded-full shadow-lg"
+              onClick={() => navigate(getChatPath())}
+              aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
+            >
+              <MessageCircle className="h-6 w-6" />
+              <ChatUnreadBadge count={chatUnread} />
+            </Button>
+          </div>
+        </>
       )}
     </div>
   )

@@ -622,7 +622,7 @@ export default function RapportsPage() {
         {/* ── DRAWER / ÉDITEUR ── */}
         {drawerOpen && selected && (
           <div
-            className="fixed inset-0 z-50 flex flex-col bg-card lg:static lg:z-auto lg:w-[480px] xl:w-[520px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border lg:shadow-lg lg:overflow-hidden lg:sticky lg:top-20"
+            className="fixed inset-0 z-[60] flex flex-col bg-card lg:static lg:z-auto lg:w-[480px] xl:w-[520px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border lg:shadow-lg lg:overflow-hidden lg:sticky lg:top-20"
             style={{ maxHeight: undefined }}
           >
             <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-[calc(100vh-140px)] overflow-hidden">
@@ -922,7 +922,7 @@ export default function RapportsPage() {
             </div>
 
             {/* Footer actions */}
-            <div className="px-4 py-3.5 border-t border-border bg-muted/10 shrink-0 pb-[calc(0.875rem+env(safe-area-inset-bottom))] lg:pb-3.5">
+            <div className="px-4 py-3.5 border-t border-border bg-muted/10 shrink-0 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-3.5">
               {saveError && null}
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">

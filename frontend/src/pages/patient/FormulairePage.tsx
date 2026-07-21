@@ -1223,9 +1223,9 @@ export default function FormulairePage() {
             className="rounded-2xl px-4 sm:px-6 py-5"
             style={{ background: 'rgba(255,255,255,0.88)', border: '1px solid rgba(228,200,189,0.4)' }}
           >
-            {/* Numbered stepper */}
-            <div className="overflow-x-auto pb-1 -mx-1 px-1 sm:mx-0 sm:px-0">
-            <div className="relative flex min-w-[420px] sm:min-w-0 items-start justify-between gap-1">
+            {/* Numbered stepper — compact on mobile (no forced min-width) */}
+            <div className="overflow-x-auto pb-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:overflow-visible">
+            <div className="relative flex w-full items-start justify-between gap-1">
               {/* Connecting line behind the circles */}
               <div
                 className="absolute top-4 left-0 right-0 h-px"

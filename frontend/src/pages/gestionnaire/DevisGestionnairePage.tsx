@@ -283,7 +283,7 @@ function DevisModal({
       <div className="relative z-10 w-full max-w-5xl max-h-[94vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 shrink-0">
           <div>
             <h2 className="text-base font-bold text-slate-900">
               {existingDevis?.statut === 'brouillon' || isEditing ? 'Modifier le devis' : 'Nouveau devis'}
@@ -299,13 +299,13 @@ function DevisModal({
         </div>
 
         {/* Corps scrollable */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-6">
 
           {/* Tableau des prestations */}
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Prestations</p>
             <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <div className="grid grid-cols-12 bg-slate-50 px-4 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+              <div className="hidden sm:grid grid-cols-12 bg-slate-50 px-4 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
                 <div className="col-span-5">Désignation</div>
                 <div className="col-span-2 text-center">Qté</div>
                 <div className="col-span-2 text-right">P.U. (TND)</div>
@@ -314,39 +314,51 @@ function DevisModal({
               </div>
               <div className="divide-y divide-slate-100">
                 {lignes.map((ligne, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-1.5 px-3 py-2 items-center">
+                  <div key={i} className="flex flex-col gap-2 p-3 sm:grid sm:grid-cols-12 sm:gap-1.5 sm:items-center">
                     <Input
-                      className="col-span-5 h-8 text-sm border-slate-200 focus:border-brand-400"
+                      className="sm:col-span-5 h-10 sm:h-8 text-sm border-slate-200 focus:border-brand-400"
                       placeholder="Description de la prestation"
                       value={ligne.description}
                       onChange={(e) => updateLigne(i, 'description', e.target.value)}
                     />
-                    <Input
-                      className="col-span-2 h-8 text-sm text-center border-slate-200"
-                      type="number" min={1} value={ligne.quantite}
-                      onChange={(e) => updateLigne(i, 'quantite', parseInt(e.target.value, 10) || 1)}
-                    />
-                    <Input
-                      className="col-span-2 h-8 text-sm text-right border-slate-200"
-                      type="number" min={0} step={1} value={ligne.prixUnitaire}
-                      onChange={(e) => {
-                        const raw = e.target.value
-                        const v = raw === '' ? 0 : Number.parseFloat(raw)
-                        updateLigne(
-                          i,
-                          'prixUnitaire',
-                          Number.isFinite(v) ? normalizeTndDinars(v) : 0
-                        )
-                      }}
-                    />
-                    <div className="col-span-2 text-right text-xs font-semibold text-slate-600 pr-1">
-                      {formatCurrency(ligne.quantite * ligne.prixUnitaire, currency)}
+                    <div className="grid grid-cols-3 gap-2 sm:contents">
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] text-slate-400 sm:hidden mb-0.5 block">Qté</label>
+                        <Input
+                          className="h-10 sm:h-8 text-sm text-center border-slate-200"
+                          type="number" min={1} value={ligne.quantite}
+                          onChange={(e) => updateLigne(i, 'quantite', parseInt(e.target.value, 10) || 1)}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] text-slate-400 sm:hidden mb-0.5 block">P.U.</label>
+                        <Input
+                          className="h-10 sm:h-8 text-sm text-right border-slate-200"
+                          type="number" min={0} step={1} value={ligne.prixUnitaire}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            const v = raw === '' ? 0 : Number.parseFloat(raw)
+                            updateLigne(
+                              i,
+                              'prixUnitaire',
+                              Number.isFinite(v) ? normalizeTndDinars(v) : 0
+                            )
+                          }}
+                        />
+                      </div>
+                      <div className="sm:col-span-2 flex flex-col justify-center text-right">
+                        <label className="text-[10px] text-slate-400 sm:hidden mb-0.5 block">Total</label>
+                        <span className="text-xs font-semibold text-slate-600 pr-1">
+                          {formatCurrency(ligne.quantite * ligne.prixUnitaire, currency)}
+                        </span>
+                      </div>
                     </div>
                     <button
                       type="button" onClick={() => removeLigne(i)}
-                      className="col-span-1 flex justify-center text-slate-300 hover:text-red-400 transition-colors"
+                      className="sm:col-span-1 flex justify-end sm:justify-center text-slate-300 hover:text-red-400 transition-colors min-h-10 sm:min-h-0 items-center"
                     >
                       <Trash2 className="h-4 w-4" />
+                      <span className="text-xs ml-1 sm:hidden">Supprimer</span>
                     </button>
                   </div>
                 ))}
@@ -484,7 +496,7 @@ function DevisModal({
         </div>
 
         {/* Footer avec actions */}
-        <div className="shrink-0 border-t border-slate-200 px-6 py-4 flex flex-col sm:flex-row gap-2.5 bg-slate-50/60">
+        <div className="shrink-0 border-t border-slate-200 px-4 sm:px-6 py-4 flex flex-col sm:flex-row gap-2.5 bg-slate-50/60">
           <Button
             variant="brand"
             className="flex-1 h-10 gap-2 font-semibold"

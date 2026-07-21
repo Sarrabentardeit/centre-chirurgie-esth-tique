@@ -372,7 +372,8 @@ export default function UsersManagementPage() {
             const RoleIcon = roleMeta.icon
             return (
               <div key={u.id}>
-                <div className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/60 transition-colors">
+                <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:gap-3 sm:px-5 hover:bg-gray-50/60 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                   <Avatar name={u.fullName} role={u.role} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -387,8 +388,8 @@ export default function UsersManagementPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                      <span className="text-xs text-gray-400 flex items-center gap-1">
-                        <Mail className="h-3 w-3" /> {u.email}
+                      <span className="text-xs text-gray-400 flex items-center gap-1 break-all">
+                        <Mail className="h-3 w-3 shrink-0" /> {u.email}
                       </span>
                       {u.patient?.dossierNumber && (
                         <span className="text-xs font-semibold text-brand-600">{u.patient.dossierNumber}</span>
@@ -401,17 +402,18 @@ export default function UsersManagementPage() {
                       )}
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
+                  </div>
+                  <div className="flex items-center justify-between sm:flex-col sm:items-end sm:text-right shrink-0 gap-2">
                     <span className="text-[11px] text-gray-400 flex items-center gap-1">
                       <CalendarDays className="h-3 w-3" /> {formatRelative(u.createdAt)}
                     </span>
-                    <div className="mt-1.5 flex items-center gap-1.5 justify-end">
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
                       {editingUserId === u.id ? (
                         <>
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-2 text-xs"
+                            className="h-9 min-h-9 px-3 text-xs"
                             onClick={cancelEdit}
                             disabled={actionUserId === u.id}
                           >
@@ -420,7 +422,7 @@ export default function UsersManagementPage() {
                           <Button
                             size="sm"
                             variant="brand"
-                            className="h-7 px-2 text-xs"
+                            className="h-9 min-h-9 px-3 text-xs"
                             onClick={() => void handleSaveEdit(u)}
                             disabled={actionUserId === u.id}
                           >
@@ -432,7 +434,7 @@ export default function UsersManagementPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-2 text-xs"
+                            className="h-9 min-h-9 px-3 text-xs"
                             onClick={() => beginEdit(u)}
                             disabled={Boolean(actionUserId)}
                           >
@@ -441,7 +443,7 @@ export default function UsersManagementPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-2 text-xs text-red-600 hover:text-red-700"
+                            className="h-9 min-h-9 px-3 text-xs text-red-600 hover:text-red-700"
                             onClick={() => void handleDelete(u)}
                             disabled={Boolean(actionUserId)}
                           >

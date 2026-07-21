@@ -200,14 +200,14 @@ export default function PatientAccessPage() {
           </div>
 
           <div className="mb-5">
-            <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-[#e4c8bd] bg-[#fffdfa] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-              <span className="flex h-11 items-center justify-center rounded-lg border border-[#ddbca9] bg-white px-1.5 text-center text-[10px] leading-tight font-medium text-[#282727]">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 rounded-xl border border-[#e4c8bd] bg-[#fffdfa] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+              <span className="flex min-h-11 items-center justify-center rounded-lg border border-[#ddbca9] bg-white px-2 py-2 text-center text-[11px] leading-tight font-medium text-[#282727]">
                 Confidentialité médicale
               </span>
-              <span className="flex h-11 items-center justify-center rounded-lg border border-[#ddbca9] bg-white px-1.5 text-center text-[10px] leading-tight font-medium text-[#282727]">
+              <span className="flex min-h-11 items-center justify-center rounded-lg border border-[#ddbca9] bg-white px-2 py-2 text-center text-[11px] leading-tight font-medium text-[#282727]">
                 Espace sécurisé
               </span>
-              <span className="flex h-11 items-center justify-center rounded-lg border border-[#ddbca9] bg-white px-1.5 text-center text-[10px] leading-tight font-medium text-[#282727]">
+              <span className="flex min-h-11 items-center justify-center rounded-lg border border-[#ddbca9] bg-white px-2 py-2 text-center text-[11px] leading-tight font-medium text-[#282727]">
                 Accès réservé patient
               </span>
             </div>

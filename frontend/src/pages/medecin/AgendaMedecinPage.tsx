@@ -889,9 +889,9 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
 
       {/* ── Mini-menu choix type d'événement ── */}
       {cellPicker && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setCellPicker(null)} />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background shadow-2xl overflow-hidden">
+          <div className="relative z-10 w-full max-w-sm max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div>
                 <p className="text-base font-bold">Nouvel événement</p>
@@ -975,9 +975,9 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
       )}
 
       {quickType !== 'none' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/45" onClick={() => setQuickType('none')} />
-          <div className="relative z-10 w-full max-w-2xl rounded-2xl border border-border bg-background shadow-2xl">
+          <div className="relative z-10 w-full max-w-2xl max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div>
                 <p className="text-lg font-bold">
@@ -1479,9 +1479,9 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
       </Card>
 
       {selectedEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/45" onClick={() => setSelectedEventId(null)} />
-          <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl overflow-hidden">
+          <div className="relative z-10 w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl">
             <div className="flex items-start justify-between px-5 py-4 border-b border-border">
               <div>
                 <p className="text-base font-bold">Détails du rendez-vous</p>

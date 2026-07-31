@@ -537,26 +537,28 @@ export default function PatientsPage() {
                     </div>
                   </div>
 
-                  {/* Actions — masquées sur mobile (tap = navigation vers détail) */}
-                  <div className="shrink-0 flex items-center gap-1">
+                  {/* Actions */}
+                  <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
                     {!isGestionnaire && (
                       <button
-                        className="h-8 w-8 hidden sm:flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        type="button"
+                        className="h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-xl sm:rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                         title="Modifier"
                         onClick={(e) => { e.stopPropagation(); setEditTarget(p) }}
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        <Pencil className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                       </button>
                     )}
                     <button
                       type="button"
-                      className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                      className="h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-xl sm:rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                       title="Supprimer le patient"
+                      aria-label="Supprimer le patient"
                       onClick={(e) => { e.stopPropagation(); setDeleteTarget(p) }}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                     </button>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors hidden sm:block" />
                   </div>
                 </div>
               )

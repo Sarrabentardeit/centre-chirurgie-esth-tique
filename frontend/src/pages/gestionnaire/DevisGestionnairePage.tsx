@@ -647,11 +647,7 @@ export default function DevisGestionnairePage() {
   const [sent, setSent]                       = useState(false)
   const [savedDraft, setSavedDraft]           = useState(false)
   const [actionLoading, setActionLoading]     = useState(false)
-  const [pendingDelete, setPendingDelete] = useState<
-    | { type: 'devis'; devisId: string }
-    | { type: 'patient'; patientId: string; name: string }
-    | null
-  >(null)
+  const [pendingDeleteDevisId, setPendingDeleteDevisId] = useState<string | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
@@ -882,42 +878,28 @@ export default function DevisGestionnairePage() {
 
   const closeDeleteDialog = () => {
     if (deleteLoading) return
-    setPendingDelete(null)
+    setPendingDeleteDevisId(null)
     setDeleteError(null)
   }
 
   const requestDeleteDevis = (devisId: string) => {
     setDeleteError(null)
-    setPendingDelete({ type: 'devis', devisId })
-  }
-
-  const requestDeletePatient = (patientId: string, name: string) => {
-    setDeleteError(null)
-    setPendingDelete({ type: 'patient', patientId, name })
+    setPendingDeleteDevisId(devisId)
   }
 
   const confirmPendingDelete = async () => {
-    if (!pendingDelete) return
+    if (!pendingDeleteDevisId) return
     setDeleteLoading(true)
     setDeleteError(null)
     setActionLoading(true)
     setPageError(null)
     try {
-      if (pendingDelete.type === 'devis') {
-        await gestionnaireApi.deleteDevis(pendingDelete.devisId)
-        setShowModal(false)
-        setIsEditingExisting(false)
-        if (selectedPatient) await loadPatientDetail(selectedPatient)
-        await loadPatients()
-      } else {
-        await gestionnaireApi.deletePatient(pendingDelete.patientId)
-        if (selectedPatient === pendingDelete.patientId) {
-          setShowModal(false)
-          goBackToList()
-        }
-        await loadPatients()
-      }
-      setPendingDelete(null)
+      await gestionnaireApi.deleteDevis(pendingDeleteDevisId)
+      setShowModal(false)
+      setIsEditingExisting(false)
+      if (selectedPatient) await loadPatientDetail(selectedPatient)
+      await loadPatients()
+      setPendingDeleteDevisId(null)
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : 'Erreur lors de la suppression.')
     } finally {
@@ -934,11 +916,6 @@ export default function DevisGestionnairePage() {
   const handleDeleteDevisFromList = (e: MouseEvent, devisId: string) => {
     e.stopPropagation()
     requestDeleteDevis(devisId)
-  }
-
-  const handleDeletePatient = (patientId: string, patientName: string, e?: MouseEvent) => {
-    e?.stopPropagation()
-    requestDeletePatient(patientId, patientName)
   }
 
   /* ══════ RENDER : Vue liste ══════ */
@@ -1102,31 +1079,21 @@ export default function DevisGestionnairePage() {
                   <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 shrink-0 transition-colors" />
                   </button>
 
-                  {/* Actions suppression */}
-                  <div className="flex items-center gap-0.5 shrink-0 border-l border-slate-100 pl-2 ml-1">
-                    {lastDevis && (
-                      <button
-                        type="button"
-                        title="Supprimer le devis"
-                        disabled={actionLoading}
-                        onClick={(e) => void handleDeleteDevisFromList(e, lastDevis.id)}
-                        className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span className="hidden lg:inline">Devis</span>
-                      </button>
-                    )}
+                  {/* Supprimer devis uniquement */}
+                  {lastDevis ? (
                     <button
                       type="button"
-                      title="Supprimer le patient"
+                      title="Supprimer le devis"
+                      aria-label="Supprimer le devis"
                       disabled={actionLoading}
-                      onClick={(e) => void handleDeletePatient(p.id, p.user.fullName, e)}
-                      className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      onClick={(e) => handleDeleteDevisFromList(e, lastDevis.id)}
+                      className="shrink-0 h-10 w-10 sm:h-9 sm:w-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 transition-colors disabled:opacity-50"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span className="hidden lg:inline">Patient</span>
+                      <Trash2 className="h-4 w-4" />
                     </button>
-                  </div>
+                  ) : (
+                    <span className="shrink-0 h-10 w-10 sm:h-9 sm:w-9" aria-hidden />
+                  )}
                 </div>
               )
             })}
@@ -1189,33 +1156,23 @@ export default function DevisGestionnairePage() {
               </div>
 
               {/* CTA Devis */}
-              <div className="flex flex-col items-end gap-2 shrink-0">
-                <div className="flex items-center gap-2 flex-wrap justify-end">
+              <div className="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto shrink-0">
+                <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
                   {existingDevis && (
                     <Button
                       type="button"
                       variant="outline"
-                      className="gap-1.5 h-10 text-sm text-amber-700 border-amber-200 hover:bg-amber-50"
+                      className="gap-1.5 h-10 text-sm text-destructive border-destructive/30 hover:bg-destructive/10 flex-1 sm:flex-none min-w-[44px]"
                       disabled={actionLoading}
-                      onClick={() => void handleDeleteDevis()}
+                      onClick={() => handleDeleteDevis()}
                     >
                       <Trash2 className="h-4 w-4" />
-                      Supprimer devis
+                      <span className="sm:inline">Supprimer devis</span>
                     </Button>
                   )}
                   <Button
-                    type="button"
-                    variant="outline"
-                    className="gap-1.5 h-10 text-sm text-red-600 border-red-200 hover:bg-red-50"
-                    disabled={actionLoading}
-                    onClick={() => void handleDeletePatient(patientRow.id, patientRow.user.fullName)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Supprimer patient
-                  </Button>
-                  <Button
                     variant="brand"
-                    className="gap-2 px-5 h-10 text-sm font-semibold"
+                    className="gap-2 px-4 sm:px-5 h-10 text-sm font-semibold flex-1 sm:flex-none"
                     onClick={() => openModal(!!existingDevis && existingDevis.statut !== 'refuse')}
                     disabled={detailLoading || !devisAllowed}
                     title={
@@ -1477,15 +1434,11 @@ export default function DevisGestionnairePage() {
       )}
 
       <ConfirmDialog
-        open={pendingDelete !== null}
+        open={pendingDeleteDevisId !== null}
         onClose={closeDeleteDialog}
-        title={pendingDelete?.type === 'patient' ? 'Supprimer ce patient ?' : 'Supprimer ce devis ?'}
-        description={
-          pendingDelete?.type === 'patient'
-            ? 'Le compte, le dossier, les formulaires, rapports et devis associés seront définitivement effacés. Action irréversible.'
-            : 'Cette action est irréversible. Le devis sera définitivement effacé.'
-        }
-        confirmLabel={pendingDelete?.type === 'patient' ? 'Supprimer le patient' : 'Supprimer le devis'}
+        title="Supprimer ce devis ?"
+        description="Cette action est irréversible. Le devis sera définitivement effacé."
+        confirmLabel="Supprimer le devis"
         loading={deleteLoading}
         error={deleteError}
         onConfirm={confirmPendingDelete}
@@ -1494,14 +1447,7 @@ export default function DevisGestionnairePage() {
             <Trash2 className="h-5 w-5 text-destructive" />
           </div>
         }
-      >
-        {pendingDelete?.type === 'patient' && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="font-semibold text-sm text-slate-900">{pendingDelete.name}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Suppression définitive du dossier patient</p>
-          </div>
-        )}
-      </ConfirmDialog>
+      />
     </div>
   )
 }

@@ -446,6 +446,20 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       currency: input.currency ?? 'EUR',
       dateValidite,
     })
+
+    const patientProfile = await prisma.patient.findUnique({
+      where: { id: patientId },
+      select: { dossierNumber: true, user: { select: { fullName: true } } },
+    })
+    if (patientProfile) {
+      const ref = devis.numeroDevis ?? patientProfile.dossierNumber
+      await notifyGestionnaires({
+        type: 'success',
+        titre: 'Devis généré',
+        message: `Un devis a été généré pour ${patientProfile.user.fullName} (${ref}) — total ${input.total} ${input.currency ?? 'EUR'}.`,
+        lienAction: `/gestionnaire/devis/${patientId}`,
+      })
+    }
   }
 
   if (['rapport_genere', 'devis_preparation'].includes(patient.status)) {
@@ -495,6 +509,13 @@ export async function sendDevis(gestionnaireId: string, devisId: string) {
   await prisma.patient.update({
     where: { id: patient.id },
     data: { status: 'devis_envoye' },
+  })
+
+  await notifyGestionnaires({
+    type: 'success',
+    titre: 'Devis envoyé au patient',
+    message: `Le devis de ${patient.user.fullName} (${devis.numeroDevis ?? patient.dossierNumber}) a été envoyé.`,
+    lienAction: `/gestionnaire/devis/${patient.id}`,
   })
 
   const templates = await getTemplateMap()

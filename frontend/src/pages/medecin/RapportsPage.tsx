@@ -28,6 +28,7 @@ interface Rapport {
   forfaitPropose: number | null
   nuitsClinique?: number | null
   anesthesieGenerale?: boolean | null
+  dureeSejourTunisie?: number | null
   notes: string | null
   createdAt: string
 }
@@ -154,6 +155,7 @@ export default function RapportsPage() {
   const [valeur, setValeur]               = useState('')
   const [forfait, setForfait]             = useState('')
   const [nuitsClinique, setNuitsClinique] = useState('')
+  const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [notes, setNotes]                 = useState('')
   const [saving, setSaving]               = useState(false)
@@ -205,7 +207,7 @@ export default function RapportsPage() {
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
     setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
-    setNuitsClinique(''); setAnesthesieGenerale(false); setNotes('')
+    setNuitsClinique(''); setDureeSejourTunisie(''); setAnesthesieGenerale(false); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
     try {
@@ -230,6 +232,7 @@ export default function RapportsPage() {
             : ''
         )
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
+        setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
         setNotes(r.notes ?? '')
         setPatients((prev) => prev.map((p) => p.id === patientId ? { ...p, rapport: r } : p))
@@ -254,6 +257,7 @@ export default function RapportsPage() {
         valeurMedicale: valeur || undefined,
         forfaitPropose: forfait ? Number(forfait) : undefined,
         nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
+        dureeSejourTunisie: dureeSejourTunisie === '' ? undefined : Number(dureeSejourTunisie),
         anesthesieGenerale,
         notes: notes || undefined,
       })
@@ -270,6 +274,7 @@ export default function RapportsPage() {
               valeurMedicale: valeur,
               forfaitPropose: forfait ? Number(forfait) : null,
               nuitsClinique: nuitsClinique === '' ? null : Number(nuitsClinique),
+              dureeSejourTunisie: dureeSejourTunisie === '' ? null : Number(dureeSejourTunisie),
               anesthesieGenerale,
               notes,
               createdAt: new Date().toISOString(),
@@ -848,6 +853,8 @@ export default function RapportsPage() {
                 color="bg-cyan-100 text-cyan-600"
                 subtitle={
                   `${nuitsClinique.trim() ? `${nuitsClinique} nuit(s)` : 'Nuits non précisées'} · ${
+                    dureeSejourTunisie.trim() ? `${dureeSejourTunisie} j. Tunisie` : 'Séjour global non précisé'
+                  } · ${
                     anesthesieGenerale ? 'Anesthésie générale: oui' : 'Anesthésie générale: non'
                   }`
                 }
@@ -870,6 +877,24 @@ export default function RapportsPage() {
                         className="w-[120px] h-10"
                       />
                       <span className="text-xs text-muted-foreground">nuit(s)</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Nombre de séjour global (Tunisie)
+                    </label>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={90}
+                        placeholder="Ex: 6"
+                        value={dureeSejourTunisie}
+                        onChange={(e) => setDureeSejourTunisie(e.target.value)}
+                        className="w-[120px] h-10"
+                      />
+                      <span className="text-xs text-muted-foreground">jour(s)</span>
                     </div>
                   </div>
 

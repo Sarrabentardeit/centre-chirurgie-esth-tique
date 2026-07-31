@@ -34,6 +34,7 @@ interface Rapport {
   forfaitPropose: number | null
   nuitsClinique?: number | null
   anesthesieGenerale?: boolean | null
+  dureeSejourTunisie?: number | null
   notes: string | null
   createdAt: string
 }
@@ -118,6 +119,7 @@ export default function DossierPatientPage() {
   const [interventions, setInterventions] = useState('')
   const [forfait, setForfait]           = useState('')
   const [nuitsClinique, setNuitsClinique] = useState('')
+  const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [notes, setNotes]               = useState('')
   const [saving, setSaving]             = useState(false)
@@ -154,12 +156,14 @@ export default function DossierPatientPage() {
             : ''
         )
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
+        setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
         setNotes(r.notes ?? '')
       } else {
         setExamensDemandes([])
         setExamensAutreChecked(false)
         setExamensAutreText('')
+        setDureeSejourTunisie('')
         setAnesthesieGenerale(false)
       }
       setNewStatus(res.patient.status)
@@ -188,6 +192,7 @@ export default function DossierPatientPage() {
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
         forfaitPropose: forfait ? Number(forfait) : undefined,
         nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
+        dureeSejourTunisie: dureeSejourTunisie === '' ? undefined : Number(dureeSejourTunisie),
         anesthesieGenerale,
         notes: notes || undefined,
       })
@@ -592,6 +597,18 @@ export default function DossierPatientPage() {
                     </Button>
                   </div>
                 </div>
+              </div>
+
+              <div className="space-y-2 max-w-xs">
+                <Label>Nombre de séjour global (Tunisie)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={90}
+                  value={dureeSejourTunisie}
+                  onChange={(e) => setDureeSejourTunisie(e.target.value)}
+                  placeholder="Ex: 6"
+                />
               </div>
 
               <div className="space-y-2">

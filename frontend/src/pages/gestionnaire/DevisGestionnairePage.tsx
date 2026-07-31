@@ -174,7 +174,7 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
           </div>
         </div>
       )}
-      {(r.nuitsClinique != null || r.anesthesieGenerale != null) && (
+      {(r.nuitsClinique != null || r.anesthesieGenerale != null || r.dureeSejourTunisie != null) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
             <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits clinique</p>
@@ -188,6 +188,14 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
               {r.anesthesieGenerale ? 'Oui' : 'Non'}
             </p>
           </div>
+          {r.dureeSejourTunisie != null && (
+            <div className="rounded-lg border border-teal-100 bg-teal-50/70 px-3 py-2.5 sm:col-span-2">
+              <p className="text-[11px] uppercase tracking-wide font-semibold text-teal-700 mb-1">Séjour global Tunisie</p>
+              <p className="text-sm font-semibold text-teal-900">
+                {r.dureeSejourTunisie} jour(s)
+              </p>
+            </div>
+          )}
         </div>
       )}
       {examens.length > 0 && (

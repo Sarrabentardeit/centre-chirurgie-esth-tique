@@ -622,6 +622,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
         : Math.round(Number(input.forfaitPropose.toFixed(2))),
     nuitsClinique:            input.nuitsClinique,
     anesthesieGenerale:       input.anesthesieGenerale,
+    dureeSejourTunisie:       input.dureeSejourTunisie,
     notes:                    input.notes,
   }
 
@@ -661,6 +662,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
         forfaitPropose: rapport.forfaitPropose,
         nuitsClinique: rapport.nuitsClinique,
         anesthesieGenerale: rapport.anesthesieGenerale,
+        dureeSejourTunisie: rapport.dureeSejourTunisie,
         notes: rapport.notes,
         updatedAt: rapport.updatedAt,
       } as never,

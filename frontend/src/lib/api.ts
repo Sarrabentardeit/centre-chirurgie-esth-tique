@@ -415,6 +415,7 @@ export interface PatientListItem {
     forfaitPropose: number | null
     nuitsClinique?: number | null
     anesthesieGenerale?: boolean | null
+    dureeSejourTunisie?: number | null
     notes: string | null
     createdAt: string
   }>
@@ -520,6 +521,7 @@ export const medecinApi = {
         forfaitPropose: number | null
         nuitsClinique?: number | null
         anesthesieGenerale?: boolean | null
+        dureeSejourTunisie?: number | null
         notes: string | null
         createdAt: string
       }>
@@ -551,6 +553,7 @@ export const medecinApi = {
     forfaitPropose?: number
     nuitsClinique?: number
     anesthesieGenerale?: boolean
+    dureeSejourTunisie?: number
     notes?: string
   }) =>
     request<{ ok: true; rapport: unknown }>(`/medecin/patients/${patientId}/rapport`, {
@@ -687,6 +690,7 @@ export interface GestionnaireRapportRow {
   forfaitPropose: number | null
   nuitsClinique?: number | null
   anesthesieGenerale?: boolean | null
+  dureeSejourTunisie?: number | null
   notes: string | null
   createdAt: string
 }

@@ -24,8 +24,17 @@ export async function sendNotificationEmail(input: {
   message: string
   lienAction?: string | null
 }): Promise<void> {
-  if (NOTIFICATION_RECIPIENTS.length === 0) return
-  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) return
+  if (NOTIFICATION_RECIPIENTS.length === 0) {
+    console.warn('[mailer] Envoi ignoré : NOTIFICATION_EMAILS vide')
+    return
+  }
+  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
+    console.warn(
+      '[mailer] Envoi ignoré : SMTP incomplet',
+      { host: !!env.SMTP_HOST, user: !!env.SMTP_USER, pass: !!env.SMTP_PASS },
+    )
+    return
+  }
 
   const appUrl = env.FRONTEND_URL ?? 'https://chennoufi.nav.ovh'
   const lien = input.lienAction ? `${appUrl}${input.lienAction}` : appUrl
@@ -86,11 +95,16 @@ export async function sendNotificationEmail(input: {
   `.trim()
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: `"Centre Est" <${env.SMTP_USER}>`,
       to: NOTIFICATION_RECIPIENTS.join(', '),
       subject: `[Centre Est] ${input.titre}`,
       html,
+    })
+    console.log('[mailer] Email envoyé', {
+      titre: input.titre,
+      to: NOTIFICATION_RECIPIENTS,
+      messageId: info.messageId,
     })
   } catch (err) {
     console.error('[mailer] Échec envoi email :', err)

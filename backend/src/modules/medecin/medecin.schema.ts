@@ -8,6 +8,7 @@ export const rapportSchema = z.object({
   forfaitPropose:           z.number().positive().optional(),
   nuitsClinique:            z.number().int().min(0).max(60).optional(),
   anesthesieGenerale:       z.boolean().optional(),
+  dureeSejourTunisie:       z.number().int().min(0).max(90).optional(),
   notes:                    z.string().optional(),
 })
 export type RapportInput = z.infer<typeof rapportSchema>

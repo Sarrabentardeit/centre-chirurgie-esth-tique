@@ -180,12 +180,22 @@ function sejourPdfFromPatient(p: GestionnairePatientDetail) {
   const nClinTot = nGestClin ?? nuitsClinRap
   const nHotelTot = nGestHotel != null ? nGestHotel : convNightsLegacy
   const totalNights = nClinTot + nHotelTot
-  const dureeTotale = totalNights > 0 ? `${totalNights + 1} jours / ${totalNights} nuits` : '—'
-  const jours = totalNights + 1
+  const dureeTotale =
+    rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0
+      ? `${rap.dureeSejourTunisie} jour${rap.dureeSejourTunisie > 1 ? 's' : ''}`
+      : totalNights > 0
+        ? `${totalNights + 1} jours / ${totalNights} nuits`
+        : '—'
+  const jours =
+    rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0
+      ? rap.dureeSejourTunisie
+      : totalNights + 1
   const sejourLine =
-    totalNights > 0
-      ? `Séjour ${totalNights} nuit${totalNights > 1 ? 's' : ''} / ${jours} jour${jours > 1 ? 's' : ''}`
-      : ''
+    rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0
+      ? `Séjour ${rap.dureeSejourTunisie} jour${rap.dureeSejourTunisie > 1 ? 's' : ''}`
+      : totalNights > 0
+        ? `Séjour ${totalNights} nuit${totalNights > 1 ? 's' : ''} / ${jours} jour${jours > 1 ? 's' : ''}`
+        : ''
 
   return { dureeHosp, cliniqueRetenue, postHospLabel, hotelSejour, dureeTotale, sejourLine }
 }

@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  Eye, EyeOff, Heart, User as UserIcon, Mail, Phone, Lock,
+  Eye, EyeOff, Heart, User as UserIcon, Mail, Lock,
   ArrowRight, CheckCircle2, Instagram, MessageCircle, Search,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,12 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/lib/api'
 import type { User } from '@/types'
+import {
+  PhoneInputField,
+  isValidPhoneNumber,
+  isTunisianPhone,
+  TUNISIA_PHONE_BLOCK_MESSAGE,
+} from '@/components/ui/phone-input-field'
 
 const inscriptionSchema = z.object({
   prenom: z.string().min(2, 'Prénom requis (min. 2 caractères)'),
@@ -31,6 +37,12 @@ const inscriptionSchema = z.object({
 }).refine((d) => d.password === d.confirmPassword, {
   message: 'Les mots de passe ne correspondent pas',
   path: ['confirmPassword'],
+}).refine((d) => isValidPhoneNumber(d.phone), {
+  message: 'Veuillez saisir un numéro valide avec indicatif pays',
+  path: ['phone'],
+}).refine((d) => !isTunisianPhone(d.phone), {
+  message: TUNISIA_PHONE_BLOCK_MESSAGE,
+  path: ['phone'],
 })
 
 type InscriptionForm = z.infer<typeof inscriptionSchema>
@@ -66,11 +78,13 @@ export default function InscriptionPage() {
     trigger,
     watch,
     setValue,
+    control,
     formState: { errors },
   } = useForm<InscriptionForm>({
     resolver: zodResolver(inscriptionSchema),
     defaultValues: {
       source: sourceParam ?? undefined,
+      phone: '',
     },
   })
 
@@ -328,18 +342,20 @@ export default function InscriptionPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="phone">Téléphone (WhatsApp de préférence) <span className="text-destructive">*</span></Label>
-                  <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="phone"
-                      type="tel"
-                      placeholder="+213 555 123 456"
-                      className={cn('pl-9', errors.phone && 'border-destructive')}
-                      {...register('phone')}
-                    />
-                  </div>
-                  {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
+                  <Label>Téléphone (WhatsApp de préférence) <span className="text-destructive">*</span></Label>
+                  <Controller
+                    name="phone"
+                    control={control}
+                    render={({ field }) => (
+                      <PhoneInputField
+                        value={field.value ?? ''}
+                        onChange={(v) => field.onChange(v ?? '')}
+                      />
+                    )}
+                  />
+                  {errors.phone && (
+                    <p className="text-xs text-destructive leading-relaxed">{errors.phone.message}</p>
+                  )}
                 </div>
 
                 <div className="space-y-1.5">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import {
   Plus, Trash2, Save, Send, CheckCircle2, FileText, AlertCircle,
   RefreshCw, Search, Eye, EyeOff, ChevronDown, ChevronRight,
@@ -33,8 +33,10 @@ import {
   parseSejourMeta,
   resolveCliniqueFromNom,
   resolveHotelFromNom,
+  devisSejourDefaultsFromRapport,
 } from '@/lib/devisSejourNotes'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 
 /* ══════════════════════════════════════════════════
    TYPES & HELPERS
@@ -174,7 +176,7 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
           </div>
         </div>
       )}
-      {(r.nuitsClinique != null || r.anesthesieGenerale != null || r.dureeSejourTunisie != null) && (
+      {(r.nuitsClinique != null || r.anesthesieGenerale != null || r.dureeSejourTunisie != null || r.nbAdultesSejour != null) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
             <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits clinique</p>
@@ -189,10 +191,18 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
             </p>
           </div>
           {r.dureeSejourTunisie != null && (
-            <div className="rounded-lg border border-teal-100 bg-teal-50/70 px-3 py-2.5 sm:col-span-2">
+            <div className="rounded-lg border border-teal-100 bg-teal-50/70 px-3 py-2.5">
               <p className="text-[11px] uppercase tracking-wide font-semibold text-teal-700 mb-1">Séjour global Tunisie</p>
               <p className="text-sm font-semibold text-teal-900">
                 {r.dureeSejourTunisie} jour(s)
+              </p>
+            </div>
+          )}
+          {(r.nbAdultesSejour != null || r.nbEnfantsSejour != null) && (
+            <div className="rounded-lg border border-violet-100 bg-violet-50/70 px-3 py-2.5">
+              <p className="text-[11px] uppercase tracking-wide font-semibold text-violet-700 mb-1">Accompagnants</p>
+              <p className="text-sm font-semibold text-violet-900">
+                {r.nbAdultesSejour ?? '—'} adulte(s) · {r.nbEnfantsSejour ?? 0} enfant(s)
               </p>
             </div>
           )}
@@ -249,6 +259,9 @@ interface DevisModalProps {
   hotelChoice: string; setHotelChoice: (v: string) => void
   hotelAutre: string; setHotelAutre: (v: string) => void
   hotelNuits: string; setHotelNuits: (v: string) => void
+  nbAdultes: string; setNbAdultes: (v: string) => void
+  nbEnfants: string; setNbEnfants: (v: string) => void
+  dureeSejourTotale: string; setDureeSejourTotale: (v: string) => void
   notesSejour: string; setNotesSejour: (v: string) => void
   sent: boolean; savedDraft: boolean; actionLoading: boolean
   onSend: () => void; onSaveDraft: () => void
@@ -266,6 +279,9 @@ function DevisModal({
   cliniqueNuits, setCliniqueNuits,
   hotelChoice, setHotelChoice, hotelAutre, setHotelAutre,
   hotelNuits, setHotelNuits,
+  nbAdultes, setNbAdultes,
+  nbEnfants, setNbEnfants,
+  dureeSejourTotale, setDureeSejourTotale,
   notesSejour, setNotesSejour,
   sent, savedDraft, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
   tauxEur,
@@ -444,6 +460,7 @@ function DevisModal({
                       value={cliniqueNuits}
                       onChange={(e) => setCliniqueNuits(e.target.value)}
                     />
+                    <p className="text-[11px] text-slate-400 mt-1">Rapport médecin</p>
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
@@ -486,7 +503,48 @@ function DevisModal({
                       value={hotelNuits}
                       onChange={(e) => setHotelNuits(e.target.value)}
                     />
+                    <p className="text-[11px] text-slate-400 mt-1">Auto : total − 1 − clinique</p>
                   </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1.5">Séjour total (jours)</label>
+                  <Input
+                    className="h-9 text-sm border-slate-200 bg-white"
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="Ex. : 6"
+                    value={dureeSejourTotale}
+                    onChange={(e) => setDureeSejourTotale(e.target.value)}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Depuis le rapport médecin.</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1.5">Nombre d&apos;adultes</label>
+                  <Input
+                    className="h-9 text-sm border-slate-200 bg-white"
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder="Ex. : 1"
+                    value={nbAdultes}
+                    onChange={(e) => setNbAdultes(e.target.value)}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Depuis le rapport médecin.</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1.5">Nbr enfants (2 – 12 ans)</label>
+                  <Input
+                    className="h-9 text-sm border-slate-200 bg-white"
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="Ex. : 0"
+                    value={nbEnfants}
+                    onChange={(e) => setNbEnfants(e.target.value)}
+                  />
                 </div>
               </div>
               <div>
@@ -581,11 +639,21 @@ export default function DevisGestionnairePage() {
   const [hotelChoice, setHotelChoice]         = useState('')
   const [hotelAutre, setHotelAutre]           = useState('')
   const [hotelNuits, setHotelNuits]           = useState('')
+  const [nbAdultes, setNbAdultes]             = useState('1')
+  const [nbEnfants, setNbEnfants]             = useState('0')
+  const [dureeSejourTotale, setDureeSejourTotale] = useState('')
   const [notesSejour, setNotesSejour]         = useState('')
   const [isEditingExisting, setIsEditingExisting] = useState(false)
   const [sent, setSent]                       = useState(false)
   const [savedDraft, setSavedDraft]           = useState(false)
   const [actionLoading, setActionLoading]     = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<
+    | { type: 'devis'; devisId: string }
+    | { type: 'patient'; patientId: string; name: string }
+    | null
+  >(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const patientsFiltered = useMemo(() => {
     const all = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
@@ -667,6 +735,10 @@ export default function DevisGestionnairePage() {
       )
       return
     }
+    const formPayload = (patientDetail?.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
+    const rap = patientDetail?.rapports?.[0]
+    const fromRapport = devisSejourDefaultsFromRapport(rap, formPayload)
+
     if (editing && existingDevis) {
       setLignes(
         existingDevis.lignes.map((l) => ({
@@ -680,10 +752,13 @@ export default function DevisGestionnairePage() {
       const hotel = resolveHotelFromNom(p.hotelNom)
       setCliniqueChoice(clinique.choice)
       setCliniqueAutre(clinique.autre)
-      setCliniqueNuits(p.cliniqueNuits)
+      setCliniqueNuits(p.cliniqueNuits !== '' ? p.cliniqueNuits : fromRapport.cliniqueNuits)
       setHotelChoice(hotel.choice)
       setHotelAutre(hotel.autre)
-      setHotelNuits(p.hotelNuits)
+      setHotelNuits(p.hotelNuits !== '' ? p.hotelNuits : fromRapport.hotelNuits)
+      setNbAdultes(p.nbAdultes !== '' ? p.nbAdultes : fromRapport.nbAdultes)
+      setNbEnfants(p.nbEnfants !== '' ? p.nbEnfants : fromRapport.nbEnfants)
+      setDureeSejourTotale(p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale)
       setNotesSejour(p.noteSejour)
       setIsEditingExisting(true)
     } else {
@@ -691,8 +766,13 @@ export default function DevisGestionnairePage() {
       const honoraires =
         typeof fp === 'number' && Number.isFinite(fp) && fp > 0 ? fp : undefined
       setLignes(buildDefaultLignes(honoraires))
-      setCliniqueChoice(''); setCliniqueAutre(''); setCliniqueNuits('')
-      setHotelChoice(''); setHotelAutre(''); setHotelNuits('')
+      setCliniqueChoice(''); setCliniqueAutre('')
+      setCliniqueNuits(fromRapport.cliniqueNuits)
+      setHotelChoice(''); setHotelAutre('')
+      setHotelNuits(fromRapport.hotelNuits)
+      setNbAdultes(fromRapport.nbAdultes)
+      setNbEnfants(fromRapport.nbEnfants)
+      setDureeSejourTotale(fromRapport.dureeSejourTotale)
       setNotesSejour('')
       setIsEditingExisting(false)
     }
@@ -719,6 +799,9 @@ export default function DevisGestionnairePage() {
           cliniqueNuits,
           hotelNom: hotelNomFromChoice(hotelChoice, hotelAutre),
           hotelNuits,
+          nbAdultes,
+          nbEnfants,
+          dureeSejourTotale,
           noteSejour: notesSejour,
         }) || null,
       currency,
@@ -797,21 +880,65 @@ export default function DevisGestionnairePage() {
     }
   }
 
-  const handleDeleteDevis = async () => {
-    if (!existingDevis) return
-    if (!window.confirm('Supprimer ce devis ? Cette action est irréversible.')) return
-    setActionLoading(true); setPageError(null)
+  const closeDeleteDialog = () => {
+    if (deleteLoading) return
+    setPendingDelete(null)
+    setDeleteError(null)
+  }
+
+  const requestDeleteDevis = (devisId: string) => {
+    setDeleteError(null)
+    setPendingDelete({ type: 'devis', devisId })
+  }
+
+  const requestDeletePatient = (patientId: string, name: string) => {
+    setDeleteError(null)
+    setPendingDelete({ type: 'patient', patientId, name })
+  }
+
+  const confirmPendingDelete = async () => {
+    if (!pendingDelete) return
+    setDeleteLoading(true)
+    setDeleteError(null)
+    setActionLoading(true)
+    setPageError(null)
     try {
-      await gestionnaireApi.deleteDevis(existingDevis.id)
-      setShowModal(false)
-      setIsEditingExisting(false)
-      await loadPatientDetail(selectedPatient)
-      await loadPatients()
+      if (pendingDelete.type === 'devis') {
+        await gestionnaireApi.deleteDevis(pendingDelete.devisId)
+        setShowModal(false)
+        setIsEditingExisting(false)
+        if (selectedPatient) await loadPatientDetail(selectedPatient)
+        await loadPatients()
+      } else {
+        await gestionnaireApi.deletePatient(pendingDelete.patientId)
+        if (selectedPatient === pendingDelete.patientId) {
+          setShowModal(false)
+          goBackToList()
+        }
+        await loadPatients()
+      }
+      setPendingDelete(null)
     } catch (e) {
-      setPageError(e instanceof Error ? e.message : 'Erreur.')
+      setDeleteError(e instanceof Error ? e.message : 'Erreur lors de la suppression.')
     } finally {
+      setDeleteLoading(false)
       setActionLoading(false)
     }
+  }
+
+  const handleDeleteDevis = () => {
+    if (!existingDevis) return
+    requestDeleteDevis(existingDevis.id)
+  }
+
+  const handleDeleteDevisFromList = (e: MouseEvent, devisId: string) => {
+    e.stopPropagation()
+    requestDeleteDevis(devisId)
+  }
+
+  const handleDeletePatient = (patientId: string, patientName: string, e?: MouseEvent) => {
+    e?.stopPropagation()
+    requestDeletePatient(patientId, patientName)
   }
 
   /* ══════ RENDER : Vue liste ══════ */
@@ -883,12 +1010,15 @@ export default function DevisGestionnairePage() {
               }[devisStatut ?? ''] ?? { label: 'Pas de devis', cls: 'bg-slate-100 text-slate-500 border-slate-200', dot: 'bg-slate-300' }
 
               return (
-                <button
+                <div
                   key={p.id}
-                  type="button"
-                  onClick={() => openDetail(p.id)}
-                  className="w-full bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all text-left px-3 sm:px-5 py-3 sm:py-4 flex items-center gap-2 sm:gap-4 group"
+                  className="w-full bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all px-3 sm:px-5 py-3 sm:py-4 flex items-center gap-2 sm:gap-4 group"
                 >
+                  <button
+                    type="button"
+                    onClick={() => openDetail(p.id)}
+                    className="flex-1 min-w-0 flex items-center gap-2 sm:gap-4 text-left"
+                  >
                   {/* Avatar */}
                   <Avatar className="h-9 w-9 sm:h-11 sm:w-11 shrink-0">
                     <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-xs sm:text-sm">
@@ -969,9 +1099,35 @@ export default function DevisGestionnairePage() {
                     )}
                   </div>
 
-                  {/* Flèche */}
                   <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 shrink-0 transition-colors" />
-                </button>
+                  </button>
+
+                  {/* Actions suppression */}
+                  <div className="flex items-center gap-0.5 shrink-0 border-l border-slate-100 pl-2 ml-1">
+                    {lastDevis && (
+                      <button
+                        type="button"
+                        title="Supprimer le devis"
+                        disabled={actionLoading}
+                        onClick={(e) => void handleDeleteDevisFromList(e, lastDevis.id)}
+                        className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="hidden lg:inline">Devis</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Supprimer le patient"
+                      disabled={actionLoading}
+                      onClick={(e) => void handleDeletePatient(p.id, p.user.fullName, e)}
+                      className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span className="hidden lg:inline">Patient</span>
+                    </button>
+                  </div>
+                </div>
               )
             })}
           </div>
@@ -1034,20 +1190,44 @@ export default function DevisGestionnairePage() {
 
               {/* CTA Devis */}
               <div className="flex flex-col items-end gap-2 shrink-0">
-                <Button
-                  variant="brand"
-                  className="gap-2 px-5 h-10 text-sm font-semibold"
-                  onClick={() => openModal(!!existingDevis && existingDevis.statut !== 'refuse')}
-                  disabled={detailLoading || !devisAllowed}
-                  title={
-                    devisAllowed
-                      ? undefined
-                      : 'En attente du rapport médical (médecin) avant devis.'
-                  }
-                >
-                  <FileText className="h-4 w-4" />
-                  {devisActionLabel}
-                </Button>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {existingDevis && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-1.5 h-10 text-sm text-amber-700 border-amber-200 hover:bg-amber-50"
+                      disabled={actionLoading}
+                      onClick={() => void handleDeleteDevis()}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Supprimer devis
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-1.5 h-10 text-sm text-red-600 border-red-200 hover:bg-red-50"
+                    disabled={actionLoading}
+                    onClick={() => void handleDeletePatient(patientRow.id, patientRow.user.fullName)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Supprimer patient
+                  </Button>
+                  <Button
+                    variant="brand"
+                    className="gap-2 px-5 h-10 text-sm font-semibold"
+                    onClick={() => openModal(!!existingDevis && existingDevis.statut !== 'refuse')}
+                    disabled={detailLoading || !devisAllowed}
+                    title={
+                      devisAllowed
+                        ? undefined
+                        : 'En attente du rapport médical (médecin) avant devis.'
+                    }
+                  >
+                    <FileText className="h-4 w-4" />
+                    {devisActionLabel}
+                  </Button>
+                </div>
                 {!devisAllowed && (
                   <p className="text-xs text-amber-700 max-w-xs text-right">
                     Rapport médical requis avant devis.
@@ -1281,17 +1461,47 @@ export default function DevisGestionnairePage() {
           hotelChoice={hotelChoice} setHotelChoice={setHotelChoice}
           hotelAutre={hotelAutre} setHotelAutre={setHotelAutre}
           hotelNuits={hotelNuits} setHotelNuits={setHotelNuits}
+          nbAdultes={nbAdultes} setNbAdultes={setNbAdultes}
+          nbEnfants={nbEnfants} setNbEnfants={setNbEnfants}
+          dureeSejourTotale={dureeSejourTotale} setDureeSejourTotale={setDureeSejourTotale}
           notesSejour={notesSejour} setNotesSejour={setNotesSejour}
           sent={sent} savedDraft={savedDraft} actionLoading={actionLoading}
           onSend={() => void handleSend()}
           onSaveDraft={() => void handleSaveDraft()}
-          onDelete={() => void handleDeleteDevis()}
+          onDelete={() => handleDeleteDevis()}
           canDelete={!!existingDevis && existingDevis.statut !== 'accepte'}
           onCustomize={handleCustomize}
           currency={currency}
           tauxEur={tauxEur}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onClose={closeDeleteDialog}
+        title={pendingDelete?.type === 'patient' ? 'Supprimer ce patient ?' : 'Supprimer ce devis ?'}
+        description={
+          pendingDelete?.type === 'patient'
+            ? 'Le compte, le dossier, les formulaires, rapports et devis associés seront définitivement effacés. Action irréversible.'
+            : 'Cette action est irréversible. Le devis sera définitivement effacé.'
+        }
+        confirmLabel={pendingDelete?.type === 'patient' ? 'Supprimer le patient' : 'Supprimer le devis'}
+        loading={deleteLoading}
+        error={deleteError}
+        onConfirm={confirmPendingDelete}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-red-50 border border-red-100 flex items-center justify-center">
+            <Trash2 className="h-5 w-5 text-destructive" />
+          </div>
+        }
+      >
+        {pendingDelete?.type === 'patient' && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="font-semibold text-sm text-slate-900">{pendingDelete.name}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Suppression définitive du dossier patient</p>
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   )
 }

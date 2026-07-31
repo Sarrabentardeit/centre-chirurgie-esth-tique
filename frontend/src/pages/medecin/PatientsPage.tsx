@@ -192,8 +192,9 @@ function EditModal({ patient, onClose, onSaved }: {
 
 // ─── Modal Confirmer Suppression ─────────────────────────────────────────────
 
-function DeleteModal({ patient, onClose, onDeleted }: {
+function DeleteModal({ patient, asGestionnaire, onClose, onDeleted }: {
   patient: PatientListItem
+  asGestionnaire: boolean
   onClose: () => void
   onDeleted: () => void
 }) {
@@ -203,7 +204,8 @@ function DeleteModal({ patient, onClose, onDeleted }: {
   const handleDelete = async () => {
     setDeleting(true); setErr(null)
     try {
-      await medecinApi.deletePatient(patient.id)
+      if (asGestionnaire) await gestionnaireApi.deletePatient(patient.id)
+      else await medecinApi.deletePatient(patient.id)
       onDeleted()
       onClose()
     } catch (e) {
@@ -538,23 +540,22 @@ export default function PatientsPage() {
                   {/* Actions — masquées sur mobile (tap = navigation vers détail) */}
                   <div className="shrink-0 flex items-center gap-1">
                     {!isGestionnaire && (
-                      <>
-                        <button
-                          className="h-8 w-8 hidden sm:flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                          title="Modifier"
-                          onClick={(e) => { e.stopPropagation(); setEditTarget(p) }}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          className="h-8 w-8 hidden sm:flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                          title="Supprimer"
-                          onClick={(e) => { e.stopPropagation(); setDeleteTarget(p) }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </>
+                      <button
+                        className="h-8 w-8 hidden sm:flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        title="Modifier"
+                        onClick={(e) => { e.stopPropagation(); setEditTarget(p) }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
                     )}
+                    <button
+                      type="button"
+                      className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                      title="Supprimer le patient"
+                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(p) }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                     <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
                   </div>
                 </div>
@@ -595,6 +596,7 @@ export default function PatientsPage() {
       {deleteTarget && (
         <DeleteModal
           patient={deleteTarget}
+          asGestionnaire={isGestionnaire}
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => {
             setPatients((prev) => prev.filter((p) => p.id !== deleteTarget.id))

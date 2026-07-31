@@ -16,6 +16,7 @@ import { formatDate, formatRelative, STATUS_LABELS, STATUS_COLORS } from '@/lib/
 import { useAuthStore } from '@/store/authStore'
 import { medecinApi } from '@/lib/api'
 import type { PatientListItem } from '@/lib/api'
+import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,8 @@ interface Rapport {
   nuitsClinique?: number | null
   anesthesieGenerale?: boolean | null
   dureeSejourTunisie?: number | null
+  nbAdultesSejour?: number | null
+  nbEnfantsSejour?: number | null
   notes: string | null
   createdAt: string
 }
@@ -156,6 +159,8 @@ export default function RapportsPage() {
   const [forfait, setForfait]             = useState('')
   const [nuitsClinique, setNuitsClinique] = useState('')
   const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
+  const [nbAdultesSejour, setNbAdultesSejour] = useState('')
+  const [nbEnfantsSejour, setNbEnfantsSejour] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [notes, setNotes]                 = useState('')
   const [saving, setSaving]               = useState(false)
@@ -207,7 +212,7 @@ export default function RapportsPage() {
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
     setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
-    setNuitsClinique(''); setDureeSejourTunisie(''); setAnesthesieGenerale(false); setNotes('')
+    setNuitsClinique(''); setDureeSejourTunisie(''); setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
     try {
@@ -233,9 +238,26 @@ export default function RapportsPage() {
         )
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
         setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
+        setNbAdultesSejour(r.nbAdultesSejour != null ? String(r.nbAdultesSejour) : '')
+        setNbEnfantsSejour(r.nbEnfantsSejour != null ? String(r.nbEnfantsSejour) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
         setNotes(r.notes ?? '')
         setPatients((prev) => prev.map((p) => p.id === patientId ? { ...p, rapport: r } : p))
+        if (r.nbAdultesSejour == null && r.nbEnfantsSejour == null) {
+          const payload = res.patient.formulaires?.[0]?.payload as Record<string, unknown> | undefined
+          if (payload) {
+            const acc = accompagnantsFromFormulairePayload(payload)
+            setNbAdultesSejour(acc.nbAdultes)
+            setNbEnfantsSejour(acc.nbEnfants)
+          }
+        }
+      } else {
+        const payload = res.patient.formulaires?.[0]?.payload as Record<string, unknown> | undefined
+        if (payload) {
+          const acc = accompagnantsFromFormulairePayload(payload)
+          setNbAdultesSejour(acc.nbAdultes)
+          setNbEnfantsSejour(acc.nbEnfants)
+        }
       }
     } catch { /* silent */ }
   }
@@ -258,6 +280,8 @@ export default function RapportsPage() {
         forfaitPropose: forfait ? Number(forfait) : undefined,
         nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
         dureeSejourTunisie: dureeSejourTunisie === '' ? undefined : Number(dureeSejourTunisie),
+        nbAdultesSejour: nbAdultesSejour === '' ? undefined : Number(nbAdultesSejour),
+        nbEnfantsSejour: nbEnfantsSejour === '' ? undefined : Number(nbEnfantsSejour),
         anesthesieGenerale,
         notes: notes || undefined,
       })
@@ -275,6 +299,8 @@ export default function RapportsPage() {
               forfaitPropose: forfait ? Number(forfait) : null,
               nuitsClinique: nuitsClinique === '' ? null : Number(nuitsClinique),
               dureeSejourTunisie: dureeSejourTunisie === '' ? null : Number(dureeSejourTunisie),
+              nbAdultesSejour: nbAdultesSejour === '' ? null : Number(nbAdultesSejour),
+              nbEnfantsSejour: nbEnfantsSejour === '' ? null : Number(nbEnfantsSejour),
               anesthesieGenerale,
               notes,
               createdAt: new Date().toISOString(),
@@ -897,6 +923,44 @@ export default function RapportsPage() {
                       <span className="text-xs text-muted-foreground">jour(s)</span>
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                        Nombre d&apos;adultes (séjour)
+                      </label>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          max={20}
+                          placeholder="Ex: 1"
+                          value={nbAdultesSejour}
+                          onChange={(e) => setNbAdultesSejour(e.target.value)}
+                          className="w-full h-10"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                        Nbr enfants (2–12 ans)
+                      </label>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={20}
+                          placeholder="Ex: 0"
+                          value={nbEnfantsSejour}
+                          onChange={(e) => setNbEnfantsSejour(e.target.value)}
+                          className="w-full h-10"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Prérempli depuis le formulaire patient — repris automatiquement dans le devis.
+                  </p>
 
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">

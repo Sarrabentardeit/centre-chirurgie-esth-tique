@@ -25,7 +25,7 @@ import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSe
 const PLANNING_SEJOUR_STATUSES = ['devis_accepte'] as const
 
 const patientListInclude = {
-  user: { select: { fullName: true, email: true, createdAt: true } },
+  user: { select: { id: true, fullName: true, email: true, createdAt: true } },
   formulaires: { orderBy: { createdAt: 'desc' as const }, take: 1 },
   devis: { orderBy: { dateCreation: 'desc' as const }, take: 1 },
 } as const
@@ -279,7 +279,7 @@ export async function getPatientById(patientId: string) {
   const patient = await prisma.patient.findUnique({
     where: { id: patientId },
     include: {
-      user: { select: { fullName: true, email: true, createdAt: true } },
+      user: { select: { id: true, fullName: true, email: true, createdAt: true } },
       formulaires: { orderBy: { createdAt: 'desc' } },
       devis: { orderBy: { dateCreation: 'desc' } },
       rapports: { orderBy: { createdAt: 'desc' } },
@@ -572,12 +572,6 @@ export async function deleteDevis(gestionnaireId: string, devisId: string) {
     include: { patient: true },
   })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
-  if (devis.gestionnaireId !== gestionnaireId) {
-    throw new AppError(403, 'FORBIDDEN', 'Ce devis ne vous appartient pas.')
-  }
-  if (devis.statut === 'accepte') {
-    throw new AppError(400, 'DEVIS_ACCEPTED', 'Un devis accepté ne peut pas être supprimé.')
-  }
 
   await prisma.$transaction(async (tx) => {
     await tx.devis.delete({ where: { id: devisId } })
@@ -596,6 +590,7 @@ export async function deleteDevis(gestionnaireId: string, devisId: string) {
     else if (remaining.some((d) => d.statut === 'envoye')) nextStatus = 'devis_envoye'
     else if (remaining.some((d) => d.statut === 'brouillon')) nextStatus = 'devis_preparation'
     else if (rapportsCount > 0) nextStatus = 'rapport_genere'
+    else nextStatus = 'en_analyse'
 
     if (nextStatus !== devis.patient.status) {
       await tx.patient.update({
@@ -604,6 +599,51 @@ export async function deleteDevis(gestionnaireId: string, devisId: string) {
       })
     }
   })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'delete',
+      entity: 'devis',
+      entityId: devisId,
+      before: {
+        patientId: devis.patientId,
+        statut: devis.statut,
+        numeroDevis: devis.numeroDevis,
+        total: devis.total,
+      } as never,
+    },
+  }).catch(() => undefined)
+
+  return { deleted: true as const }
+}
+
+export async function deletePatientByGestionnaire(actorId: string, patientId: string) {
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    include: {
+      user: { select: { id: true, fullName: true, email: true } },
+    },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  await prisma.user.delete({ where: { id: patient.userId } })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      actorRole: 'gestionnaire',
+      action: 'delete',
+      entity: 'patient',
+      entityId: patientId,
+      before: {
+        dossierNumber: patient.dossierNumber,
+        fullName: patient.user.fullName,
+        email: patient.user.email,
+      } as never,
+    },
+  }).catch(() => undefined)
 
   return { deleted: true as const }
 }

@@ -623,6 +623,8 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     nuitsClinique:            input.nuitsClinique,
     anesthesieGenerale:       input.anesthesieGenerale,
     dureeSejourTunisie:       input.dureeSejourTunisie,
+    nbAdultesSejour:          input.nbAdultesSejour,
+    nbEnfantsSejour:          input.nbEnfantsSejour,
     notes:                    input.notes,
   }
 
@@ -663,6 +665,8 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
         nuitsClinique: rapport.nuitsClinique,
         anesthesieGenerale: rapport.anesthesieGenerale,
         dureeSejourTunisie: rapport.dureeSejourTunisie,
+        nbAdultesSejour: rapport.nbAdultesSejour,
+        nbEnfantsSejour: rapport.nbEnfantsSejour,
         notes: rapport.notes,
         updatedAt: rapport.updatedAt,
       } as never,

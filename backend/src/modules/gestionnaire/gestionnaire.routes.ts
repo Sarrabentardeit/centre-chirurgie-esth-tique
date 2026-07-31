@@ -67,6 +67,15 @@ gestionnaireRouter.get('/patients/:id', async (req: Request, res: Response, next
   }
 })
 
+gestionnaireRouter.delete('/patients/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await gestionnaireService.deletePatientByGestionnaire(req.auth!.sub, pid(req.params.id))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
 gestionnaireRouter.post(
   '/patients/:patientId/devis/brouillon',
   validate(upsertDevisDraftSchema),

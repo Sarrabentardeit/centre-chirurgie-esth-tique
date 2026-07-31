@@ -101,18 +101,62 @@ export function amountEuroInWords(totalTnd: number, tndPerEur = DEFAULT_TND_PER_
 }
 
 /** Remplace les anciens placeholders dans un HTML déjà sauvegardé. */
-export function replaceDevisAmountPlaceholders(html: string, totalTnd: number): string {
-  if (!html.includes('[montant en lettres]') && !html.includes('[montant en euros]')) return html
+export function replaceDevisAmountPlaceholders(
+  html: string,
+  totalTnd: number,
+  tndPerEur = DEFAULT_TND_PER_EUR,
+): string {
+  if (!html.includes('[montant en lettres]') && !html.includes('[montant en euros]')) {
+    return refreshDevisAmountSentenceInHtml(html, totalTnd, tndPerEur)
+  }
   const letters = amountTndInWords(totalTnd)
-  const euroLetters = amountEuroInWords(totalTnd)
-  return html
+  const euroLetters = amountEuroInWords(totalTnd, tndPerEur)
+  const withPlaceholders = html
     .replace(/\[montant en lettres\]/gi, letters)
     .replace(/\[montant en euros\]/gi, euroLetters)
+  return refreshDevisAmountSentenceInHtml(withPlaceholders, totalTnd, tndPerEur)
 }
 
-export function buildDevisAmountSentence(totalTnd: number): string {
+export function buildDevisAmountSentence(
+  totalTnd: number,
+  tndPerEur = DEFAULT_TND_PER_EUR,
+): string {
   const totalStr = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(totalTnd)
   const letters = amountTndInWords(totalTnd)
+  const euroStr = formatEuroApprox(totalTnd, tndPerEur)
 
-  return `La totalité des frais de votre séjour médical s'élève à ${letters} Dinars Tunisiens (${totalStr} dt).`
+  return `La totalité des frais de votre séjour médical s'élève à ${letters} Dinars Tunisiens (${totalStr} dt ≈ ${euroStr}).`
+}
+
+/** Met à jour la phrase de total (avec € approx.) dans un HTML déjà sauvegardé. */
+export function refreshDevisAmountSentenceInHtml(
+  html: string,
+  totalTnd: number,
+  tndPerEur = DEFAULT_TND_PER_EUR,
+): string {
+  if (!html || !Number.isFinite(totalTnd)) return html
+  const fresh = buildDevisAmountSentence(totalTnd, tndPerEur)
+  const re =
+    /La totalité des frais de votre séjour médical s['’]élève à[\s\S]*?Dinars Tunisiens\s*\([^)]*\)\.?/gi
+
+  if (re.test(html)) {
+    return html.replace(re, fresh)
+  }
+
+  if (typeof window === 'undefined') return html
+  try {
+    const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+    const root = doc.getElementById('__root')
+    if (!root) return html
+    for (const p of Array.from(root.querySelectorAll('p'))) {
+      const t = (p.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (/totalité des frais de votre séjour médical/i.test(t)) {
+        p.textContent = fresh
+        return root.innerHTML
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return html
 }

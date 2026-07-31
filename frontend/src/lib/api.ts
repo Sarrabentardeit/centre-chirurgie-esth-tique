@@ -403,7 +403,7 @@ export interface PatientListItem {
   sourceContact: string | null
   createdAt: string
   updatedAt: string
-  user: { fullName: string; email: string; createdAt: string }
+  user: { id?: string; fullName: string; email: string; createdAt: string }
   formulaires: Array<{ id: string; status: string; submittedAt: string | null }>
   devis: Array<{ id: string; statut: string; total: number; dateCreation: string; numeroDevis?: string | null; updatedAt?: string; vuParPatientAt?: string | null }>
   rapports?: Array<{
@@ -416,6 +416,8 @@ export interface PatientListItem {
     nuitsClinique?: number | null
     anesthesieGenerale?: boolean | null
     dureeSejourTunisie?: number | null
+    nbAdultesSejour?: number | null
+    nbEnfantsSejour?: number | null
     notes: string | null
     createdAt: string
   }>
@@ -522,6 +524,8 @@ export const medecinApi = {
         nuitsClinique?: number | null
         anesthesieGenerale?: boolean | null
         dureeSejourTunisie?: number | null
+        nbAdultesSejour?: number | null
+        nbEnfantsSejour?: number | null
         notes: string | null
         createdAt: string
       }>
@@ -554,6 +558,8 @@ export const medecinApi = {
     nuitsClinique?: number
     anesthesieGenerale?: boolean
     dureeSejourTunisie?: number
+    nbAdultesSejour?: number
+    nbEnfantsSejour?: number
     notes?: string
   }) =>
     request<{ ok: true; rapport: unknown }>(`/medecin/patients/${patientId}/rapport`, {
@@ -691,6 +697,8 @@ export interface GestionnaireRapportRow {
   nuitsClinique?: number | null
   anesthesieGenerale?: boolean | null
   dureeSejourTunisie?: number | null
+  nbAdultesSejour?: number | null
+  nbEnfantsSejour?: number | null
   notes: string | null
   createdAt: string
 }
@@ -858,6 +866,11 @@ export const gestionnaireApi = {
 
   getPatient: (id: string) =>
     request<{ ok: true; patient: GestionnairePatientDetail }>(`/gestionnaire/patients/${id}`),
+
+  deletePatient: (patientId: string) =>
+    request<{ ok: true; deleted: true }>(`/gestionnaire/patients/${patientId}`, {
+      method: 'DELETE',
+    }),
 
   upsertDevisDraft: (
     patientId: string,

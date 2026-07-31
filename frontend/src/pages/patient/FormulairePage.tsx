@@ -10,7 +10,7 @@ import { CheckCircle2, ChevronLeft, ChevronRight, Upload, X, AlertCircle, Check,
 
 import { Input } from '@/components/ui/input'
 
-import { PhoneInputField, isValidPhoneNumber } from '@/components/ui/phone-input-field'
+import { PhoneInputField, isValidPhoneNumber, isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '@/components/ui/phone-input-field'
 
 import { Label } from '@/components/ui/label'
 
@@ -605,6 +605,14 @@ export default function FormulairePage() {
           setAutoAccountError('Veuillez saisir un numéro de téléphone valide (avec indicatif pays).')
           return
         }
+        if (isTunisianPhone(phone)) {
+          setAutoAccountError(TUNISIA_PHONE_BLOCK_MESSAGE)
+          return
+        }
+        if (/tunisie/i.test(pays.trim())) {
+          setAutoAccountError(TUNISIA_PHONE_BLOCK_MESSAGE)
+          return
+        }
         if (!email.includes('@')) {
           setAutoAccountError('Adresse email invalide.')
           return
@@ -672,6 +680,10 @@ export default function FormulairePage() {
       }
       if (!isValidPhoneNumber(phone)) {
         setAutoAccountError('Veuillez saisir un numéro de téléphone valide (avec indicatif pays).')
+        return
+      }
+      if (isTunisianPhone(phone) || /tunisie/i.test(pays)) {
+        setAutoAccountError(TUNISIA_PHONE_BLOCK_MESSAGE)
         return
       }
       try {
@@ -1121,6 +1133,13 @@ export default function FormulairePage() {
                       }}
                       disabled={Boolean(user)}
                     />
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                      Patients à l&apos;étranger uniquement. Depuis la Tunisie : RDV cabinet au{' '}
+                      <a href="tel:+21627626300" className="font-medium text-brand-700 underline-offset-2 hover:underline">
+                        216 27 626 300
+                      </a>
+                      .
+                    </p>
                   </div>
                 </div>
                 {/* Pays | Ville */}

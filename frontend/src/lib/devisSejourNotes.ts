@@ -5,6 +5,9 @@ export const SEJOUR_CLINIQUE_NOM_PREFIX = 'SEJOUR_CLINIQUE_NOM:'
 export const SEJOUR_CLINIQUE_NUITS_PREFIX = 'SEJOUR_CLINIQUE_NUITS:'
 export const SEJOUR_HOTEL_NOM_PREFIX = 'SEJOUR_HOTEL_NOM:'
 export const SEJOUR_HOTEL_NUITS_PREFIX = 'SEJOUR_HOTEL_NUITS:'
+export const SEJOUR_NB_ADULTES_PREFIX = 'SEJOUR_NB_ADULTES:'
+export const SEJOUR_NB_ENFANTS_PREFIX = 'SEJOUR_NB_ENFANTS:'
+export const SEJOUR_DUREE_TOTALE_PREFIX = 'SEJOUR_DUREE_TOTALE:'
 export const DELAIS_CONVALESCENCE_PREFIX = 'DELAIS_CONVALESCENCE:'
 
 const META_PREFIXES = [
@@ -14,6 +17,9 @@ const META_PREFIXES = [
   SEJOUR_CLINIQUE_NUITS_PREFIX,
   SEJOUR_HOTEL_NOM_PREFIX,
   SEJOUR_HOTEL_NUITS_PREFIX,
+  SEJOUR_NB_ADULTES_PREFIX,
+  SEJOUR_NB_ENFANTS_PREFIX,
+  SEJOUR_DUREE_TOTALE_PREFIX,
 ] as const
 
 function lineValue(lines: string[], prefix: string): string {
@@ -30,6 +36,9 @@ export interface ParsedSejourMeta {
   cliniqueNuits: string
   hotelNom: string
   hotelNuits: string
+  nbAdultes: string
+  nbEnfants: string
+  dureeSejourTotale: string
   noteSejour: string
 }
 
@@ -86,6 +95,9 @@ export function parseSejourMeta(notes: string | null | undefined): ParsedSejourM
     cliniqueNuits: lineValue(lines, SEJOUR_CLINIQUE_NUITS_PREFIX),
     hotelNom: lineValue(lines, SEJOUR_HOTEL_NOM_PREFIX),
     hotelNuits: lineValue(lines, SEJOUR_HOTEL_NUITS_PREFIX),
+    nbAdultes: lineValue(lines, SEJOUR_NB_ADULTES_PREFIX),
+    nbEnfants: lineValue(lines, SEJOUR_NB_ENFANTS_PREFIX),
+    dureeSejourTotale: lineValue(lines, SEJOUR_DUREE_TOTALE_PREFIX),
     noteSejour: lines.filter((l) => !isMetaLine(l)).join('\n').trim(),
   }
 }
@@ -96,8 +108,81 @@ export function buildSejourNotes(i: ParsedSejourMeta): string {
     i.cliniqueNuits.trim() ? `${SEJOUR_CLINIQUE_NUITS_PREFIX}${i.cliniqueNuits.trim()}` : '',
     i.hotelNom.trim() ? `${SEJOUR_HOTEL_NOM_PREFIX}${i.hotelNom.trim()}` : '',
     i.hotelNuits.trim() ? `${SEJOUR_HOTEL_NUITS_PREFIX}${i.hotelNuits.trim()}` : '',
+    i.nbAdultes.trim() !== '' ? `${SEJOUR_NB_ADULTES_PREFIX}${i.nbAdultes.trim()}` : '',
+    i.nbEnfants.trim() !== '' ? `${SEJOUR_NB_ENFANTS_PREFIX}${i.nbEnfants.trim()}` : '',
+    i.dureeSejourTotale.trim() !== '' ? `${SEJOUR_DUREE_TOTALE_PREFIX}${i.dureeSejourTotale.trim()}` : '',
     i.noteSejour.trim(),
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * Préremplit adultes/enfants depuis le formulaire patient.
+ * Adultes = patient (1) + adultes accompagnants. Enfants = enfants accompagnants.
+ */
+export function accompagnantsFromFormulairePayload(
+  payload: Record<string, unknown> | null | undefined,
+): { nbAdultes: string; nbEnfants: string } {
+  if (!payload || payload.accompagnant !== true) {
+    return { nbAdultes: '1', nbEnfants: '0' }
+  }
+  const nAdultesAcc = Number(payload.nbAdultesAccompagnement)
+  const nEnfants = Number(payload.nbEnfantsAccompagnement)
+  const adultesAcc = Number.isFinite(nAdultesAcc) && nAdultesAcc >= 0 ? Math.floor(nAdultesAcc) : 0
+  const enfants = Number.isFinite(nEnfants) && nEnfants >= 0 ? Math.floor(nEnfants) : 0
+  return {
+    nbAdultes: String(1 + adultesAcc),
+    nbEnfants: String(enfants),
+  }
+}
+
+export type RapportSejourDefaults = {
+  nuitsClinique?: number | null
+  dureeSejourTunisie?: number | null
+  nbAdultesSejour?: number | null
+  nbEnfantsSejour?: number | null
+}
+
+/**
+ * Valeurs devis préremplies depuis le rapport médecin (+ repli formulaire pour accompagnants).
+ */
+export function devisSejourDefaultsFromRapport(
+  rap: RapportSejourDefaults | null | undefined,
+  formPayload?: Record<string, unknown> | null,
+): {
+  cliniqueNuits: string
+  dureeSejourTotale: string
+  hotelNuits: string
+  nbAdultes: string
+  nbEnfants: string
+} {
+  const accForm = accompagnantsFromFormulairePayload(formPayload)
+  const cliniqueNuits =
+    rap?.nuitsClinique != null && Number.isFinite(rap.nuitsClinique)
+      ? String(rap.nuitsClinique)
+      : ''
+  const dureeSejourTotale =
+    rap?.dureeSejourTunisie != null && Number.isFinite(rap.dureeSejourTunisie)
+      ? String(rap.dureeSejourTunisie)
+      : ''
+
+  let hotelNuits = ''
+  const clin = cliniqueNuits !== '' ? Number(cliniqueNuits) : NaN
+  const jours = dureeSejourTotale !== '' ? Number(dureeSejourTotale) : NaN
+  if (Number.isFinite(clin) && Number.isFinite(jours) && jours > 0) {
+    const hotel = Math.max(0, jours - 1 - clin)
+    hotelNuits = String(hotel)
+  }
+
+  const nbAdultes =
+    rap?.nbAdultesSejour != null && Number.isFinite(rap.nbAdultesSejour)
+      ? String(rap.nbAdultesSejour)
+      : accForm.nbAdultes
+  const nbEnfants =
+    rap?.nbEnfantsSejour != null && Number.isFinite(rap.nbEnfantsSejour)
+      ? String(rap.nbEnfantsSejour)
+      : accForm.nbEnfants
+
+  return { cliniqueNuits, dureeSejourTotale, hotelNuits, nbAdultes, nbEnfants }
 }
 
 /** Affichage patient / PDF : texte lisible sans préfixes techniques. */
@@ -117,6 +202,16 @@ export function formatDevisSejourNotesForDisplay(notes: string | null | undefine
     const bits = [
       p.hotelNom && `Hôtel : ${p.hotelNom}`,
       p.hotelNuits && `Nuits à l'hôtel : ${p.hotelNuits}`,
+    ].filter(Boolean)
+    if (bits.length) parts.push(bits.join('\n'))
+  }
+  if (p.dureeSejourTotale) {
+    parts.push(`Durée séjour total : ${p.dureeSejourTotale} jour(s)`)
+  }
+  if (p.nbAdultes || p.nbEnfants) {
+    const bits = [
+      p.nbAdultes !== '' && `Nombre d'adultes : ${p.nbAdultes}`,
+      p.nbEnfants !== '' && `Nbr enfants (2 – 12 ans) : ${p.nbEnfants}`,
     ].filter(Boolean)
     if (bits.length) parts.push(bits.join('\n'))
   }

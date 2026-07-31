@@ -17,6 +17,7 @@ import { formatDevisSejourNotesForDisplay, parseSejourMeta } from '@/lib/devisSe
 import { downloadDevisPdf } from '@/lib/pdf'
 import { DEVIS_HEADER_SUBTITLE, DEVIS_LOGO_SRC, buildDevisDocumentEndHtml, buildDevisHeaderLogoHtml } from '@/lib/devisBranding'
 import { DEVIS_ACCENT, buildDevisPrintStyles } from '@/lib/devisCharte'
+import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -118,9 +119,10 @@ export default function DevisPage() {
     const hasCustom = Boolean(d.customContent?.trim())
     if (hasCustom) {
       const raw = d.customContent!.trim()
-      const [topHtml, botHtml] = raw.includes(CONTENT_BREAK) ? raw.split(CONTENT_BREAK) : [raw, '']
+      const [topHtml, botRaw] = raw.includes(CONTENT_BREAK) ? raw.split(CONTENT_BREAK) : [raw, '']
       const lignes = Array.isArray(d.lignes) ? d.lignes : []
       const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+      const botHtml = replaceDevisAmountPlaceholders(botRaw ?? '', total, DEFAULT_TND_PER_EUR)
       const operationTitle =
         lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
       const sej = parseSejourMeta(d.notesSejour)

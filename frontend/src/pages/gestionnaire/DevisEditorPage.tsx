@@ -10,9 +10,9 @@ import Highlight from '@tiptap/extension-highlight'
 import { ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw } from 'lucide-react'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
-import { parseSejourMeta } from '@/lib/devisSejourNotes'
+import { parseSejourMeta, devisSejourDefaultsFromRapport } from '@/lib/devisSejourNotes'
 import { formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
-import { buildDevisAmountSentence, replaceDevisAmountPlaceholders } from '@/lib/moneyWords'
+import { buildDevisAmountSentence, replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import {
   DEVIS_HEADER_SUBTITLE,
   DEVIS_LOGO_SRC,
@@ -180,24 +180,35 @@ function sejourPdfFromPatient(p: GestionnairePatientDetail) {
   const nClinTot = nGestClin ?? nuitsClinRap
   const nHotelTot = nGestHotel != null ? nGestHotel : convNightsLegacy
   const totalNights = nClinTot + nHotelTot
+
+  const dureeFromDevis = sej.dureeSejourTotale.trim() !== '' ? Number(sej.dureeSejourTotale) : NaN
+  const dureeFromRapport = rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0 ? rap.dureeSejourTunisie : NaN
+  const dureeJours = Number.isFinite(dureeFromDevis) && dureeFromDevis > 0
+    ? dureeFromDevis
+    : Number.isFinite(dureeFromRapport)
+      ? dureeFromRapport
+      : NaN
+
   const dureeTotale =
-    rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0
-      ? `${rap.dureeSejourTunisie} jour${rap.dureeSejourTunisie > 1 ? 's' : ''}`
+    Number.isFinite(dureeJours)
+      ? `${dureeJours} jour${dureeJours > 1 ? 's' : ''}`
       : totalNights > 0
         ? `${totalNights + 1} jours / ${totalNights} nuits`
         : '—'
-  const jours =
-    rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0
-      ? rap.dureeSejourTunisie
-      : totalNights + 1
+  const jours = Number.isFinite(dureeJours) ? dureeJours : totalNights + 1
   const sejourLine =
-    rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0
-      ? `Séjour ${rap.dureeSejourTunisie} jour${rap.dureeSejourTunisie > 1 ? 's' : ''}`
+    Number.isFinite(dureeJours)
+      ? `Séjour ${dureeJours} jour${dureeJours > 1 ? 's' : ''}`
       : totalNights > 0
         ? `Séjour ${totalNights} nuit${totalNights > 1 ? 's' : ''} / ${jours} jour${jours > 1 ? 's' : ''}`
         : ''
 
-  return { dureeHosp, cliniqueRetenue, postHospLabel, hotelSejour, dureeTotale, sejourLine }
+  const formPayload = (p.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
+  const fromRapport = devisSejourDefaultsFromRapport(rap, formPayload)
+  const nbAdultes = sej.nbAdultes.trim() !== '' ? sej.nbAdultes.trim() : fromRapport.nbAdultes
+  const nbEnfants = sej.nbEnfants.trim() !== '' ? sej.nbEnfants.trim() : fromRapport.nbEnfants
+
+  return { dureeHosp, cliniqueRetenue, postHospLabel, hotelSejour, dureeTotale, sejourLine, nbAdultes, nbEnfants }
 }
 
 const SEJOUR_CONV_START = '<!-- DEVIS_SEJOUR_CONV -->'
@@ -210,8 +221,8 @@ function buildSejourConvalescenceHtml(sv: SejourPdfValues): string {
 ${devisSectionHeading('Détails de votre séjour de convalescence :')}
 ${devisFieldRow('Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)}
 ${devisFieldRow('Hôtel de séjour sélectionné :', sv.hotelSejour)}
-${devisFieldRow("Nombre d'adultes :", '1')}
-${devisFieldRow('Nbr Enfants (2 – 12 ans) :', '0')}
+${devisFieldRow("Nombre d'adultes :", sv.nbAdultes)}
+${devisFieldRow('Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)}
 ${devisFieldRow('Type de chambre :', 'Single')}
 ${devisFieldRow('Arrangement :', "Pension Complète (la pension n'inclut pas les dépenses personnelles tel que téléphone, boissons, les soins de beauté, les excursions…)")}
 ${SEJOUR_CONV_END}`
@@ -239,7 +250,8 @@ function refreshConvalescenceInTopHtml(html: string, p: GestionnairePatientDetai
  * Recherche le <p> dont le texte commence par `label` et reconstruit la ligne.
  */
 function refreshDevisFieldByLabel(html: string, label: string, value: string): string {
-  if (typeof window === 'undefined' || !value || value === '—') return html
+  if (typeof window === 'undefined') return html
+  if (value == null || value === '—') return html
   const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
   const root = doc.getElementById('__root')
   if (!root) return html
@@ -261,12 +273,14 @@ function refreshDevisFieldByLabel(html: string, label: string, value: string): s
   return changed ? root.innerHTML : html
 }
 
-/** Synchronise clinique + hôtel (et conv.) depuis le devis actuel. */
+/** Synchronise clinique + hôtel + accompagnants (et conv.) depuis le devis actuel. */
 function refreshDossierFieldsInTopHtml(html: string, p: GestionnairePatientDetail): string {
   const sv = sejourPdfFromPatient(p)
   let out = refreshConvalescenceInTopHtml(html, p)
   out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
   out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
+  out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
+  out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
   return out
 }
 
@@ -415,8 +429,8 @@ ${devisSectionHeading('Offre de prix :')}
    GÉNÉRATION HTML PARTIE BASSE
    (total en lettres → modalités → validité → clôture)
 ───────────────────────────────────────────────────────── */
-function buildBottomHtml(total: number): string {
-  const amountLine = buildDevisAmountSentence(total)
+function buildBottomHtml(total: number, tndPerEur = DEFAULT_TND_PER_EUR): string {
+  const amountLine = buildDevisAmountSentence(total, tndPerEur)
 
   return `
 <p>${amountLine}</p>
@@ -448,6 +462,7 @@ export default function DevisEditorPage() {
   const [initialTopHtml, setInitialTopHtml] = useState<string>('')
   const [initialBottomHtml, setInitialBottomHtml] = useState<string>('')
   const [activeZone, setActiveZone] = useState<'top' | 'bottom'>('top')
+  const [tndPerEur, setTndPerEur] = useState(DEFAULT_TND_PER_EUR)
 
   const devisIdRef    = useRef<string | null>(null)
   const saveTimerRef  = useRef<ReturnType<typeof setTimeout>>()
@@ -468,7 +483,12 @@ export default function DevisEditorPage() {
     if (!patientId) return
     setLoading(true); setError(null)
     try {
-      const { patient: p } = await gestionnaireApi.getPatient(patientId)
+      const [{ patient: p }, taux] = await Promise.all([
+        gestionnaireApi.getPatient(patientId),
+        gestionnaireApi.getTauxEur().catch(() => null),
+      ])
+      const tndPerEurRate = taux?.tndPerEur ?? DEFAULT_TND_PER_EUR
+      setTndPerEur(tndPerEurRate)
       setPatient(p)
       const dv = p.devis?.find(d => d.statut === 'brouillon')
                ?? p.devis?.find(d => ['envoye', 'accepte'].includes(d.statut))
@@ -484,15 +504,15 @@ export default function DevisEditorPage() {
           const [top, bot] = dv.customContent.split(CONTENT_BREAK)
           const topRaw = refreshDossierFieldsInTopHtml(top ?? buildTopHtml(p), p)
           setInitialTopHtml(topRaw)
-          const bottomRaw = bot ?? buildBottomHtml(total)
-          setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total))
+          const bottomRaw = bot ?? buildBottomHtml(total, tndPerEurRate)
+          setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate))
         } else {
           setInitialTopHtml(refreshDossierFieldsInTopHtml(dv.customContent, p))
-          setInitialBottomHtml(buildBottomHtml(total))
+          setInitialBottomHtml(buildBottomHtml(total, tndPerEurRate))
         }
       } else {
         setInitialTopHtml(buildTopHtml(p))
-        setInitialBottomHtml(buildBottomHtml(total))
+        setInitialBottomHtml(buildBottomHtml(total, tndPerEurRate))
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -585,7 +605,7 @@ export default function DevisEditorPage() {
       ?? null
     const total = (dv?.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
     editorTop?.commands.setContent(refreshConvalescenceInTopHtml(buildTopHtml(patient), patient))
-    editorBot?.commands.setContent(buildBottomHtml(total))
+    editorBot?.commands.setContent(buildBottomHtml(total, tndPerEur))
     setSaved(false)
   }
 
@@ -608,7 +628,8 @@ export default function DevisEditorPage() {
   /* Export PDF — HTML construit depuis le contenu TipTap (pas depuis le DOM React) */
   const handlePrint = () => {
     const topHtml  = editorTopRef.current?.getHTML() ?? ''
-    const botHtml  = editorBotRef.current?.getHTML() ?? ''
+    let botHtml  = editorBotRef.current?.getHTML() ?? ''
+    botHtml = replaceDevisAmountPlaceholders(botHtml, total, tndPerEur)
 
     if (!topHtml && !botHtml) {
       window.alert("Le document est vide. Réinitialisez ou saisissez du contenu d'abord.")

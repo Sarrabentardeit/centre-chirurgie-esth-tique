@@ -193,6 +193,10 @@ model Rapport {
   anesthesieGenerale       Boolean? @map("anesthesie_generale")
   /** Durée globale du séjour en Tunisie (jours). */
   dureeSejourTunisie       Int?     @map("duree_sejour_tunisie")
+  /** Adultes séjour (patient + accompagnants) — repris sur le devis. */
+  nbAdultesSejour          Int?     @map("nb_adultes_sejour")
+  /** Enfants 2–12 ans — repris sur le devis. */
+  nbEnfantsSejour          Int?     @map("nb_enfants_sejour")
   notes                    String?
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '../../lib/phonePolicy.js'
 
 export const registerSchema = z.object({
   email: z.string().email('Email invalide'),
@@ -10,6 +11,21 @@ export const registerSchema = z.object({
   ville: z.string().optional(),
   pays: z.string().optional(),
   sourceContact: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (isTunisianPhone(data.phone)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['phone'],
+      message: TUNISIA_PHONE_BLOCK_MESSAGE,
+    })
+  }
+  if (data.pays && /tunisie/i.test(data.pays.trim())) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['pays'],
+      message: TUNISIA_PHONE_BLOCK_MESSAGE,
+    })
+  }
 })
 
 export const loginSchema = z.object({

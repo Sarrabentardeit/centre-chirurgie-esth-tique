@@ -8,6 +8,7 @@ import type { RegisterInput, LoginInput } from './auth.schema.js'
 import type { UserRole, JwtPayload, RefreshPayload } from './auth.types.js'
 import { generateNextMcReference } from '../../lib/devisNumber.js'
 import { sendNotificationEmail } from '../../lib/mailer.js'
+import { isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '../../lib/phonePolicy.js'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,10 @@ export async function register(
   input: RegisterInput,
   meta: { userAgent?: string; ip?: string }
 ) {
+  if (isTunisianPhone(input.phone) || (input.pays && /tunisie/i.test(input.pays))) {
+    throw new AppError(400, 'TUNISIA_NOT_ALLOWED', TUNISIA_PHONE_BLOCK_MESSAGE)
+  }
+
   const existing = await prisma.user.findUnique({
     where: { email: input.email.toLowerCase() },
   })

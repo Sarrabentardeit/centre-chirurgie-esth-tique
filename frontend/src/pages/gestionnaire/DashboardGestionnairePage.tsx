@@ -5,7 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useNavigate } from 'react-router-dom'
-import { STATUS_LABELS, STATUS_COLORS, formatRelative } from '@/lib/utils'
+import { STATUS_LABELS, STATUS_COLORS, formatRelative, cn } from '@/lib/utils'
+import { EmptyState } from '@/components/EmptyState'
 import { useAuthStore } from '@/store/authStore'
 import { gestionnaireApi, type GestionnaireFunnelStep, type GestionnairePatientSummary } from '@/lib/api'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
@@ -56,23 +57,23 @@ export default function DashboardGestionnairePage() {
       label: 'Patients actifs',
       value: stats?.totalPatients ?? 0,
       icon: Users,
-      color: 'text-blue-600',
-      bg: 'bg-blue-50',
+      color: 'text-brand-950',
+      bg: 'bg-[rgba(6,42,48,0.06)]',
     },
     {
       label: 'Devis en cours',
       value: stats?.devisEnCours ?? 0,
       icon: FileCheck,
-      color: 'text-amber-600',
+      color: 'text-amber-700',
       bg: 'bg-amber-50',
       urgent: (stats?.devisEnCours ?? 0) > 0,
     },
     {
-      label: 'Logistique à préparer',
+      label: 'Logistique',
       value: stats?.logistique ?? 0,
       icon: Package,
-      color: 'text-purple-600',
-      bg: 'bg-purple-50',
+      color: 'text-brand-700',
+      bg: 'bg-brand-50',
     },
     {
       label: 'Notifications',
@@ -101,8 +102,8 @@ export default function DashboardGestionnairePage() {
     <div className="space-y-6 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-xl font-bold">Bonjour, {user?.name}</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="font-display text-2xl font-semibold text-brand-950 tracking-tight">Bonjour, {user?.name}</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
             {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>
@@ -143,24 +144,25 @@ export default function DashboardGestionnairePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpi.map((stat) => {
-          const Icon = stat.icon
-          return (
-            <Card key={stat.label} className={stat.urgent ? 'border-amber-300 bg-amber-50/50' : ''}>
-              <CardContent className="pt-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.bg}`}>
-                    <Icon className={`h-5 w-5 ${stat.color}`} />
+      {/* Bande KPI unique — moins de cartes empilées */}
+      <div className="rounded-2xl border border-border bg-white shadow-sm overflow-hidden">
+        <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border">
+          {kpi.map((stat) => {
+            const Icon = stat.icon
+            return (
+              <div key={stat.label} className={cn('px-4 py-4', stat.urgent && 'bg-amber-50/40')}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${stat.bg}`}>
+                    <Icon className={`h-4 w-4 ${stat.color}`} />
                   </div>
                   {stat.urgent && <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />}
                 </div>
-                <p className="text-2xl font-bold">{stat.value}</p>
-                <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
-              </CardContent>
-            </Card>
-          )
-        })}
+                <p className="text-2xl font-bold text-brand-950 tabular-nums">{stat.value}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -175,7 +177,7 @@ export default function DashboardGestionnairePage() {
                 <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                 <YAxis dataKey="step" type="category" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={80} />
                 <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
-                <Bar dataKey="count" fill="#c44828" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="count" fill="#81572d" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -190,7 +192,14 @@ export default function DashboardGestionnairePage() {
           </CardHeader>
           <CardContent>
             {devisATraiter.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">Aucun devis à préparer pour le moment.</p>
+              <EmptyState
+                icon={FileCheck}
+                title="Aucun devis à préparer"
+                description="Les dossiers avec rapport médical apparaîtront ici."
+                actionLabel="Ouvrir les devis"
+                onAction={() => navigate('/gestionnaire/devis')}
+                className="py-8"
+              />
             ) : (
               <div className="space-y-2">
                 {devisATraiter.map((p) => (

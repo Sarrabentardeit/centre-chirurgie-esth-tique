@@ -36,11 +36,16 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
     overflow-x: clip;
     min-width: 0;
     -webkit-text-size-adjust: 100%;
+  }
+
+  h1, h2, .font-display {
+    font-family: "Cormorant Garamond", Georgia, serif;
+    letter-spacing: -0.01em;
   }
 
   /* Empêche les tableaux / flex trop larges de faire déborder toute l'app */
@@ -143,6 +148,22 @@
     animation: fade-in 0.3s ease-out;
   }
 
+  .animate-in {
+    animation-fill-mode: both;
+  }
+
+  .fade-in {
+    animation-name: fade-in;
+  }
+
+  .slide-in-from-bottom-2 {
+    animation-name: slide-in-from-bottom-2;
+  }
+
+  .duration-200 {
+    animation-duration: 200ms;
+  }
+
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -151,4 +172,18 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes slide-in-from-bottom-2 {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }

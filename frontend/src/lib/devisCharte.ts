@@ -1,5 +1,6 @@
 /**
  * Charte graphique devis — réf. charte_graphique/Sans titre - 1-07.png
+ * Accent principal unique : bronze. Teal réservé aux titres de structure.
  */
 export const DEVIS_CHARTE = {
   white: '#ffffff',
@@ -11,7 +12,7 @@ export const DEVIS_CHARTE = {
   bronze: '#81572d',
 } as const
 
-/** Rétrocompat — accent historique (bronze). */
+/** Accent principal (bronze). */
 export const DEVIS_ACCENT = DEVIS_CHARTE.bronze
 
 export type DevisLabelTone = 'bronze' | 'teal' | 'gray'
@@ -22,7 +23,7 @@ const LABEL_COLORS: Record<DevisLabelTone, string> = {
   gray: DEVIS_CHARTE.gray,
 }
 
-/** Libellé coloré (bronze = identité / principal, teal = médical / séjour, gris = secondaire). */
+/** Libellé coloré — bronze par défaut (accent unique). */
 export function devisLabel(text: string, tone: DevisLabelTone = 'bronze'): string {
   return `<span style="color:${LABEL_COLORS[tone]};font-weight:700">${text}</span>`
 }
@@ -36,10 +37,10 @@ export function devisValueSpan(value: string): string {
   return `<span style="color:${DEVIS_CHARTE.charcoal}">${value}</span>`
 }
 
-/** Titre de bloc (bleu nuit + fond crème + filet teal). */
+/** Titre de section — hiérarchie claire, sans soulignement. */
 export function devisSectionHeading(text: string): string {
-  const { teal, cream } = DEVIS_CHARTE
-  return `<p style="margin-top:10px;margin-bottom:4px;padding:6px 10px;background:${cream};border-left:4px solid ${teal}"><strong><span style="color:${teal};text-decoration:underline">${text}</span></strong></p>`
+  const { bronze } = DEVIS_CHARTE
+  return `<p class="devis-heading"><strong style="color:${bronze}">${text}</strong></p>`
 }
 
 /** Ligne label + valeur. */
@@ -51,17 +52,102 @@ export function devisFieldRow(
   return `<p>${devisLabel(label, labelTone)} ${devisValueSpan(value)}</p>`
 }
 
-/** Encadré rose (info importante). */
+/** Encadré info importante. */
 export function devisHighlightBox(label: string, value: string): string {
   const { rose, bronze, charcoal } = DEVIS_CHARTE
-  return `<p style="margin:8px 0;padding:8px 12px;background:${rose};border-radius:4px"><strong style="color:${bronze}">${label}</strong> <span style="color:${charcoal};font-weight:700">${value}</span></p>`
+  return `<p class="devis-highlight"><strong style="color:${bronze}">${label}</strong> <span style="color:${charcoal};font-weight:700">${value}</span></p>`
 }
 
 export function devisSeparator(): string {
-  return `<div style="height:0;margin:18px 0 14px;border-top:1px solid ${DEVIS_CHARTE.rose}" aria-hidden="true"></div>`
+  return `<div class="section-hr" aria-hidden="true"></div>`
 }
 
-/** Palette TipTap (éditeur devis) — toutes les couleurs charte. */
+/** Bloc « Notre meilleure offre » — tableau + ligne total distincte. */
+export function buildDevisOfferBlockHtml(opts: {
+  operationTitle: string
+  sejourLine?: string
+  totalFormatted: string
+}): string {
+  const { operationTitle, sejourLine = '', totalFormatted } = opts
+  return `
+<div class="offer-block">
+  <p class="section-title">Notre meilleure offre</p>
+  <table class="offer-table">
+    <thead>
+      <tr>
+        <th class="col-desc">Description</th>
+        <th class="col-price">Tarif</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="desc-cell" colspan="2">
+          <div class="op-title">${operationTitle}</div>
+          ${sejourLine ? `<div class="sejour-badge">${sejourLine}</div>` : ''}
+        </td>
+      </tr>
+    </tbody>
+    <tfoot>
+      <tr class="offer-total-row">
+        <td class="total-label">Total <span class="total-hint">(ferme et définitif)</span></td>
+        <td class="total-price">
+          <span class="price-amount">${totalFormatted}</span>
+          <span class="price-currency">dt</span>
+        </td>
+      </tr>
+    </tfoot>
+  </table>
+</div>`
+}
+
+/** Styles aperçu écran du bloc offre (médecin / éditeur). */
+export const DEVIS_OFFER_PREVIEW_CSS = `
+.doc-offer-preview .section-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin: 0 0 12px;
+  color: ${DEVIS_CHARTE.bronze};
+  border-bottom: 2px solid ${DEVIS_CHARTE.bronze};
+  padding-bottom: 6px;
+  display: inline-block;
+}
+.doc-offer-preview .offer-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5px solid ${DEVIS_CHARTE.charcoal};
+  font-size: 12.5px;
+}
+.doc-offer-preview .offer-table th {
+  background: ${DEVIS_CHARTE.cream};
+  color: ${DEVIS_CHARTE.teal};
+  font-weight: 700;
+  padding: 8px 12px;
+  border-bottom: 1.5px solid ${DEVIS_CHARTE.charcoal};
+  text-align: left;
+}
+.doc-offer-preview .offer-table th.col-price { text-align: right; }
+.doc-offer-preview .offer-table td { padding: 12px; }
+.doc-offer-preview .op-title { font-weight: 700; color: ${DEVIS_CHARTE.charcoal}; font-size: 13px; }
+.doc-offer-preview .sejour-badge {
+  margin-top: 8px; font-size: 11px; font-weight: 500; color: ${DEVIS_CHARTE.gray};
+}
+.doc-offer-preview .offer-total-row td {
+  border-top: 1.5px solid ${DEVIS_CHARTE.charcoal};
+  background: ${DEVIS_CHARTE.cream};
+  padding: 10px 12px;
+}
+.doc-offer-preview .total-label { font-weight: 700; color: ${DEVIS_CHARTE.teal}; }
+.doc-offer-preview .total-hint { font-weight: 500; font-size: 10.5px; color: ${DEVIS_CHARTE.gray}; }
+.doc-offer-preview .total-price { text-align: right; white-space: nowrap; }
+.doc-offer-preview .price-amount {
+  font-weight: 700; font-size: 22px; color: ${DEVIS_CHARTE.bronze}; letter-spacing: 0.02em;
+}
+.doc-offer-preview .price-currency {
+  margin-left: 6px; font-weight: 700; font-size: 12px; color: ${DEVIS_CHARTE.bronze};
+}
+`
+
+/** Palette TipTap (éditeur devis). */
 export const DEVIS_TOOLBAR_COLORS = [
   { label: 'Blanc', value: DEVIS_CHARTE.white },
   { label: 'Crème', value: DEVIS_CHARTE.cream },
@@ -81,127 +167,268 @@ export function buildDevisPrintStyles(): string {
     html, body {
       font-family: Arial, Helvetica, sans-serif;
       font-size: 12px;
-      line-height: 1.55;
+      line-height: 1.65;
       color: ${C.charcoal};
       background: ${C.white};
       margin: 0; padding: 0;
     }
     .page-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .page-table > thead > tr > td {
-      padding: 8mm 14mm 5mm;
+      padding: 7mm 14mm 4mm;
       border-bottom: 1px solid ${C.rose};
     }
     .page-table > tbody > tr > td {
-      padding: 6mm 14mm 0;
+      padding: 5mm 14mm 0;
       vertical-align: top;
     }
-    .page-table > tfoot > tr > td {
-      padding: 0;
-      vertical-align: bottom;
+    .page-table > tfoot > tr > td { padding: 0; vertical-align: bottom; }
+
+    .devis-sheet {
+      display: block;
+      width: 210mm;
+      height: 297mm;
+      min-height: 297mm;
+      max-height: 297mm;
+      position: relative;
+      overflow: visible;
+      box-sizing: border-box;
+      background: ${C.white};
+      page-break-after: always;
+      break-after: page;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
-    p  { margin: 2px 0; }
-    ul, ol { padding-left: 18px; margin: 4px 0; }
-    li { margin: 1px 0; }
+    .devis-sheet:last-child { page-break-after: auto; break-after: auto; }
+    .devis-sheet-header {
+      padding: 7mm 14mm 4mm;
+      border-bottom: 1px solid ${C.rose};
+    }
+    .devis-sheet-body { padding: 5mm 14mm 0; }
+    .devis-sheet-last .devis-footer-group {
+      position: absolute;
+      left: 14mm;
+      right: 14mm;
+      bottom: 7mm;
+      margin-top: 0 !important;
+    }
+
+    /* Rythme vertical régulier */
+    p  { margin: 0 0 8px; }
+    ul, ol { padding-left: 18px; margin: 0 0 10px; }
+    li {
+      margin: 0 0 5px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .devis-heading {
+      margin: 14px 0 8px;
+      padding: 7px 12px;
+      background: ${C.cream};
+      border-left: 4px solid ${C.bronze};
+      font-size: 12.5px;
+      font-weight: 700;
+      color: ${C.bronze};
+      break-after: avoid;
+      page-break-after: avoid;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .devis-heading strong { color: ${C.bronze}; font-weight: 700; }
+    .devis-highlight {
+      margin: 10px 0;
+      padding: 8px 12px;
+      background: ${C.rose};
+      border-radius: 4px;
+    }
+    .devis-top { display: block; }
+    .devis-closing { display: flex; flex-direction: column; }
+    .devis-bot { margin-top: 14px; }
+    .devis-bot p { margin: 0 0 9px; }
+
     strong { font-weight: 700; }
     em { font-style: italic; color: ${C.gray}; }
-    u  { text-decoration: underline; }
+    u  { text-decoration: none; border-bottom: 1px solid ${C.rose}; }
     mark {
       background: ${C.cream};
       padding: 0 1px;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .doc-header { display: flex; justify-content: space-between; align-items: flex-start; }
-    .devis-logo-block { display: flex; flex-direction: column; align-items: center; max-width: 168px; }
+
+    .doc-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .devis-logo-block { display: flex; flex-direction: column; align-items: center; max-width: 132px; }
     .devis-logo-block .logo-img {
-      width: 158px;
+      width: 118px;
       height: auto;
       display: block;
       object-fit: contain;
-      border-radius: 6px;
+      border-radius: 4px;
     }
     .devis-logo-block .logo-slogan {
-      margin: 9px 0 0;
-      padding-top: 8px;
+      margin: 6px 0 0;
+      padding-top: 5px;
       width: 100%;
       text-align: center;
-      font-size: 9px;
+      font-size: 8px;
       font-weight: 600;
-      letter-spacing: 0.16em;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: ${C.bronze};
       border-top: 1px solid ${C.rose};
-      line-height: 1.35;
+      line-height: 1.3;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .doc-header .header-right { text-align: right; font-size: 10px; color: ${C.gray}; line-height: 1.4; }
-    .doc-header .header-ref  { font-weight: 700; color: ${C.bronze}; }
-    .doc-header .header-sub  { color: ${C.gray}; }
-    .doc-body p { margin: 2px 0; }
-    .doc-body ul, .doc-body ol { padding-left: 18px; margin: 4px 0; }
-    .doc-body li { margin: 1px 0; }
-    .doc-body hr { border: none; border-top: 1px solid ${C.rose}; margin: 12px 0 10px; }
-    .section-hr { border: none; border-top: 1px solid ${C.rose}; margin: 12px 0 10px; }
+    .doc-header .header-right { text-align: right; font-size: 11px; color: ${C.gray}; line-height: 1.35; }
+    .doc-header .header-ref  { font-weight: 700; font-size: 13px; color: ${C.bronze}; letter-spacing: 0.02em; }
+    .doc-header .header-sub  { margin-top: 3px; color: ${C.gray}; font-size: 10px; }
+
+    .doc-body p { margin: 0 0 8px; }
+    .doc-body ul, .doc-body ol { padding-left: 18px; margin: 0 0 10px; }
+    .doc-body li { margin: 0 0 5px; }
+    .doc-body hr, .section-hr {
+      border: none;
+      border-top: 1px solid ${C.rose};
+      margin: 14px 0 12px;
+      height: 0;
+    }
+
+    /* Page offre */
     .section-title {
       font-weight: 700;
-      text-decoration: underline;
-      font-size: 12.5px;
-      margin-bottom: 8px;
-      color: ${C.teal};
+      font-size: 14px;
+      margin: 0 0 12px;
+      color: ${C.bronze};
+      letter-spacing: 0.01em;
+      text-decoration: none;
+      border-bottom: 2px solid ${C.bronze};
+      padding-bottom: 6px;
+      display: inline-block;
     }
-    .offer-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-    .offer-table th, .offer-table td {
+    .offer-block {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      margin-top: 4px;
+    }
+    .offer-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
       border: 1.5px solid ${C.charcoal};
-      padding: 7px 10px;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .col-desc  { text-align: left; width: 72%; background: ${C.cream}; font-weight: 700; color: ${C.teal}; }
-    .col-price { text-align: center; background: ${C.cream}; font-weight: 700; color: ${C.teal}; }
-    .price-sub { display: block; font-size: 9px; font-weight: 500; color: ${C.gray}; }
+    .offer-table th {
+      border-bottom: 1.5px solid ${C.charcoal};
+      padding: 8px 12px;
+      background: ${C.cream};
+      font-weight: 700;
+      color: ${C.teal};
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .offer-table td {
+      padding: 12px;
+      border: none;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .col-desc  { text-align: left; width: 68%; }
+    .col-price { text-align: right; width: 32%; }
     .desc-cell { vertical-align: top; }
-    .price-cell { text-align: center; vertical-align: middle; font-weight: 700; font-size: 20px; letter-spacing: .02em; color: ${C.charcoal}; }
     .op-title  {
       font-weight: 700;
-      color: ${C.bronze};
-      background: ${C.cream};
-      padding: 6px 10px;
-      border-radius: 3px;
-      border-left: 3px solid ${C.teal};
+      color: ${C.charcoal};
+      font-size: 12.5px;
+      line-height: 1.45;
     }
     .sejour-badge {
       display: inline-block;
-      margin-top: 6px;
-      font-weight: 600;
-      font-size: 11px;
-      color: ${C.bronze};
-      background: ${C.rose};
-      padding: 4px 10px;
-      border-radius: 3px;
+      margin-top: 8px;
+      font-weight: 500;
+      font-size: 10.5px;
+      color: ${C.gray};
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      letter-spacing: 0.01em;
     }
-    .offer-block { break-inside: avoid; page-break-inside: avoid; }
+    .offer-total-row td {
+      border-top: 1.5px solid ${C.charcoal};
+      background: ${C.cream};
+      padding: 10px 12px;
+      vertical-align: middle;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .total-label {
+      font-weight: 700;
+      font-size: 12px;
+      color: ${C.teal};
+    }
+    .total-hint {
+      font-weight: 500;
+      font-size: 10px;
+      color: ${C.gray};
+    }
+    .total-price {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .price-amount {
+      font-weight: 700;
+      font-size: 22px;
+      letter-spacing: 0.02em;
+      color: ${C.bronze};
+    }
+    .price-currency {
+      display: inline-block;
+      margin-left: 6px;
+      font-weight: 700;
+      font-size: 12px;
+      color: ${C.bronze};
+      vertical-align: 2px;
+    }
+
+    /* Signature compacte + footer bas de page */
+    .devis-footer-group {
+      margin-top: auto;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
     .signature-block {
-      margin-top: 18px;
+      margin-top: 0;
+      margin-bottom: 6px;
       text-align: right;
       break-inside: avoid;
       page-break-inside: avoid;
-      break-before: avoid;
-      page-break-before: avoid;
     }
-    .signature-block .sig-name { font-weight: 700; font-size: 12.5px; color: ${C.charcoal}; }
-    .signature-block .sig-sub  { font-size: 11px; color: ${C.gray}; margin-top: 1px; }
-    .signature-block img.sig-img { width: 90px; height: 46px; object-fit: contain; display: block; margin-left: auto; margin-top: 4px; }
-    .signature-block .sig-line { width: 140px; height: 1px; border-bottom: 1px solid ${C.rose}; margin-left: auto; margin-top: 4px; }
+    .signature-block .sig-name { font-weight: 700; font-size: 11.5px; color: ${C.charcoal}; }
+    .signature-block .sig-sub  { font-size: 10px; color: ${C.gray}; margin-top: 1px; }
+    .signature-block img.sig-img {
+      width: 72px;
+      height: 38px;
+      object-fit: contain;
+      display: block;
+      margin-left: auto;
+      margin-top: 3px;
+    }
+    .signature-block .sig-line {
+      width: 110px;
+      height: 1px;
+      border-bottom: 1px solid ${C.rose};
+      margin-left: auto;
+      margin-top: 3px;
+    }
     .devis-contact-footer {
-      margin-top: 20px;
-      padding: 14px 0 4px;
+      margin-top: 6px;
+      padding: 8px 0 0;
       border-top: 1px solid ${C.rose};
       background: transparent;
       color: ${C.gray};
       text-align: center;
-      font-size: 10.5px;
-      line-height: 1.55;
+      font-size: 10px;
+      line-height: 1.5;
       letter-spacing: 0.02em;
       break-inside: avoid;
       page-break-inside: avoid;
@@ -210,15 +437,15 @@ export function buildDevisPrintStyles(): string {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      margin: 3px 0;
+      gap: 6px;
+      margin: 2px 0;
       color: ${C.charcoal};
       text-decoration: none;
     }
     .devis-contact-footer a.contact-line:hover { color: ${C.bronze}; }
     .devis-contact-footer svg {
-      width: 14px;
-      height: 14px;
+      width: 12px;
+      height: 12px;
       flex-shrink: 0;
       stroke: ${C.bronze};
       fill: none;

@@ -1,6 +1,9 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
 import bcrypt from 'bcryptjs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type {
   CreateUserByGestionnaireInput,
   LogistiqueInput,
@@ -20,6 +23,12 @@ import {
 } from '../../lib/devisNumber.js'
 import { sendNotificationEmail } from '../../lib/mailer.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
+import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
+import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
+import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
+
+const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
+
 
 /** Liste planning séjour : uniquement dossiers « devis accepté » (pas les étapes suivantes). */
 const PLANNING_SEJOUR_STATUSES = ['devis_accepte'] as const
@@ -192,7 +201,7 @@ export async function getDashboard(gestionnaireUserId: string) {
     patientsLogistique,
     funnel,
   ] = await Promise.all([
-    prisma.patient.count(),
+    prisma.patient.count({ where: { status: { not: 'abstention' } } }),
     prisma.devis.count({ where: { statut: { in: ['brouillon', 'envoye'] } } }),
     prisma.patient.count({ where: { status: { in: ['date_reservee', 'logistique'] } } }),
     prisma.notification.count({ where: { userId: gestionnaireUserId, lu: false } }),
@@ -248,23 +257,27 @@ export async function getDashboard(gestionnaireUserId: string) {
 }
 
 export async function getPatients(search?: string, status?: string) {
-  const patients = await prisma.patient.findMany({
-    where: {
-      ...(status && status !== 'all' ? { status: status as never } : {}),
-      ...(search
-        ? {
-            OR: [
-              { user: { fullName: { contains: search, mode: 'insensitive' } } },
-              { user: { email: { contains: search, mode: 'insensitive' } } },
-              { dossierNumber: { contains: search, mode: 'insensitive' } },
-              { phone: { contains: search, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
-    },
-    include: patientListInclude,
-    orderBy: { updatedAt: 'desc' },
-  })
+  const statusWhere = buildPatientStatusWhere(status, 'gestionnaire')
+  const [patients, counts] = await Promise.all([
+    prisma.patient.findMany({
+      where: {
+        ...statusWhere,
+        ...(search
+          ? {
+              OR: [
+                { user: { fullName: { contains: search, mode: 'insensitive' } } },
+                { user: { email: { contains: search, mode: 'insensitive' } } },
+                { dossierNumber: { contains: search, mode: 'insensitive' } },
+                { phone: { contains: search, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      include: patientListInclude,
+      orderBy: { updatedAt: 'desc' },
+    }),
+    countDossierBuckets('gestionnaire'),
+  ])
 
   await Promise.all(
     patients
@@ -272,7 +285,7 @@ export async function getPatients(search?: string, status?: string) {
       .map((p) => syncPatientDossierFromDevis(prisma, p.id, p.devis![0].numeroDevis!)),
   )
 
-  return { patients: patients.map(mapPatientListRow) }
+  return { patients: patients.map(mapPatientListRow), counts }
 }
 
 export async function getPatientById(patientId: string) {
@@ -485,7 +498,7 @@ export async function saveDevisCustomContent(gestionnaireId: string, devisId: st
   return { ok: true }
 }
 
-export async function sendDevis(gestionnaireId: string, devisId: string) {
+export async function sendDevis(gestionnaireId: string, devisId: string, html?: string) {
   const devis = await prisma.devis.findUnique({ where: { id: devisId } })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
   if (devis.gestionnaireId !== gestionnaireId) {
@@ -528,6 +541,37 @@ export async function sendDevis(gestionnaireId: string, devisId: string) {
     notifTitle: 'Votre devis est disponible',
     notifLink: '/patient/devis',
   })
+
+  // PDF personnalisé (même HTML que « Exporter PDF ») → pièce jointe chat
+  if (html?.trim()) {
+    try {
+      const pdfBuffer = await renderHtmlToPdf(html)
+      const safeRef = String(devis.numeroDevis ?? patient.dossierNumber ?? devisId)
+        .replace(/[^\w.-]+/g, '_')
+        .slice(0, 80)
+      const filename = `chat-${Date.now()}-Devis-${safeRef}.pdf`
+      await mkdir(UPLOADS_DIR, { recursive: true })
+      await writeFile(path.join(UPLOADS_DIR, filename), pdfBuffer)
+
+      const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
+      const pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
+      const pieceJointeNom = `Devis-${safeRef}.pdf`
+
+      await prisma.message.create({
+        data: {
+          patientId: patient.id,
+          expediteurId: gestionnaireId,
+          expediteurRole: 'gestionnaire',
+          contenu: `Pièce jointe : ${pieceJointeNom}`,
+          pieceJointeUrl,
+          pieceJointeNom,
+          lu: false,
+        },
+      })
+    } catch (err) {
+      console.error('[sendDevis] Échec génération PDF personnalisé:', err)
+    }
+  }
 
   return { devis: updated }
 }
@@ -646,6 +690,40 @@ export async function deletePatientByGestionnaire(actorId: string, patientId: st
   }).catch(() => undefined)
 
   return { deleted: true as const }
+}
+
+export async function updatePatientStatus(actorId: string, patientId: string, input: UpdatePatientStatusInput) {
+  const patient = await prisma.patient.findUnique({ where: { id: patientId } })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const goingToAbstention = input.status === 'abstention' && patient.status !== 'abstention'
+  const leavingAbstention = patient.status === 'abstention' && input.status !== 'abstention'
+
+  const updated = await prisma.patient.update({
+    where: { id: patientId },
+    data: {
+      status: input.status,
+      ...(goingToAbstention
+        ? { statusBeforeAbstention: patient.status }
+        : leavingAbstention
+          ? { statusBeforeAbstention: null }
+          : {}),
+    },
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      actorRole: 'gestionnaire',
+      action: 'status_change',
+      entity: 'patient',
+      entityId: patientId,
+      before: { status: patient.status } as never,
+      after: { status: updated.status } as never,
+    },
+  }).catch(() => undefined)
+
+  return { patient: updated }
 }
 
 export async function getLogistiquePatients() {

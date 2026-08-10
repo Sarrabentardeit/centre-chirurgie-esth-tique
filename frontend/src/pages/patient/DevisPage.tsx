@@ -7,7 +7,6 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { authApi, patientApi } from '@/lib/api'
@@ -15,8 +14,8 @@ import type { Devis } from '@/lib/api'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { formatDevisSejourNotesForDisplay, parseSejourMeta } from '@/lib/devisSejourNotes'
 import { downloadDevisPdf } from '@/lib/pdf'
-import { DEVIS_HEADER_SUBTITLE, DEVIS_LOGO_SRC, buildDevisDocumentEndHtml, buildDevisHeaderLogoHtml } from '@/lib/devisBranding'
-import { DEVIS_ACCENT, buildDevisPrintStyles } from '@/lib/devisCharte'
+import { DEVIS_LOGO_SRC, buildDevisDocumentEndHtml, buildDevisHeaderLogoHtml, buildDevisHeaderRightHtml, layoutDevisForPrint } from '@/lib/devisBranding'
+import { buildDevisOfferBlockHtml, buildDevisPrintStyles } from '@/lib/devisCharte'
 import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -129,38 +128,23 @@ export default function DevisPage() {
       const nClin = Number.parseInt((sej.cliniqueNuits || '').trim(), 10)
       const nHotel = Number.parseInt((sej.hotelNuits || '').trim(), 10)
       const totalNights = (Number.isFinite(nClin) ? Math.max(0, nClin) : 0) + (Number.isFinite(nHotel) ? Math.max(0, nHotel) : 0)
-      const jours = totalNights + 1
-      const sejourLine = totalNights > 0 ? `Séjour ${totalNights} nuit${totalNights > 1 ? 's' : ''} / ${jours} jour${jours > 1 ? 's' : ''}` : ''
+      const jours = totalNights
+      const sejourLine = totalNights > 0 ? `Séjour ${jours} jour${jours > 1 ? 's' : ''} (${totalNights} nuit${totalNights > 1 ? 's' : ''})` : ''
       const fmtNum = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(n || 0))
       const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
       const sigUrl = `${window.location.origin}/signature.jpg`
-      const tableHtml = lignes.length > 0 ? `
-<div class="offer-block">
-  <hr class="section-hr"/>
-  <p class="section-title">Notre meilleure offre :</p>
-  <table class="offer-table">
-    <thead>
-      <tr>
-        <th class="col-desc">Description</th>
-        <th class="col-price">Tarif en <span style="color:${DEVIS_ACCENT}">dt</span><br/><span class="price-sub">(Ferme et définitif)</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td class="desc-cell">
-          <div class="op-title">${operationTitle}</div>
-          ${sejourLine ? `<div class="sejour-badge">${sejourLine}</div>` : ''}
-        </td>
-        <td class="price-cell">${fmtNum(total)}</td>
-      </tr>
-    </tbody>
-  </table>
-</div>` : ''
+      const tableHtml = lignes.length > 0
+        ? buildDevisOfferBlockHtml({
+            operationTitle,
+            sejourLine,
+            totalFormatted: fmtNum(total),
+          })
+        : ''
       const html = `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"/><title>Devis ${patientIdentity.dossierNumber}</title>
 <style>${buildDevisPrintStyles()}</style></head>
-<body><table class="page-table"><thead><tr><td><div class="doc-header">${buildDevisHeaderLogoHtml(logoUrl)}<div class="header-right"><div class="header-ref">${patientIdentity.dossierNumber}</div><div class="header-sub">${DEVIS_HEADER_SUBTITLE}</div></div></div></td></tr></thead>
-<tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="doc-body">${topHtml}</div>${tableHtml}<div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div>${buildDevisDocumentEndHtml(sigUrl)}</td></tr></tbody></table></body></html>`
+<body><table class="page-table"><thead><tr><td><div class="doc-header">${buildDevisHeaderLogoHtml(logoUrl)}${buildDevisHeaderRightHtml(patientIdentity.dossierNumber)}</div></td></tr></thead>
+<tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="doc-body devis-top">${topHtml}</div><div class="devis-closing">${tableHtml}<div class="doc-body devis-bot">${botHtml}</div>${buildDevisDocumentEndHtml(sigUrl)}</div></td></tr></tbody></table></body></html>`
       const popup = window.open('', '_blank', 'width=1050,height=960')
       if (!popup) {
         setError("Autorisez les popups pour exporter en PDF.")
@@ -172,9 +156,10 @@ export default function DevisPage() {
       popup.focus()
       const waitAndPrint = () => {
         const imgs = Array.from(popup.document.images)
-        if (imgs.length === 0) { popup.print(); popup.close(); return }
+        const printNow = () => { layoutDevisForPrint(popup.document); popup.print(); popup.close() }
+        if (imgs.length === 0) { printNow(); return }
         let loaded = 0
-        const done = () => { if (++loaded >= imgs.length) { popup.print(); popup.close() } }
+        const done = () => { if (++loaded >= imgs.length) printNow() }
         imgs.forEach((img) => {
           if (img.complete) done()
           else {
@@ -182,7 +167,7 @@ export default function DevisPage() {
             img.addEventListener('error', done, { once: true })
           }
         })
-        setTimeout(() => { if (loaded < imgs.length) { popup.print(); popup.close() } }, 2000)
+        setTimeout(() => { if (loaded < imgs.length) printNow() }, 2000)
       }
       setTimeout(waitAndPrint, 200)
       return
@@ -268,41 +253,36 @@ export default function DevisPage() {
             </div>
 
             <CardContent className="pt-5 space-y-5 px-4 sm:px-6">
-              {/* ── Lignes ── */}
+              {/* ── Offre (aperçu écran lisible) ── */}
               {lignes.length > 0 ? (
-                <div className="overflow-x-auto -mx-1 px-1">
-                  <table className="w-full text-sm min-w-[320px]">
-                    <thead>
-                      <tr className="text-xs text-muted-foreground border-b">
-                        <th className="text-left pb-2 font-medium">Prestation</th>
-                        <th className="text-center pb-2 font-medium w-12">Qté</th>
-                        <th className="text-right pb-2 font-medium w-20 sm:w-24">P.U.</th>
-                        <th className="text-right pb-2 font-medium w-20 sm:w-24">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {lignes.map((ligne, i) => (
-                        <tr key={i}>
-                          <td className="py-3 font-medium pr-2 break-words">{ligne.description}</td>
-                          <td className="text-center text-muted-foreground">{ligne.quantite}</td>
-                          <td className="text-right text-muted-foreground whitespace-nowrap">
-                            {ligne.prixUnitaire === 0 ? 'Inclus' : formatCurrency(ligne.prixUnitaire)}
-                          </td>
-                          <td className="text-right font-semibold whitespace-nowrap">
-                            {ligne.total === 0
-                              ? <Badge variant="success" className="text-xs">Offert</Badge>
-                              : formatCurrency(ligne.total)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <Separator className="my-3" />
-                  <div className="flex justify-between items-center">
-                    <span className="font-semibold">Total estimatif</span>
-                    <span className="text-xl font-bold text-brand-600">
-                      {formatCurrency(d.total)}
-                    </span>
+                <div className="rounded-xl border border-[#e4c8bd]/bg-[#fdeada]/30 p-4 sm:p-5 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[#81572d]">Notre meilleure offre</p>
+                      <p className="mt-1 text-sm font-semibold text-[#282727] leading-snug break-words">
+                        {lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-2xl font-bold text-[#81572d] tracking-tight">{formatCurrency(d.total)}</p>
+                      <p className="text-[11px] text-muted-foreground">Ferme et définitif</p>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto -mx-1 px-1">
+                    <table className="w-full text-sm min-w-[280px]">
+                      <tbody className="divide-y divide-[#e4c8bd]/70">
+                        {lignes.map((ligne, i) => (
+                          <tr key={i}>
+                            <td className="py-2.5 pr-2 text-[#282727] break-words">{ligne.description}</td>
+                            <td className="text-right font-semibold whitespace-nowrap text-[#282727]">
+                              {ligne.total === 0
+                                ? <Badge variant="success" className="text-xs">Offert</Badge>
+                                : formatCurrency(ligne.total)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               ) : (

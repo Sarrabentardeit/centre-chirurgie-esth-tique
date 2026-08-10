@@ -2,17 +2,20 @@ import { useCallback, useEffect, useState, useMemo } from 'react'
 import {
   Search, CheckCircle2, Clock, X, AlertTriangle, Heart, Scissors,
   Save, RefreshCw, AlertCircle, DollarSign, StickyNote, ExternalLink,
-  ClipboardPlus, Sparkles, FileText, ChevronDown, ChevronUp,
-  Phone, Mail, MapPin, Activity, TrendingUp, Calendar,
+  ClipboardPlus, Sparkles, ChevronDown, ChevronUp,
+  Phone, Mail, MapPin, Activity, Calendar,
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNavigate } from 'react-router-dom'
-import { formatDate, formatRelative, STATUS_LABELS, STATUS_COLORS } from '@/lib/utils'
+import { formatDate, formatRelative } from '@/lib/utils'
+import { PageHeader, KpiStrip } from '@/components/PageHeader'
+import { EmptyState } from '@/components/EmptyState'
+import { StatusBadge } from '@/lib/statusUi'
+import { toast } from '@/store/toastStore'
 import { useAuthStore } from '@/store/authStore'
 import { medecinApi } from '@/lib/api'
 import type { PatientListItem } from '@/lib/api'
@@ -286,6 +289,7 @@ export default function RapportsPage() {
         notes: notes || undefined,
       })
       setSaved(true)
+      toast({ title: 'Rapport enregistré', description: 'Le diagnostic a été sauvegardé.', variant: 'success' })
       setTimeout(() => setSaved(false), 3000)
       setPatients((prev) => prev.map((p) => p.id === selectedId
         ? {
@@ -385,9 +389,7 @@ export default function RapportsPage() {
 
         {/* Statut */}
         <td className="px-3 py-3 hidden sm:table-cell">
-          <Badge className={`text-[10px] whitespace-nowrap ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-            {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
-          </Badge>
+          <StatusBadge kind="dossier" value={p.status} />
         </td>
 
         {/* Completion */}
@@ -443,59 +445,28 @@ export default function RapportsPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-4 sm:space-y-5">
 
-      {/* ── Header ── */}
-      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <h2 className="text-lg sm:text-xl font-bold tracking-tight">Rapports Médicaux</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {loading ? '—' : `${patients.length} patient(s) · ${stats.total} rapport(s) · ${stats.avecForfait} avec forfait`}
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="gap-2">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Actualiser</span>
-        </Button>
-      </div>
+      <PageHeader
+        title="Rapports médicaux"
+        description={
+          loading
+            ? 'Chargement…'
+            : `${patients.length} patient(s) · ${stats.total} rapport(s) · ${stats.avecForfait} avec forfait`
+        }
+        actions={
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Actualiser</span>
+          </Button>
+        }
+      />
 
-      {/* ── KPIs — bandeau compact sur mobile ── */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        {[
-          {
-            label: 'À analyser', value: stats.aAnalyser,
-            icon: AlertTriangle, sub: 'Nécessitent un rapport',
-            iconCls: stats.aAnalyser > 0 ? 'text-amber-600 bg-amber-100' : 'text-slate-400 bg-slate-100',
-            cardCls: stats.aAnalyser > 0 ? 'border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50/30' : 'border-slate-200 bg-slate-50',
-            valCls: stats.aAnalyser > 0 ? 'text-amber-700' : 'text-slate-500',
-            pulse: stats.aAnalyser > 0,
-          },
-          {
-            label: 'Rédigés', value: stats.total,
-            icon: FileText, sub: 'Rapports enregistrés',
-            iconCls: 'text-indigo-600 bg-indigo-100',
-            cardCls: 'border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-purple-50/20',
-            valCls: 'text-indigo-700', pulse: false,
-          },
-          {
-            label: 'Forfait', value: stats.avecForfait,
-            icon: TrendingUp, sub: 'Prêts pour devis',
-            iconCls: 'text-emerald-600 bg-emerald-100',
-            cardCls: 'border-emerald-100 bg-gradient-to-br from-emerald-50/60 to-teal-50/20',
-            valCls: 'text-emerald-700', pulse: false,
-          },
-        ].map(({ label, value, icon: Icon, sub, iconCls, cardCls, valCls, pulse }) => (
-          <div key={label} className={`relative rounded-xl sm:rounded-2xl border px-2.5 py-2.5 sm:px-5 sm:py-4 flex flex-col sm:flex-row items-start sm:items-center gap-1.5 sm:gap-4 ${cardCls}`}>
-            <div className={`h-8 w-8 sm:h-11 sm:w-11 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>
-              <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className={`text-lg sm:text-2xl font-bold leading-none ${valCls}`}>{loading ? '—' : value}</p>
-              <p className="text-[10px] sm:text-xs font-semibold text-foreground mt-0.5 sm:mt-1 leading-tight">{label}</p>
-              <p className="text-[11px] text-muted-foreground hidden sm:block">{sub}</p>
-            </div>
-            {pulse && <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-amber-500 animate-pulse" />}
-          </div>
-        ))}
-      </div>
+      <KpiStrip
+        items={[
+          { key: 'a', label: 'À analyser', value: loading ? '—' : stats.aAnalyser, tone: 'amber' },
+          { key: 'r', label: 'Rédigés', value: loading ? '—' : stats.total, tone: 'teal' },
+          { key: 'f', label: 'Avec forfait', value: loading ? '—' : stats.avecForfait, tone: 'emerald' },
+        ]}
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">
@@ -545,10 +516,14 @@ export default function RapportsPage() {
                 </div>
               ))
             ) : filtered.length === 0 ? (
-              <div className="px-4 py-14 text-center">
-                <ClipboardPlus className="h-10 w-10 text-muted-foreground/30 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Aucun patient trouvé</p>
-              </div>
+              <EmptyState
+                icon={ClipboardPlus}
+                title="Aucun patient trouvé"
+                description="Aucun dossier à analyser pour le moment."
+                actionLabel="Voir les patients"
+                onAction={() => navigate('/medecin/patients')}
+                className="py-12"
+              />
             ) : (
               filtered.map((p) => {
                 const hasRapport = patientHasRapport(p)
@@ -673,9 +648,7 @@ export default function RapportsPage() {
                       <span className="text-[11px] font-mono bg-white/10 text-white/80 px-2 py-0.5 rounded border border-white/20 whitespace-nowrap">
                         {selected.dossierNumber}
                       </span>
-                      <Badge className={`text-[10px] ${STATUS_COLORS[selected.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-                        {STATUS_LABELS[selected.status as keyof typeof STATUS_LABELS] ?? selected.status}
-                      </Badge>
+                      <StatusBadge kind="dossier" value={selected.status} />
                     </div>
                   </div>
                 </div>

@@ -1,7 +1,8 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Stethoscope, CheckCircle2, User, Phone, Mail,
-  MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList,
+  MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList, Receipt,
+  ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEffect, useState } from 'react'
-import { STATUS_LABELS, STATUS_COLORS, formatDate, formatCurrency } from '@/lib/utils'
+import { STATUS_LABELS, STATUS_COLORS, formatDate, formatCurrency, cn } from '@/lib/utils'
 import { medecinApi } from '@/lib/api'
 import type { Devis, RendezVous } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
@@ -32,7 +33,10 @@ interface Rapport {
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null
+  nuitsPreoperatoires?: number | null
   nuitsClinique?: number | null
+  nuitsHotel?: number | null
+  vetementContention?: boolean | null
   anesthesieGenerale?: boolean | null
   dureeSejourTunisie?: number | null
   notes: string | null
@@ -92,10 +96,124 @@ const DOSSIER_STATUSES = [
   'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
   'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
+  'abstention',
 ]
 
 function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+// ─── DevisReadCard ────────────────────────────────────────────────────────────
+
+const DEVIS_STATUT_BADGE: Record<string, string> = {
+  brouillon: 'bg-slate-100 text-slate-600',
+  envoye:    'bg-blue-100 text-blue-700',
+  accepte:   'bg-emerald-100 text-emerald-700',
+  refuse:    'bg-red-100 text-red-700',
+}
+const DEVIS_STATUT_LABEL: Record<string, string> = {
+  brouillon: 'Brouillon',
+  envoye:    'Envoyé',
+  accepte:   'Accepté',
+  refuse:    'Refusé',
+}
+
+function DevisReadCard({ devis }: { devis: import('@/lib/api').Devis }) {
+  const [open, setOpen] = useState(devis.statut === 'envoye' || devis.statut === 'accepte')
+
+  return (
+    <Card className={`overflow-hidden ${devis.statut === 'accepte' ? 'border-emerald-200 shadow-sm' : ''}`}>
+      <CardHeader
+        className="cursor-pointer select-none py-3 px-5"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Receipt className={`h-4 w-4 shrink-0 ${devis.statut === 'accepte' ? 'text-emerald-600' : 'text-brand-500'}`} />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold leading-tight">
+                {devis.numeroDevis ?? `Devis v${devis.version}`}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Créé le {formatDate(devis.dateCreation)}
+                {devis.dateValidite ? ` · Valide jusqu'au ${formatDate(devis.dateValidite)}` : ''}
+                {devis.vuParPatientAt ? ` · Vu le ${formatDate(devis.vuParPatientAt)}` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge className={`text-[11px] font-semibold ${DEVIS_STATUT_BADGE[devis.statut] ?? ''}`}>
+              {DEVIS_STATUT_LABEL[devis.statut] ?? devis.statut}
+            </Badge>
+            <p className="text-sm font-bold text-foreground">{formatCurrency(devis.total)}</p>
+            {open ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </div>
+        </div>
+      </CardHeader>
+
+      {open && (
+        <CardContent className="pt-0 pb-5 px-5 space-y-4 border-t">
+          {/* Lignes */}
+          {devis.lignes.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Prestations</p>
+              <div className="rounded-xl border overflow-hidden overflow-x-auto">
+                <table className="w-full text-sm min-w-[420px]">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Description</th>
+                      <th className="text-center px-3 py-2 text-xs font-medium text-muted-foreground w-12">Qté</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground w-28">P.U.</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground w-28">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {devis.lignes.map((l, i) => (
+                      <tr key={i} className="hover:bg-muted/20">
+                        <td className="px-3 py-2 text-sm">{l.description}</td>
+                        <td className="px-3 py-2 text-center text-sm text-muted-foreground">{l.quantite}</td>
+                        <td className="px-3 py-2 text-right text-sm text-muted-foreground">{formatCurrency(l.prixUnitaire)}</td>
+                        <td className="px-3 py-2 text-right text-sm font-medium">{formatCurrency(l.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-muted/20 border-t-2 border-border">
+                    <tr>
+                      <td colSpan={3} className="px-3 py-2 text-sm font-bold text-right">Total</td>
+                      <td className="px-3 py-2 text-right text-sm font-bold text-brand-700">{formatCurrency(devis.total)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Planning médical */}
+          {devis.planningMedical && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Planning médical</p>
+              <div className="rounded-xl bg-muted/30 border px-4 py-3 text-sm whitespace-pre-line text-foreground/90">
+                {devis.planningMedical}
+              </div>
+            </div>
+          )}
+
+          {/* Notes séjour (affichage simplifié) */}
+          {devis.notesSejour && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Notes séjour</p>
+              <div className="rounded-xl bg-muted/30 border px-4 py-3 text-xs text-muted-foreground leading-relaxed">
+                {devis.notesSejour.split('\n')
+                  .filter((l) => !l.startsWith('DELAIS_CONVALESCENCE:') && !l.startsWith('CLINIQUE_NUITS:') && !l.startsWith('HOTEL_NUITS:') && !l.startsWith('DUREE_SEJOUR:'))
+                  .join('\n')
+                  .trim() || devis.notesSejour}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  )
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -118,7 +236,10 @@ export default function DossierPatientPage() {
   const [examensAutreText, setExamensAutreText] = useState('')
   const [interventions, setInterventions] = useState('')
   const [forfait, setForfait]           = useState('')
+  const [nuitsPreoperatoires, setNuitsPreoperatoires] = useState('')
   const [nuitsClinique, setNuitsClinique] = useState('')
+  const [nuitsHotel, setNuitsHotel]     = useState('')
+  const [vetementContention, setVetementContention] = useState<boolean | null>(null)
   const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [notes, setNotes]               = useState('')
@@ -156,6 +277,9 @@ export default function DossierPatientPage() {
             : ''
         )
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
+        setNuitsPreoperatoires(r.nuitsPreoperatoires != null ? String(r.nuitsPreoperatoires) : '1')
+        setNuitsHotel(r.nuitsHotel != null ? String(r.nuitsHotel) : '')
+        setVetementContention(r.vetementContention ?? null)
         setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
         setNotes(r.notes ?? '')
@@ -163,6 +287,7 @@ export default function DossierPatientPage() {
         setExamensDemandes([])
         setExamensAutreChecked(false)
         setExamensAutreText('')
+        setNuitsPreoperatoires('1')
         setDureeSejourTunisie('')
         setAnesthesieGenerale(false)
       }
@@ -176,8 +301,31 @@ export default function DossierPatientPage() {
 
   useEffect(() => { void load() }, [id])
 
+  // Calcul automatique du séjour global = pré-op + post-op + hôtel
+  useEffect(() => {
+    const pre  = parseInt(nuitsPreoperatoires) || 0
+    const post = parseInt(nuitsClinique) || 0
+    const hotel = parseInt(nuitsHotel) || 0
+    if (nuitsPreoperatoires !== '' || nuitsClinique !== '' || nuitsHotel !== '') {
+      setDureeSejourTunisie(String(pre + post + hotel))
+    }
+  }, [nuitsPreoperatoires, nuitsClinique, nuitsHotel])
+
   const handleSaveRapport = async () => {
     if (!id) return
+
+    // Validation des champs obligatoires
+    const missing: string[] = []
+    if (!forfait || Number(forfait) <= 0) missing.push('Forfait médical')
+    if (nuitsPreoperatoires === '') missing.push('Nuits préopératoires')
+    if (nuitsClinique === '') missing.push('Nuits postopératoires')
+    if (nuitsHotel === '') missing.push('Nuits hôtel')
+    if (vetementContention === null) missing.push('Vêtement de contention')
+    if (missing.length > 0) {
+      setRapportError(`Champs obligatoires manquants : ${missing.join(', ')}.`)
+      return
+    }
+
     setSaving(true); setRapportError(null)
     try {
       const examensPayload = [...examensDemandes]
@@ -190,8 +338,11 @@ export default function DossierPatientPage() {
         diagnostic: diagnostic || undefined,
         examensDemandes: examensPayload,
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
-        forfaitPropose: forfait ? Number(forfait) : undefined,
-        nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
+        forfaitPropose: Number(forfait),
+        nuitsPreoperatoires: Number(nuitsPreoperatoires),
+        nuitsClinique: Number(nuitsClinique),
+        nuitsHotel: Number(nuitsHotel),
+        vetementContention: vetementContention!,
         dureeSejourTunisie: dureeSejourTunisie === '' ? undefined : Number(dureeSejourTunisie),
         anesthesieGenerale,
         notes: notes || undefined,
@@ -320,46 +471,59 @@ export default function DossierPatientPage() {
         </div>
       </div>
 
-      {/* ── Changer statut ── */}
+      {/* ── Statut dossier ── */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
-        <span className="text-sm text-muted-foreground">Statut dossier :</span>
-        <Select value={newStatus} onValueChange={setNewStatus}>
-          <SelectTrigger className="w-52 h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DOSSIER_STATUSES.map((s) => (
-              <SelectItem key={s} value={s} className="text-xs">
-                {STATUS_LABELS[s as keyof typeof STATUS_LABELS] ?? s}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {newStatus !== patient.status && (
-          <Button size="sm" variant="brand" className="h-8 text-xs" disabled={statusSaving} onClick={handleUpdateStatus}>
-            {statusSaving ? 'Sauvegarde...' : 'Appliquer'}
-          </Button>
-        )}
+        <span className="text-sm font-medium text-muted-foreground">Statut dossier :</span>
+        <span className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold border', STATUS_COLORS[patient.status as keyof typeof STATUS_COLORS])}>
+          {STATUS_LABELS[patient.status as keyof typeof STATUS_LABELS] ?? patient.status}
+        </span>
+        <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
+          <Select value={newStatus} onValueChange={setNewStatus}>
+            <SelectTrigger className="w-full sm:w-52 h-8 text-xs border-dashed">
+              <SelectValue placeholder="Modifier manuellement…" />
+            </SelectTrigger>
+            <SelectContent>
+              {DOSSIER_STATUSES.map((s) => (
+                <SelectItem key={s} value={s} className="text-xs">
+                  {STATUS_LABELS[s as keyof typeof STATUS_LABELS] ?? s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {newStatus && newStatus !== patient.status && (
+            <Button size="sm" variant="brand" className="h-8 text-xs" disabled={statusSaving} onClick={handleUpdateStatus}>
+              {statusSaving ? 'Sauvegarde...' : 'Appliquer'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ── Tabs ── */}
       <Tabs defaultValue={initialTab}>
-        <TabsList className="mb-5 w-full sm:w-auto flex">
-          <TabsTrigger value="profil" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none text-xs sm:text-sm">
+        <TabsList className="mb-5 w-full sm:w-auto flex overflow-x-auto scrollbar-none">
+          <TabsTrigger value="profil" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none shrink-0 text-xs sm:text-sm">
             <User className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden xs:inline sm:inline">Profil</span>
-            <span className="xs:hidden sm:hidden">Profil</span>
+            <span>Profil</span>
           </TabsTrigger>
-          <TabsTrigger value="formulaire" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none text-xs sm:text-sm">
+          <TabsTrigger value="formulaire" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none shrink-0 text-xs sm:text-sm">
             <FileText className="h-3.5 w-3.5 shrink-0" />
             <span className="hidden sm:inline">Formulaire</span>
             <span className="sm:hidden">Form.</span>
           </TabsTrigger>
-          <TabsTrigger value="rapport" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none text-xs sm:text-sm">
+          <TabsTrigger value="rapport" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none shrink-0 text-xs sm:text-sm">
             <Stethoscope className="h-3.5 w-3.5 shrink-0" />
             <span>Rapport</span>
           </TabsTrigger>
-          <TabsTrigger value="suivi" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none text-xs sm:text-sm">
+          <TabsTrigger value="devis" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none shrink-0 text-xs sm:text-sm">
+            <Receipt className="h-3.5 w-3.5 shrink-0" />
+            <span>Devis</span>
+            {patient.devis.filter((d) => d.statut === 'envoye' || d.statut === 'accepte').length > 0 && (
+              <span className="ml-0.5 rounded-full bg-brand-100 text-brand-700 text-[10px] font-bold px-1.5 py-0.5 leading-none">
+                {patient.devis.filter((d) => d.statut === 'envoye' || d.statut === 'accepte').length}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="suivi" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none shrink-0 text-xs sm:text-sm">
             <ClipboardList className="h-3.5 w-3.5 shrink-0" />
             <span>Suivi</span>
           </TabsTrigger>
@@ -465,7 +629,15 @@ export default function DossierPatientPage() {
                   variant="brand"
                   size="sm"
                   className="gap-1.5"
-                  disabled={saving}
+                  disabled={saving || !forfait || Number(forfait) <= 0 || nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '' || vetementContention === null}
+                  title={
+                    !forfait || Number(forfait) <= 0 ? 'Forfait médical requis'
+                    : nuitsPreoperatoires === '' ? 'Nuits préopératoires requises'
+                    : nuitsClinique === '' ? 'Nuits postopératoires requises'
+                    : nuitsHotel === '' ? 'Nuits hôtel requis'
+                    : vetementContention === null ? 'Vêtement de contention requis'
+                    : undefined
+                  }
                   onClick={handleSaveRapport}
                 >
                   {saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
@@ -554,19 +726,42 @@ export default function DossierPatientPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Forfait proposé (TND)</Label>
+                  <Label className="flex items-center gap-1">
+                    Forfait proposé (TND)
+                    <span className="text-destructive font-bold">*</span>
+                  </Label>
                   <Input
                     type="number"
                     value={forfait}
                     onChange={(e) => setForfait(e.target.value)}
                     placeholder="Ex: 5000"
+                    className={!forfait || Number(forfait) <= 0 ? 'border-amber-300 focus:border-amber-500' : ''}
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label>Nombre de nuits cliniques (séjour médical)</Label>
+                  <Label className="flex items-center gap-1">
+                    Nuits préopératoires
+                    <span className="text-destructive font-bold">*</span>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={30}
+                    value={nuitsPreoperatoires}
+                    onChange={(e) => setNuitsPreoperatoires(e.target.value)}
+                    placeholder="Ex: 1"
+                    className={nuitsPreoperatoires === '' ? 'border-amber-300 focus:border-amber-500' : ''}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Avant l'opération</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1">
+                    Nuits postopératoires
+                    <span className="text-destructive font-bold">*</span>
+                  </Label>
                   <Input
                     type="number"
                     min={0}
@@ -574,7 +769,55 @@ export default function DossierPatientPage() {
                     value={nuitsClinique}
                     onChange={(e) => setNuitsClinique(e.target.value)}
                     placeholder="Ex: 2"
+                    className={nuitsClinique === '' ? 'border-amber-300 focus:border-amber-500' : ''}
                   />
+                  <p className="text-[11px] text-muted-foreground">Après l'opération</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1">
+                    Nuits hôtel
+                    <span className="text-destructive font-bold">*</span>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={60}
+                    value={nuitsHotel}
+                    onChange={(e) => setNuitsHotel(e.target.value)}
+                    placeholder="Ex: 4"
+                    className={nuitsHotel === '' ? 'border-amber-300 focus:border-amber-500' : ''}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Convalescence hôtel</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1">
+                    Vêtement de contention
+                    <span className="text-destructive font-bold">*</span>
+                  </Label>
+                  <div className={`flex items-center gap-2 p-2 rounded-lg border ${vetementContention === null ? 'border-amber-300' : 'border-transparent'}`}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={vetementContention === true ? 'brand' : 'outline'}
+                      onClick={() => setVetementContention(true)}
+                    >
+                      Oui
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={vetementContention === false ? 'brand' : 'outline'}
+                      onClick={() => setVetementContention(false)}
+                    >
+                      Non
+                    </Button>
+                    {vetementContention === null && (
+                      <span className="text-xs text-amber-600 ml-1">À préciser</span>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Anesthésie générale</Label>
@@ -600,14 +843,21 @@ export default function DossierPatientPage() {
               </div>
 
               <div className="space-y-2 max-w-xs">
-                <Label>Nombre de séjour global (Tunisie)</Label>
+                <Label className="flex items-center gap-2">
+                  Nombre de séjour global (Tunisie)
+                  <span className="text-[10px] font-medium bg-brand-50 text-brand-600 border border-brand-200 rounded-full px-2 py-0.5">
+                    Auto
+                  </span>
+                </Label>
                 <Input
                   type="number"
                   min={0}
                   max={90}
                   value={dureeSejourTunisie}
-                  onChange={(e) => setDureeSejourTunisie(e.target.value)}
-                  placeholder="Ex: 6"
+                  readOnly
+                  tabIndex={-1}
+                  placeholder="Calculé automatiquement"
+                  className="bg-muted/50 cursor-default select-none font-semibold text-brand-700"
                 />
               </div>
 
@@ -628,6 +878,22 @@ export default function DossierPatientPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── Devis ── */}
+        <TabsContent value="devis">
+          {patient.devis.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+              <Receipt className="h-10 w-10 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Aucun devis établi pour ce dossier.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {patient.devis.map((d) => (
+                <DevisReadCard key={d.id} devis={d} />
+              ))}
+            </div>
+          )}
         </TabsContent>
 
         {/* ── Suivi ── */}

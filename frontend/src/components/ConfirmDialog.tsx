@@ -49,7 +49,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
@@ -60,7 +60,7 @@ export function ConfirmDialog({
         onClick={() => !loading && onClose()}
         aria-label="Fermer"
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative z-10 w-full max-w-md max-h-[min(90dvh,90vh)] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-2">
           <div className="flex items-start gap-3 min-w-0">
             {icon && <div className="shrink-0 mt-0.5">{icon}</div>}

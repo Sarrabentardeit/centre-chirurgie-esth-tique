@@ -5,6 +5,7 @@ import { Navbar } from './Navbar'
 import { BottomNav } from './BottomNav'
 import { useDemoStore } from '@/store/demoStore'
 import { useAuthStore } from '@/store/authStore'
+import { useChatUnreadStore } from '@/store/chatUnreadStore'
 import { chatApi, type ChatMessage } from '@/lib/api'
 import { playMessageSound, unlockNotificationAudio } from '@/lib/notificationSounds'
 import { Button } from '@/components/ui/button'
@@ -53,7 +54,8 @@ export function AppLayout() {
   const [chatInput, setChatInput] = useState('')
   const [widgetMessages, setWidgetMessages] = useState<ChatMessage[]>([])
   const [sending, setSending] = useState(false)
-  const [chatUnread, setChatUnread] = useState(0)
+  const chatUnread = useChatUnreadStore((s) => s.unread)
+  const setChatUnread = useChatUnreadStore((s) => s.setUnread)
   const prevChatUnreadRef = useRef<number | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
@@ -107,7 +109,7 @@ export function AppLayout() {
         })
     }
     load()
-    const id = window.setInterval(load, 8000)
+    const id = window.setInterval(load, 20000)
     return () => {
       cancelled = true
       window.clearInterval(id)
@@ -156,7 +158,7 @@ export function AppLayout() {
   useEffect(() => {
     if (!chatOpen || user?.role !== 'patient') return
     void loadWidgetMessages()
-    const id = window.setInterval(() => void loadWidgetMessages(), 5000)
+    const id = window.setInterval(() => void loadWidgetMessages(), 15000)
     return () => window.clearInterval(id)
   }, [chatOpen, user?.role, loadWidgetMessages])
 

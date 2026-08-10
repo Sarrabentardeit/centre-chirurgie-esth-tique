@@ -21,28 +21,16 @@ services:
       dockerfile: Dockerfile
     container_name: centre_est_backend
     restart: unless-stopped
+    # Source de vérité pour SMTP, JWT, CORS, etc.
+    # Important: ne pas redéfinir SMTP_*/NOTIFICATION_EMAILS ici avec ${VAR:-}
+    # sinon un deploy sans --env-file injecte "" et écrase env_file.
+    env_file:
+      - .env.prod
     environment:
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-centre_est}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-1d}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
       UPLOAD_DIR: uploads
-      UPLOAD_MAX_FILE_SIZE_MB: ${UPLOAD_MAX_FILE_SIZE_MB:-10}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
-      API_BASE_URL: ${API_BASE_URL:-http://localhost}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
-      FRONTEND_URL: ${FRONTEND_URL:-}
-      EXCHANGE_RATE_API_KEY: ${EXCHANGE_RATE_API_KEY:-}
-      SMTP_HOST: ${SMTP_HOST:-ssl0.ovh.net}
-      SMTP_PORT: ${SMTP_PORT:-465}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      NOTIFICATION_EMAILS: ${NOTIFICATION_EMAILS:-}
     depends_on:
       db:
         condition: service_healthy

@@ -50,7 +50,7 @@ export const CLINIQUE_CHOIX = {
 
 export const HOTEL_CHOIX = {
   mouradi: 'Mouradi Gammarth',
-  darMarsa: 'Hotel Dar Marsa La Soukra',
+  darMarsa: 'Hotel Dar Marsa La Marsa',
   autre: '__autre__',
 } as const
 
@@ -84,8 +84,27 @@ export function resolveHotelFromNom(nom: string): { choice: string; autre: strin
   const n = nom.trim()
   if (!n) return { choice: '', autre: '' }
   if (n === HOTEL_CHOIX.mouradi || /mouradi/i.test(n)) return { choice: 'mouradi', autre: '' }
-  if (n === HOTEL_CHOIX.darMarsa || /dar marsa|soukra/i.test(n)) return { choice: 'darMarsa', autre: '' }
+  if (n === HOTEL_CHOIX.darMarsa || /dar\s*marsa/i.test(n)) return { choice: 'darMarsa', autre: '' }
   return { choice: 'autre', autre: n }
+}
+
+/** Parse un entier ≥ 0 ; NaN si vide / invalide. */
+export function parseNuitsField(s: string): number | null {
+  const t = s.trim()
+  if (t === '') return null
+  const n = Number.parseInt(t, 10)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+/**
+ * Séjour total en jours = nuits clinique + nuits hôtel (sans +1).
+ * Ex. : 3 + 4 nuits → 7 jours.
+ */
+export function joursSejourFromNuits(cliniqueNuits: string, hotelNuits: string): string {
+  const c = parseNuitsField(cliniqueNuits)
+  const h = parseNuitsField(hotelNuits)
+  if (c == null && h == null) return ''
+  return String((c ?? 0) + (h ?? 0))
 }
 
 export function parseSejourMeta(notes: string | null | undefined): ParsedSejourMeta {
@@ -136,7 +155,9 @@ export function accompagnantsFromFormulairePayload(
 }
 
 export type RapportSejourDefaults = {
+  nuitsPreoperatoires?: number | null
   nuitsClinique?: number | null
+  nuitsHotel?: number | null
   dureeSejourTunisie?: number | null
   nbAdultesSejour?: number | null
   nbEnfantsSejour?: number | null
@@ -156,21 +177,29 @@ export function devisSejourDefaultsFromRapport(
   nbEnfants: string
 } {
   const accForm = accompagnantsFromFormulairePayload(formPayload)
-  const cliniqueNuits =
-    rap?.nuitsClinique != null && Number.isFinite(rap.nuitsClinique)
-      ? String(rap.nuitsClinique)
-      : ''
+  // Nuits clinique = pré-opératoires + postopératoires
+  const preop  = rap?.nuitsPreoperatoires != null && Number.isFinite(rap.nuitsPreoperatoires) ? rap.nuitsPreoperatoires : 0
+  const postop = rap?.nuitsClinique != null && Number.isFinite(rap.nuitsClinique) ? rap.nuitsClinique : 0
+  const totalClin = preop + postop
+  const cliniqueNuits = (totalClin > 0 || (rap?.nuitsClinique != null || rap?.nuitsPreoperatoires != null))
+    ? String(totalClin)
+    : ''
   const dureeSejourTotale =
     rap?.dureeSejourTunisie != null && Number.isFinite(rap.dureeSejourTunisie)
       ? String(rap.dureeSejourTunisie)
       : ''
 
   let hotelNuits = ''
-  const clin = cliniqueNuits !== '' ? Number(cliniqueNuits) : NaN
-  const jours = dureeSejourTotale !== '' ? Number(dureeSejourTotale) : NaN
-  if (Number.isFinite(clin) && Number.isFinite(jours) && jours > 0) {
-    const hotel = Math.max(0, jours - 1 - clin)
-    hotelNuits = String(hotel)
+  // Priorité : nuitsHotel saisi explicitement par le médecin
+  if (rap?.nuitsHotel != null && Number.isFinite(rap.nuitsHotel)) {
+    hotelNuits = String(rap.nuitsHotel)
+  } else {
+    // Repli : séjour total - nuits clinique
+    const clin = cliniqueNuits !== '' ? Number(cliniqueNuits) : NaN
+    const jours = dureeSejourTotale !== '' ? Number(dureeSejourTotale) : NaN
+    if (Number.isFinite(clin) && Number.isFinite(jours) && jours >= 0) {
+      hotelNuits = String(Math.max(0, jours - clin))
+    }
   }
 
   const nbAdultes =

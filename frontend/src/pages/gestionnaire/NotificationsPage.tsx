@@ -3,6 +3,8 @@ import { Bell, CheckCheck, Info, AlertCircle, CheckCircle2, AlertTriangle, Refre
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/PageHeader'
+import { EmptyState } from '@/components/EmptyState'
 import { formatRelative, cn } from '@/lib/utils'
 import type { Notification } from '@/types'
 import { useNavigate } from 'react-router-dom'
@@ -16,10 +18,10 @@ const TYPE_ICONS: Record<Notification['type'], React.ElementType> = {
 }
 
 const ICON_COLORS: Record<Notification['type'], string> = {
-  info: 'text-blue-600',
+  info: 'text-brand-700',
   success: 'text-emerald-600',
   warning: 'text-amber-600',
-  urgent: 'text-red-600',
+  urgent: 'text-rose-600',
 }
 
 function mapApiType(t: string): Notification['type'] {
@@ -81,28 +83,27 @@ export default function NotificationsPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            Notifications
+      <PageHeader
+        title="Notifications"
+        description={`${allNotifs.length} notification${allNotifs.length > 1 ? 's' : ''}${unreadCount > 0 ? ` · ${unreadCount} non lue${unreadCount > 1 ? 's' : ''}` : ''}`}
+        actions={
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             {unreadCount > 0 && (
-              <Badge className="bg-brand-600 text-white text-xs">{unreadCount}</Badge>
+              <Badge className="bg-brand-600 text-white text-xs sm:mr-1">{unreadCount}</Badge>
             )}
-          </h2>
-          <p className="text-sm text-muted-foreground">{allNotifs.length} notifications</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
-          {unreadCount > 0 && (
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void markAllRead()}>
-              <CheckCheck className="h-4 w-4" />
-              Tout marquer comme lu
+            <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => void load()} disabled={loading}>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             </Button>
-          )}
-        </div>
-      </div>
+            {unreadCount > 0 && (
+              <Button variant="outline" size="sm" className="gap-1.5 flex-1 sm:flex-none" onClick={() => void markAllRead()}>
+                <CheckCheck className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Tout marquer comme lu</span>
+                <span className="sm:hidden">Tout lire</span>
+              </Button>
+            )}
+          </div>
+        }
+      />
 
       {error && (
         <p className="text-sm text-destructive">{error}</p>
@@ -111,10 +112,13 @@ export default function NotificationsPage() {
       {loading && allNotifs.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">Chargement…</p>
       ) : allNotifs.length === 0 ? (
-        <div className="text-center py-12">
-          <Bell className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
-          <p className="text-muted-foreground text-sm">Aucune notification.</p>
-        </div>
+        <EmptyState
+          icon={Bell}
+          title="Aucune notification"
+          description="Les alertes devis, formulaires et messages apparaîtront ici."
+          actionLabel="Voir les devis"
+          onAction={() => navigate('/gestionnaire/devis')}
+        />
       ) : (
         <div className="space-y-2">
           {allNotifs.map((notif) => {

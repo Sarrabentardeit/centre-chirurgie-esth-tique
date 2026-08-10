@@ -27,7 +27,7 @@ import {
 
 import { getDashboardPath, useAuthStore } from '@/store/authStore'
 
-import { authApi, formulaireApi, uploadFile, uploadFilePublic } from '@/lib/api'
+import { authApi, formulaireApi, patientApi, uploadFile, uploadFilePublic } from '@/lib/api'
 
 import { useNavigate } from 'react-router-dom'
 
@@ -313,6 +313,7 @@ export default function FormulairePage() {
     phone: '',
     ville: '',
     pays: '',
+    nationalite: '',
     password: '',
     confirmPassword: '',
 
@@ -359,6 +360,7 @@ export default function FormulairePage() {
       phone: user.phone || '',
       ville: '',
       pays: '',
+      nationalite: '',
       password: '',
       confirmPassword: '',
     })
@@ -400,6 +402,7 @@ export default function FormulairePage() {
             photos?: string[]
             documentsPDF?: string[]
             sourceContact?: string
+            nationalite?: string
             accompagnant?: boolean
             nbAdultesAccompagnement?: number
             nbEnfantsAccompagnement?: number
@@ -407,6 +410,13 @@ export default function FormulairePage() {
         } | null
         const payload = formulaire?.payload
         if (!payload || cancelled) return
+
+        if (payload.nationalite) {
+          setPublicIdentity((prev) => ({
+            ...prev,
+            nationalite: prev.nationalite || String(payload.nationalite),
+          }))
+        }
 
         const parseChirurgiesRows = (details?: string) => {
           if (!details?.trim()) return [{ intervention: '', date: '' }]
@@ -595,10 +605,10 @@ export default function FormulairePage() {
   const handleNext = async () => {
 
     if (currentStep === 1) {
-      if (!user) {
-        const { prenom, nom, email, phone, ville, pays, password, confirmPassword } = publicIdentity
-        if (!prenom.trim() || !nom.trim() || !email.trim() || !phone.trim() || !ville.trim() || !pays.trim()) {
-          setAutoAccountError('Veuillez compléter vos coordonnées (prénom, nom, email, téléphone, ville, pays).')
+        if (!user) {
+        const { prenom, nom, email, phone, ville, pays, nationalite, password, confirmPassword } = publicIdentity
+        if (!prenom.trim() || !nom.trim() || !email.trim() || !phone.trim() || !ville.trim() || !pays.trim() || !nationalite.trim()) {
+          setAutoAccountError('Veuillez compléter vos coordonnées (prénom, nom, email, téléphone, ville, pays, nationalité).')
           return
         }
         if (!isValidPhoneNumber(phone)) {
@@ -625,6 +635,10 @@ export default function FormulairePage() {
           setAutoAccountError('Les mots de passe ne correspondent pas.')
           return
         }
+      }
+      if (!publicIdentity.nationalite.trim()) {
+        setAutoAccountError('La nationalité est obligatoire.')
+        return
       }
       if (autoAccountError) setAutoAccountError('')
       const valid = await step1Form.trigger()
@@ -674,8 +688,9 @@ export default function FormulairePage() {
       const phone = publicIdentity.phone.trim()
       const ville = publicIdentity.ville.trim()
       const pays = publicIdentity.pays.trim()
-      if (!prenom || !nom || !email || !phone || !ville || !pays) {
-        setAutoAccountError('Veuillez compléter vos coordonnées pour finaliser la soumission.')
+      const nationalite = publicIdentity.nationalite.trim()
+      if (!prenom || !nom || !email || !phone || !ville || !pays || !nationalite) {
+        setAutoAccountError('Veuillez compléter vos coordonnées pour finaliser la soumission (nationalité obligatoire).')
         return
       }
       if (!isValidPhoneNumber(phone)) {
@@ -695,6 +710,7 @@ export default function FormulairePage() {
           phone,
           ville,
           pays,
+          nationalite,
           dateNaissance: step1.dateNaissance,
           sourceContact: step1.sourceContact,
         })
@@ -714,6 +730,13 @@ export default function FormulairePage() {
     }
     const step1 = step1Form.getValues()
     const step3 = step3Form.getValues()
+
+    const nationalite = publicIdentity.nationalite.trim()
+    if (!nationalite) {
+      setAutoAccountError('La nationalité est obligatoire.')
+      setCurrentStep(1)
+      return
+    }
 
     let photosForPayload = uploadedPhotos
     let docsForPayload = uploadedDocs
@@ -765,6 +788,7 @@ export default function FormulairePage() {
       poids: parseInt(step1.poids, 10),
       taille: parseInt(step1.taille, 10),
       sourceContact: step1.sourceContact,
+      nationalite,
       groupeSanguin,
       antecedentsMedicaux: antecedents,
       traitementEnCours,
@@ -798,6 +822,7 @@ export default function FormulairePage() {
       documentsPDF: uploadedDocUrls.length > 0 ? uploadedDocUrls : undefined,
     }
     try {
+      await patientApi.updateProfil({ nationalite }).catch(() => undefined)
       await formulaireApi.submit({ status: 'submitted', payload })
       setCompleted(true)
     } catch (err) {
@@ -969,22 +994,22 @@ export default function FormulairePage() {
       <header style={{ background: '#062a30' }}>
         <div className="max-w-4xl mx-auto px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3 sm:gap-4">
-            <div className="h-12 sm:h-14 w-[170px] sm:w-[205px] overflow-hidden flex items-center">
+            <div className="h-10 sm:h-14 w-[140px] sm:w-[205px] overflow-hidden flex items-center shrink-0">
               <img
                 src="/acces-patient-logo1-crop.png"
                 alt="Dr. Mehdi Chennoufi"
                 className="h-full w-full object-contain"
               />
             </div>
-            <div className="border-l border-white/10 pl-3 sm:pl-4">
+            <div className="border-l border-white/10 pl-3 sm:pl-4 min-w-0">
               <p
-                className="text-xs tracking-[0.22em] uppercase"
+                className="text-[10px] sm:text-xs tracking-[0.18em] sm:tracking-[0.22em] uppercase"
                 style={{ color: 'rgba(228,200,189,0.6)' }}
               >
                 Formulaire de
               </p>
               <p
-                className="text-sm font-semibold tracking-[0.18em] uppercase"
+                className="text-xs sm:text-sm font-semibold tracking-[0.14em] sm:tracking-[0.18em] uppercase truncate"
                 style={{ color: '#fdeada' }}
               >
                 Pré-consultation
@@ -1024,7 +1049,8 @@ export default function FormulairePage() {
                 border: '1px solid rgba(228,200,189,0.4)',
               }}
             >
-              Se déconnecter / Créer un autre compte
+              <span className="sm:hidden">Se déconnecter</span>
+              <span className="hidden sm:inline">Se déconnecter / Créer un autre compte</span>
             </button>
           )}
         </div>
@@ -1142,17 +1168,18 @@ export default function FormulairePage() {
                     </p>
                   </div>
                 </div>
-                {/* Pays | Ville */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Pays | Ville | Nationalité */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { placeholder: 'Pays *', key: 'pays' as const, required: true },
-                    { placeholder: 'Ville *', key: 'ville' as const, required: true },
-                  ].map(({ placeholder, key, required }) => (
+                    { placeholder: 'Pays *', key: 'pays' as const, required: true, alwaysEditable: false },
+                    { placeholder: 'Ville *', key: 'ville' as const, required: true, alwaysEditable: false },
+                    { placeholder: 'Nationalité *', key: 'nationalite' as const, required: true, alwaysEditable: true },
+                  ].map(({ placeholder, key, required, alwaysEditable }) => (
                     <div key={key} className="relative">
                       <Input
                         placeholder={placeholder}
                         value={publicIdentity[key]}
-                        disabled={Boolean(user)}
+                        disabled={Boolean(user) && !alwaysEditable}
                         onChange={(e) => {
                           const value = e.target.value
                           setPublicIdentity((p) => ({ ...p, [key]: value }))

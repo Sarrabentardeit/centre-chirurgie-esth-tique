@@ -263,14 +263,14 @@ export default function LogistiquePage() {
 
       {/* Modal logistique */}
       {isModalOpen && selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button
             type="button"
             className="absolute inset-0 bg-black/40"
             onClick={() => setIsModalOpen(false)}
             aria-label="Fermer"
           />
-          <div className="relative z-10 w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <div className="relative z-10 w-full max-w-4xl max-h-[min(90dvh,90vh)] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50/95 px-5 py-4 backdrop-blur">
               <div>
                 <h3 className="text-base font-semibold text-slate-900">

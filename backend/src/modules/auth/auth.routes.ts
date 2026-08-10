@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import type { Request, Response, NextFunction } from 'express'
+import { rateLimit } from 'express-rate-limit'
 import { validate } from '../../middleware/validate.js'
 import { requireAuth } from '../../middleware/auth.js'
 import { registerSchema, loginSchema, refreshSchema } from './auth.schema.js'
@@ -7,9 +8,23 @@ import * as authService from './auth.service.js'
 
 export const authRouter = Router()
 
+/** Anti brute-force login / inscription uniquement — n’affecte pas le reste de l’app. */
+const authAbuseLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    ok: false,
+    code: 'TOO_MANY_REQUESTS',
+    message: 'Trop de tentatives de connexion. Réessayez dans quelques minutes.',
+  },
+})
+
 // POST /api/auth/register
 authRouter.post(
   '/register',
+  authAbuseLimiter,
   validate(registerSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -27,6 +42,7 @@ authRouter.post(
 // POST /api/auth/login
 authRouter.post(
   '/login',
+  authAbuseLimiter,
   validate(loginSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -44,6 +60,7 @@ authRouter.post(
 // POST /api/auth/refresh
 authRouter.post(
   '/refresh',
+  authAbuseLimiter,
   validate(refreshSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

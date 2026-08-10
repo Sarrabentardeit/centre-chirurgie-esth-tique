@@ -90,7 +90,7 @@ export default function DashboardMedecinPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div className="min-w-0">
-          <h2 className="text-xl sm:text-2xl font-bold truncate">Bonjour, Dr. {user?.name}</h2>
+          <h2 className="font-display text-2xl sm:text-[1.75rem] font-semibold text-brand-950 tracking-tight truncate">Bonjour, Dr. {user?.name}</h2>
           <p className="text-muted-foreground text-sm mt-0.5">
             {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
@@ -134,7 +134,7 @@ export default function DashboardMedecinPage() {
             label: 'Patients total',
             value: stats.totalPatients,
             icon: Users,
-            color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100',
+            color: 'text-brand-950', bg: 'bg-[rgba(6,42,48,0.04)]', border: 'border-[rgba(6,42,48,0.12)]',
             sub: 'Tous dossiers',
             onClick: () => navigate('/medecin/patients'),
           },
@@ -142,7 +142,7 @@ export default function DashboardMedecinPage() {
             label: 'À analyser',
             value: stats.aAnalyser,
             icon: FileText,
-            color: stats.aAnalyser > 0 ? 'text-amber-600' : 'text-slate-400',
+            color: stats.aAnalyser > 0 ? 'text-amber-700' : 'text-slate-400',
             bg: stats.aAnalyser > 0 ? 'bg-amber-50' : 'bg-slate-50',
             border: stats.aAnalyser > 0 ? 'border-amber-200' : 'border-slate-100',
             sub: 'Formulaires complets',
@@ -153,7 +153,7 @@ export default function DashboardMedecinPage() {
             label: "RDV aujourd'hui",
             value: stats.rdvAujourdhui,
             icon: Calendar,
-            color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100',
+            color: 'text-brand-700', bg: 'bg-brand-50', border: 'border-brand-200',
             sub: `${stats.rdvCetteSemaine} cette semaine`,
             onClick: () => navigate('/medecin/agenda'),
           },
@@ -161,7 +161,7 @@ export default function DashboardMedecinPage() {
             label: 'Derniers patients',
             value: derniersPatients.length,
             icon: ClipboardList,
-            color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100',
+            color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200',
             sub: 'Récemment actifs',
             onClick: () => navigate('/medecin/patients'),
           },
@@ -198,15 +198,15 @@ export default function DashboardMedecinPage() {
               <AreaChart data={evolutionPatients}>
                 <defs>
                   <linearGradient id="colorPat" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#c44828" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#c44828" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#81572d" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#81572d" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="mois" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                 <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '11px' }} />
-                <Area type="monotone" dataKey="patients" stroke="#c44828" strokeWidth={2} fill="url(#colorPat)" />
+                <Area type="monotone" dataKey="patients" stroke="#81572d" strokeWidth={2} fill="url(#colorPat)" />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>

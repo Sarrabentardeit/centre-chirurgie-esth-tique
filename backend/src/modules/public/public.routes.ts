@@ -25,7 +25,7 @@ const upload = multer({
   },
 })
 
-/** Limite dédiée (en plus du /api global) pour limiter l’abus sans compte. */
+/** Limite dédiée pour limiter l’abus d’upload sans compte (pas de limite globale /api). */
 const publicUploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 40,

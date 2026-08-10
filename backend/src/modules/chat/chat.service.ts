@@ -10,6 +10,8 @@ function mapMessage(m: {
   expediteurId: string
   expediteurRole: string
   contenu: string
+  pieceJointeUrl?: string | null
+  pieceJointeNom?: string | null
   lu: boolean
   dateEnvoi: Date
   expediteur?: { fullName: string } | null
@@ -22,6 +24,8 @@ function mapMessage(m: {
     expediteurRole: m.expediteurRole as UserRole,
     expediteurNom: m.expediteur?.fullName ?? null,
     contenu: m.contenu,
+    pieceJointeUrl: m.pieceJointeUrl ?? null,
+    pieceJointeNom: m.pieceJointeNom ?? null,
     dateEnvoi: m.dateEnvoi.toISOString(),
     lu: m.lu,
   }
@@ -84,8 +88,9 @@ async function notifyPatientNewStaffMessage(input: {
   senderRole: UserRole
   preview: string
 }) {
+  const who = input.senderRole === 'medecin' ? 'Dr Chennoufi' : 'la gestionnaire'
   const titre = 'Nouveau message de l’équipe'
-  const message = input.preview.slice(0, 160)
+  const message = `${who} : ${input.preview.slice(0, 140)}`
   await prisma.notification.create({
     data: {
       userId: input.patientUserId,
@@ -95,6 +100,46 @@ async function notifyPatientNewStaffMessage(input: {
       lienAction: '/patient/chat',
     },
   })
+}
+
+export async function searchChatPatients(search?: string) {
+  const q = search?.trim()
+  const patients = await prisma.patient.findMany({
+    where: q
+      ? {
+          OR: [
+            { dossierNumber: { contains: q, mode: 'insensitive' } },
+            { user: { fullName: { contains: q, mode: 'insensitive' } } },
+            { user: { email: { contains: q, mode: 'insensitive' } } },
+          ],
+        }
+      : undefined,
+    take: q ? 50 : 40,
+    orderBy: { updatedAt: 'desc' },
+    include: {
+      user: { select: { fullName: true, email: true } },
+    },
+  })
+
+  if (patients.length === 0) return { patients: [] }
+
+  const ids = patients.map((p) => p.id)
+  const withMessages = await prisma.message.groupBy({
+    by: ['patientId'],
+    where: { patientId: { in: ids } },
+    _count: { id: true },
+  })
+  const hasMsg = new Set(withMessages.map((r) => r.patientId))
+
+  return {
+    patients: patients.map((p) => ({
+      id: p.id,
+      dossierNumber: p.dossierNumber,
+      fullName: p.user.fullName,
+      email: p.user.email,
+      hasConversation: hasMsg.has(p.id),
+    })),
+  }
 }
 
 export async function listConversations(role: UserRole) {
@@ -196,12 +241,16 @@ export async function sendMessage(
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
+  const preview = input.contenu.trim() || (input.pieceJointeNom ? `📎 ${input.pieceJointeNom}` : 'Pièce jointe')
+
   const message = await prisma.message.create({
     data: {
       patientId,
       expediteurId: userId,
       expediteurRole: role,
-      contenu: input.contenu.trim(),
+      contenu: input.contenu.trim() || (input.pieceJointeNom ? `Pièce jointe : ${input.pieceJointeNom}` : 'Pièce jointe'),
+      pieceJointeUrl: input.pieceJointeUrl ?? null,
+      pieceJointeNom: input.pieceJointeNom ?? null,
       lu: false,
     },
     include: { expediteur: { select: { fullName: true } } },
@@ -221,7 +270,7 @@ export async function sendMessage(
       patientId,
       patientName: patient.user.fullName,
       dossierNumber: patient.dossierNumber,
-      preview: input.contenu.trim(),
+      preview,
     })
   } else {
     await prisma.message.updateMany({
@@ -235,7 +284,7 @@ export async function sendMessage(
     void notifyPatientNewStaffMessage({
       patientUserId: patient.user.id,
       senderRole: role,
-      preview: input.contenu.trim(),
+      preview,
     })
   }
 

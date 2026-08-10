@@ -50,9 +50,9 @@ export default {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
-        // Brand colors — charte graphique Dr. Mehdi Chennoufi
+        // Brand — teal (#062a30) + bronze (#81572d) + crème
         brand: {
-          50: '#f7f7f7',
+          50: '#faf6f2',
           100: '#fdeada',
           200: '#e4c8bd',
           300: '#c9a596',
@@ -63,6 +63,10 @@ export default {
           800: '#4b3732',
           900: '#282727',
           950: '#062a30',
+        },
+        teal: {
+          DEFAULT: '#062a30',
+          soft: 'rgba(6, 42, 48, 0.08)',
         },
         rose: {
           50: '#fff1f2',
@@ -95,7 +99,8 @@ export default {
         'fade-in': 'fade-in 0.3s ease-out',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['"Source Sans 3"', 'system-ui', 'sans-serif'],
+        display: ['"Cormorant Garamond"', 'Georgia', 'serif'],
       },
     },
   },

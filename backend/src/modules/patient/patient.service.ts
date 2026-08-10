@@ -279,9 +279,10 @@ export async function repondreDevis(userId: string, devisId: string, input: Repo
   })
 
   // Mettre à jour le statut du dossier
+  // Accepté → devis_accepte | Refusé → rapport_genere (gestionnaire doit préparer un nouveau devis)
   await prisma.patient.update({
     where: { id: patient.id },
-    data: { status: input.reponse === 'accepte' ? 'devis_accepte' : 'formulaire_complete' },
+    data: { status: input.reponse === 'accepte' ? 'devis_accepte' : 'rapport_genere' },
   })
 
   const patientProfile = await prisma.patient.findUnique({

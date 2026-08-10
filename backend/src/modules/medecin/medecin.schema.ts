@@ -5,8 +5,11 @@ export const rapportSchema = z.object({
   examensDemandes:          z.array(z.string()).optional(),
   interventionsRecommandees: z.array(z.string()).optional(),
   valeurMedicale:           z.string().optional(),
-  forfaitPropose:           z.number().positive().optional(),
-  nuitsClinique:            z.number().int().min(0).max(60).optional(),
+  forfaitPropose:           z.number({ required_error: 'Le forfait médical est obligatoire.' }).positive('Le forfait doit être supérieur à 0.'),
+  nuitsPreoperatoires:      z.number({ required_error: 'Le nombre de nuits préopératoires est obligatoire.' }).int().min(0).max(30),
+  nuitsClinique:            z.number({ required_error: 'Le nombre de nuits postopératoires est obligatoire.' }).int().min(0).max(60),
+  nuitsHotel:               z.number({ required_error: 'Le nombre de nuits hôtel est obligatoire.' }).int().min(0).max(60),
+  vetementContention:       z.boolean({ required_error: 'Veuillez indiquer si un vêtement de contention est prescrit.' }),
   anesthesieGenerale:       z.boolean().optional(),
   dureeSejourTunisie:       z.number().int().min(0).max(90).optional(),
   nbAdultesSejour:          z.number().int().min(1).max(20).optional(),
@@ -36,6 +39,7 @@ export const updatePatientStatusSchema = z.object({
     'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
     'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
     'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
+    'abstention',
   ]),
 })
 export type UpdatePatientStatusInput = z.infer<typeof updatePatientStatusSchema>

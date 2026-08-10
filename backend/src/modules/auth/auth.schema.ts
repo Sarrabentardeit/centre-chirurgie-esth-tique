@@ -7,7 +7,7 @@ export const registerSchema = z.object({
   fullName: z.string().min(2, 'Nom complet requis'),
   phone: z.string().min(6, 'Téléphone requis'),
   dateNaissance: z.string().optional(),
-  nationalite: z.string().optional(),
+  nationalite: z.string().min(2, 'Nationalité requise').max(60),
   ville: z.string().optional(),
   pays: z.string().optional(),
   sourceContact: z.string().optional(),

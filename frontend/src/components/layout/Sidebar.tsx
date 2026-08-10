@@ -7,12 +7,13 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { useDemoStore } from '@/store/demoStore'
+import { useChatUnreadStore } from '@/store/chatUnreadStore'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useEffect, useMemo, useState } from 'react'
 import type { UserRole } from '@/types'
-import { chatApi, gestionnaireApi } from '@/lib/api'
+import { gestionnaireApi } from '@/lib/api'
 
 interface NavItem {
   label: string
@@ -34,6 +35,7 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
     { label: 'Tableau de bord', href: '/medecin/dashboard', icon: LayoutDashboard },
     { label: 'Patients', href: '/medecin/patients', icon: Users },
     { label: 'Rapports Médicaux', href: '/medecin/rapports', icon: FileText },
+    { label: 'Devis', href: '/medecin/devis', icon: FileCheck },
     { label: 'Agenda', href: '/medecin/agenda', icon: Calendar },
     { label: 'Suivi Post-Op', href: '/medecin/post-op', icon: Heart },
     { label: 'Chat', href: '/medecin/chat', icon: MessageSquare, badgeKey: 'chat' },
@@ -64,32 +66,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navigate = useNavigate()
 
   const notificationsStore = useDemoStore((s) => s.notifications)
-  const [chatUnread, setChatUnread] = useState(0)
+  const chatUnread = useChatUnreadStore((s) => s.unread)
   const [gestionnaireNotifUnread, setGestionnaireNotifUnread] = useState<number | null>(null)
-
-  useEffect(() => {
-    if (!user) {
-      setChatUnread(0)
-      return
-    }
-    let cancelled = false
-    const load = () => {
-      void chatApi
-        .getUnread()
-        .then((r) => {
-          if (!cancelled) setChatUnread(r.unread)
-        })
-        .catch(() => {
-          if (!cancelled) setChatUnread(0)
-        })
-    }
-    load()
-    const id = window.setInterval(load, 15000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [user?.id, user?.role, location.pathname])
 
   useEffect(() => {
     if (user?.role !== 'gestionnaire') {

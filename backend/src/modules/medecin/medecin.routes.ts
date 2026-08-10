@@ -102,6 +102,14 @@ medecinRouter.put('/google/push-calendar', async (req: Request, res: Response, n
   } catch (e) { next(e) }
 })
 
+// ── Devis (lecture seule) ────────────────────────────────────────────────────
+medecinRouter.get('/devis', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await medecinService.getAllDevis()
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
 // ── Dashboard ────────────────────────────────────────────────────────────────
 medecinRouter.get('/dashboard', async (req: Request, res: Response, next: NextFunction) => {
   try {

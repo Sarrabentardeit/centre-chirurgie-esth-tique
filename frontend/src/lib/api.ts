@@ -180,7 +180,7 @@ export const authApi = {
     fullName: string
     phone: string
     dateNaissance?: string
-    nationalite?: string
+    nationalite: string
     ville?: string
     pays?: string
     sourceContact?: string
@@ -301,6 +301,8 @@ export interface ChatMessage {
   expediteurRole: 'patient' | 'medecin' | 'gestionnaire'
   expediteurNom?: string | null
   contenu: string
+  pieceJointeUrl?: string | null
+  pieceJointeNom?: string | null
   dateEnvoi: string
   lu: boolean
 }
@@ -316,6 +318,14 @@ export interface ChatConversation {
   lastExpediteurRole: string | null
 }
 
+export interface ChatPatientOption {
+  id: string
+  dossierNumber: string
+  fullName: string
+  email: string
+  hasConversation: boolean
+}
+
 export const chatApi = {
   getUnread: () =>
     request<{ ok: true; unread: number }>('/chat/unread'),
@@ -323,12 +333,22 @@ export const chatApi = {
   getConversations: () =>
     request<{ ok: true; conversations: ChatConversation[] }>('/chat/conversations'),
 
+  searchPatients: (search?: string) => {
+    const q = search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''
+    return request<{ ok: true; patients: ChatPatientOption[] }>(`/chat/patients${q}`)
+  },
+
   getMessages: (patientId?: string) => {
     const q = patientId ? `?patientId=${encodeURIComponent(patientId)}` : ''
     return request<{ ok: true; patientId: string; messages: ChatMessage[] }>(`/chat/messages${q}`)
   },
 
-  sendMessage: (body: { contenu: string; patientId?: string }) =>
+  sendMessage: (body: {
+    contenu: string
+    patientId?: string
+    pieceJointeUrl?: string
+    pieceJointeNom?: string
+  }) =>
     request<{ ok: true; message: ChatMessage }>('/chat/messages', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -339,6 +359,29 @@ export const chatApi = {
       method: 'POST',
       body: JSON.stringify(patientId ? { patientId } : {}),
     }),
+
+  upload: async (file: File) => {
+    const prepared = await compressImageForUpload(file)
+    const { access } = getTokens()
+    const formData = new FormData()
+    formData.append('file', prepared)
+    const headers: Record<string, string> = {}
+    if (access) headers['Authorization'] = `Bearer ${access}`
+
+    const res = await fetch(`${BASE_URL}/chat/upload`, { method: 'POST', headers, body: formData })
+    if (res.status === 401) {
+      const newToken = await tryRefreshToken()
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`
+        const retry = await fetch(`${BASE_URL}/chat/upload`, { method: 'POST', headers, body: formData })
+        if (!retry.ok) await readUploadError(retry)
+        return (await retry.json()) as { ok: true; url: string; name: string; size: number }
+      }
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
+    }
+    if (!res.ok) await readUploadError(res)
+    return (await res.json()) as { ok: true; url: string; name: string; size: number }
+  },
 }
 
 export const patientApi = {
@@ -392,11 +435,19 @@ export const patientApi = {
 
 // ─── Médecin API ──────────────────────────────────────────────────────────────
 
+export interface DossierBucketCounts {
+  non_traites: number
+  traites: number
+  abstention: number
+  actifs: number
+}
+
 export interface PatientListItem {
   id: string
   dossierNumber: string
   phone: string | null
   status: string
+  statusBeforeAbstention?: string | null
   ville: string | null
   pays: string | null
   nationalite: string | null
@@ -413,7 +464,10 @@ export interface PatientListItem {
     interventionsRecommandees: string[]
     valeurMedicale: string | null
     forfaitPropose: number | null
+    nuitsPreoperatoires?: number | null
     nuitsClinique?: number | null
+    nuitsHotel?: number | null
+    vetementContention?: boolean | null
     anesthesieGenerale?: boolean | null
     dureeSejourTunisie?: number | null
     nbAdultesSejour?: number | null
@@ -469,6 +523,14 @@ export interface DashboardAlerte {
   count: number
 }
 
+export interface DevisWithPatient extends Devis {
+  patient: {
+    id: string
+    dossierNumber: string
+    fullName: string
+  }
+}
+
 export const medecinApi = {
   getDashboard: () =>
     request<{
@@ -488,7 +550,11 @@ export const medecinApi = {
     if (params?.search) q.set('search', params.search)
     if (params?.status) q.set('status', params.status)
     const qs = q.toString()
-    return request<{ ok: true; patients: PatientListItem[] }>(`/medecin/patients${qs ? `?${qs}` : ''}`)
+    return request<{
+      ok: true
+      patients: PatientListItem[]
+      counts?: DossierBucketCounts
+    }>(`/medecin/patients${qs ? `?${qs}` : ''}`)
   },
 
   createPreDossier: (body: {
@@ -521,7 +587,10 @@ export const medecinApi = {
         interventionsRecommandees: string[]
         valeurMedicale: string | null
         forfaitPropose: number | null
+        nuitsPreoperatoires?: number | null
         nuitsClinique?: number | null
+        nuitsHotel?: number | null
+        vetementContention?: boolean | null
         anesthesieGenerale?: boolean | null
         dureeSejourTunisie?: number | null
         nbAdultesSejour?: number | null
@@ -554,8 +623,11 @@ export const medecinApi = {
     examensDemandes?: string[]
     interventionsRecommandees?: string[]
     valeurMedicale?: string
-    forfaitPropose?: number
-    nuitsClinique?: number
+    forfaitPropose: number
+    nuitsPreoperatoires: number
+    nuitsClinique: number
+    nuitsHotel: number
+    vetementContention: boolean
     anesthesieGenerale?: boolean
     dureeSejourTunisie?: number
     nbAdultesSejour?: number
@@ -659,6 +731,9 @@ export const medecinApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  getAllDevis: () =>
+    request<{ ok: true; devis: DevisWithPatient[] }>('/medecin/devis'),
 }
 
 // ─── Gestionnaire API ─────────────────────────────────────────────────────────
@@ -694,7 +769,10 @@ export interface GestionnaireRapportRow {
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null
+  nuitsPreoperatoires?: number | null
   nuitsClinique?: number | null
+  nuitsHotel?: number | null
+  vetementContention?: boolean | null
   anesthesieGenerale?: boolean | null
   dureeSejourTunisie?: number | null
   nbAdultesSejour?: number | null
@@ -861,7 +939,11 @@ export const gestionnaireApi = {
     if (params?.search) q.set('search', params.search)
     if (params?.status) q.set('status', params.status)
     const qs = q.toString()
-    return request<{ ok: true; patients: PatientListItem[] }>(`/gestionnaire/patients${qs ? `?${qs}` : ''}`)
+    return request<{
+      ok: true
+      patients: PatientListItem[]
+      counts?: DossierBucketCounts
+    }>(`/gestionnaire/patients${qs ? `?${qs}` : ''}`)
   },
 
   getPatient: (id: string) =>
@@ -870,6 +952,12 @@ export const gestionnaireApi = {
   deletePatient: (patientId: string) =>
     request<{ ok: true; deleted: true }>(`/gestionnaire/patients/${patientId}`, {
       method: 'DELETE',
+    }),
+
+  updatePatientStatus: (id: string, status: string) =>
+    request<{ ok: true; patient: unknown }>(`/gestionnaire/patients/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
     }),
 
   upsertDevisDraft: (
@@ -888,8 +976,48 @@ export const gestionnaireApi = {
       body: JSON.stringify(body),
     }),
 
-  sendDevis: (devisId: string) =>
-    request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/envoyer`, { method: 'POST' }),
+  sendDevis: (devisId: string, body?: { html?: string }) =>
+    request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/envoyer`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
+
+  /** Même moteur Chromium que l’envoi chat — PDF binaire téléchargeable. */
+  renderDevisPdf: async (html: string): Promise<Blob> => {
+    const { access } = getTokens()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (access) headers['Authorization'] = `Bearer ${access}`
+
+    const res = await fetch(`${BASE_URL}/gestionnaire/devis/render-pdf`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ html }),
+    })
+
+    if (res.status === 401) {
+      const newToken = await tryRefreshToken()
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`
+        const retry = await fetch(`${BASE_URL}/gestionnaire/devis/render-pdf`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ html }),
+        })
+        if (!retry.ok) {
+          const err = await retry.json().catch(() => ({})) as { message?: string; code?: string }
+          throw new ApiRequestError(retry.status, err.code ?? 'PDF_ERROR', err.message ?? 'Export PDF impossible.')
+        }
+        return retry.blob()
+      }
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { message?: string; code?: string }
+      throw new ApiRequestError(res.status, err.code ?? 'PDF_ERROR', err.message ?? 'Export PDF impossible.')
+    }
+    return res.blob()
+  },
 
   saveDevisCustomContent: (devisId: string, content: string) =>
     request<{ ok: true }>(`/gestionnaire/devis/${devisId}/content`, {

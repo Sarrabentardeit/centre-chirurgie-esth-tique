@@ -15,6 +15,7 @@ import {
   syncPatientDossierFromDevis,
 } from '../../lib/devisNumber.js'
 import { sendNotificationEmail } from '../../lib/mailer.js'
+import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 
 async function notifyGestionnaires(input: {
   titre: string
@@ -136,7 +137,7 @@ export async function getDashboard(medecinId: string) {
     prochainRdvRaw,
     patientsForAnalytics,
   ] = await Promise.all([
-    prisma.patient.count(),
+    prisma.patient.count({ where: { status: { not: 'abstention' } } }),
     prisma.patient.count({ where: { status: 'formulaire_complete' } }),
     // Compter les AgendaEvent de type rdv pour aujourd'hui
     prisma.agendaEvent.count({
@@ -155,6 +156,7 @@ export async function getDashboard(medecinId: string) {
       },
     }),
     prisma.patient.findMany({
+      where: { status: { not: 'abstention' } },
       orderBy: { updatedAt: 'desc' },
       take: 5,
       include: { user: { select: { fullName: true, email: true } } },
@@ -368,18 +370,20 @@ export async function getDashboardAlertes(medecinId: string) {
 // ─── Patients ─────────────────────────────────────────────────────────────────
 
 export async function getPatients(search?: string, status?: string) {
-  const patients = await prisma.patient.findMany({
-    where: {
-      ...(status && status !== 'all' ? { status: status as never } : {}),
-    },
-    include: {
-      user: { select: { fullName: true, email: true, createdAt: true } },
-      formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
-      devis: { orderBy: { dateCreation: 'desc' }, take: 1 },
-      rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
-    },
-    orderBy: { updatedAt: 'desc' },
-  })
+  const statusWhere = buildPatientStatusWhere(status, 'medecin')
+  const [patients, counts] = await Promise.all([
+    prisma.patient.findMany({
+      where: statusWhere,
+      include: {
+        user: { select: { fullName: true, email: true, createdAt: true } },
+        formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
+        devis: { orderBy: { dateCreation: 'desc' }, take: 1 },
+        rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+      orderBy: { updatedAt: 'desc' },
+    }),
+    countDossierBuckets('medecin'),
+  ])
   await Promise.all(
     patients
       .filter((p) => p.devis?.[0]?.numeroDevis)
@@ -387,7 +391,7 @@ export async function getPatients(search?: string, status?: string) {
   )
 
   const query = search?.trim().toLowerCase()
-  if (!query) return { patients: patients.map(mapPatientListRow) }
+  if (!query) return { patients: patients.map(mapPatientListRow), counts }
 
   // Support recherche par date (YYYY-MM-DD ou DD/MM/YYYY)
   const normalizedDate = (() => {
@@ -435,7 +439,7 @@ export async function getPatients(search?: string, status?: string) {
     return false
   })
 
-  return { patients: filtered.map(mapPatientListRow) }
+  return { patients: filtered.map(mapPatientListRow), counts }
 }
 
 export async function createPreDossier(medecinId: string, input: CreatePreDossierInput) {
@@ -513,7 +517,7 @@ export async function createPreDossier(medecinId: string, input: CreatePreDossie
 }
 
 export async function getPatientById(patientId: string) {
-  const patient = await prisma.patient.findUnique({
+  let patient = await prisma.patient.findUnique({
     where: { id: patientId },
     include: {
       user: { select: { fullName: true, email: true, createdAt: true } },
@@ -530,6 +534,14 @@ export async function getPatientById(patientId: string) {
   const numeroDevis = patient.devis[0]?.numeroDevis
   if (numeroDevis) {
     await syncPatientDossierFromDevis(prisma, patientId, numeroDevis)
+  }
+  // Passage automatique en "En analyse médicale" quand le médecin consulte un dossier formulaire complété
+  if (patient.status === 'formulaire_complete') {
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: { status: 'en_analyse' },
+    })
+    patient = { ...patient, status: 'en_analyse' as typeof patient.status }
   }
   return {
     patient: mapPatientListRow({
@@ -592,9 +604,20 @@ export async function deletePatient(patientId: string) {
 export async function updatePatientStatus(patientId: string, input: UpdatePatientStatusInput) {
   const patient = await prisma.patient.findUnique({ where: { id: patientId } })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const goingToAbstention = input.status === 'abstention' && patient.status !== 'abstention'
+  const leavingAbstention = patient.status === 'abstention' && input.status !== 'abstention'
+
   const updated = await prisma.patient.update({
     where: { id: patientId },
-    data: { status: input.status },
+    data: {
+      status: input.status,
+      ...(goingToAbstention
+        ? { statusBeforeAbstention: patient.status }
+        : leavingAbstention
+          ? { statusBeforeAbstention: null }
+          : {}),
+    },
   })
   return { patient: updated }
 }
@@ -615,12 +638,11 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     examensDemandes:          input.examensDemandes ?? [],
     interventionsRecommandees: input.interventionsRecommandees ?? [],
     valeurMedicale:           input.valeurMedicale,
-    // Float Prisma : arrondi pour éviter 4999.999… en base / JSON.
-    forfaitPropose:
-      input.forfaitPropose === undefined
-        ? undefined
-        : Math.round(Number(input.forfaitPropose.toFixed(2))),
+    forfaitPropose:           Math.round(Number(input.forfaitPropose.toFixed(2))),
+    nuitsPreoperatoires:      input.nuitsPreoperatoires as never,
     nuitsClinique:            input.nuitsClinique,
+    nuitsHotel:               input.nuitsHotel,
+    vetementContention:       input.vetementContention,
     anesthesieGenerale:       input.anesthesieGenerale,
     dureeSejourTunisie:       input.dureeSejourTunisie,
     nbAdultesSejour:          input.nbAdultesSejour,
@@ -662,6 +684,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
         interventionsRecommandees: rapport.interventionsRecommandees,
         valeurMedicale: rapport.valeurMedicale,
         forfaitPropose: rapport.forfaitPropose,
+        nuitsPreoperatoires: (rapport as never as Record<string, unknown>)['nuitsPreoperatoires'],
         nuitsClinique: rapport.nuitsClinique,
         anesthesieGenerale: rapport.anesthesieGenerale,
         dureeSejourTunisie: rapport.dureeSejourTunisie,
@@ -673,8 +696,9 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     },
   })
 
-  // Mettre à jour le statut dossier si encore en analyse
-  if (['formulaire_complete', 'en_analyse'].includes(patient.status)) {
+  // Mettre à jour le statut dossier vers "Rapport généré" depuis tout statut pré-rapport
+  const PRE_RAPPORT_STATUSES = ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse']
+  if (PRE_RAPPORT_STATUSES.includes(patient.status)) {
     await prisma.patient.update({
       where: { id: patientId },
       data: { status: 'rapport_genere' },
@@ -944,6 +968,46 @@ export async function createRendezVous(
       notes:  rdv.notes ?? null,
       statut: rdv.statut ?? 'planifie',
     },
+  }
+}
+
+export async function getAllDevis() {
+  const devisList = await prisma.devis.findMany({
+    where: { statut: { in: ['envoye', 'accepte', 'refuse'] } },
+    include: {
+      patient: {
+        select: {
+          id: true,
+          dossierNumber: true,
+          user: { select: { fullName: true } },
+        },
+      },
+    },
+    orderBy: { dateCreation: 'desc' },
+  })
+
+  return {
+    devis: devisList.map((d) => ({
+      id: d.id,
+      numeroDevis: d.numeroDevis,
+      statut: d.statut,
+      version: d.version,
+      lignes: d.lignes,
+      total: d.total,
+      currency: d.currency,
+      planningMedical: d.planningMedical,
+      notesSejour: d.notesSejour,
+      customContent: d.customContent,
+      dateValidite: d.dateValidite?.toISOString() ?? null,
+      dateCreation: d.dateCreation.toISOString(),
+      updatedAt: d.updatedAt.toISOString(),
+      vuParPatientAt: d.vuParPatientAt?.toISOString() ?? null,
+      patient: {
+        id: d.patient.id,
+        dossierNumber: d.patient.dossierNumber,
+        fullName: d.patient.user.fullName,
+      },
+    })),
   }
 }
 

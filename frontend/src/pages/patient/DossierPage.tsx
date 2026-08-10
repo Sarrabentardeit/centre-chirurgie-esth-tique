@@ -31,21 +31,26 @@ const STATUS_ORDER: DossierStatus[] = [
 ]
 
 function getProgress(status: DossierStatus): number {
+  if (status === 'abstention') return 0
   const idx = STATUS_ORDER.indexOf(status)
+  if (idx < 0) return 0
   return Math.round((idx / (STATUS_ORDER.length - 1)) * 100)
 }
 
 function isStepDone(stepKey: string, currentStatus: DossierStatus): boolean {
+  if (currentStatus === 'abstention') return false
   return STATUS_ORDER.indexOf(stepKey as DossierStatus) <= STATUS_ORDER.indexOf(currentStatus)
 }
 
 function isCurrentStep(stepKey: string, currentStatus: DossierStatus): boolean {
+  if (currentStatus === 'abstention') return false
   const sIdx = STATUS_ORDER.indexOf(stepKey as DossierStatus)
   const cIdx = STATUS_ORDER.indexOf(currentStatus)
   return sIdx === cIdx
 }
 
 function isNextStep(stepKey: string, currentStatus: DossierStatus): boolean {
+  if (currentStatus === 'abstention') return false
   const sIdx = STATUS_ORDER.indexOf(stepKey as DossierStatus)
   const cIdx = STATUS_ORDER.indexOf(currentStatus)
   return sIdx === cIdx + 1

@@ -69,6 +69,19 @@ export const saveDevisContentSchema = z.object({
 
 export type SaveDevisContentInput = z.infer<typeof saveDevisContentSchema>
 
+/** HTML complet du devis personnalisé (même document que « Exporter PDF ») pour pièce jointe chat. */
+export const sendDevisSchema = z.object({
+  html: z.string().min(1).optional(),
+})
+
+export type SendDevisInput = z.infer<typeof sendDevisSchema>
+
+export const renderDevisPdfSchema = z.object({
+  html: z.string().min(1, 'HTML du devis requis.'),
+})
+
+export type RenderDevisPdfInput = z.infer<typeof renderDevisPdfSchema>
+
 const chirurgieRowSchema = z.object({
   intervention: z.string(),
   date: z.string(),

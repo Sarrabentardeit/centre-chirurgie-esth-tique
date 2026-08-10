@@ -6,9 +6,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
+import { useChatUnreadStore } from '@/store/chatUnreadStore'
 import type { UserRole } from '@/types'
-import { useEffect, useState } from 'react'
-import { chatApi } from '@/lib/api'
 
 interface BottomNavItem {
   label: string
@@ -45,31 +44,7 @@ const BOTTOM_NAV_ITEMS: Record<UserRole, BottomNavItem[]> = {
 export function BottomNav() {
   const { user } = useAuthStore()
   const location = useLocation()
-  const [chatUnread, setChatUnread] = useState(0)
-
-  useEffect(() => {
-    if (!user) {
-      setChatUnread(0)
-      return
-    }
-    let cancelled = false
-    const load = () => {
-      void chatApi
-        .getUnread()
-        .then((r) => {
-          if (!cancelled) setChatUnread(r.unread)
-        })
-        .catch(() => {
-          if (!cancelled) setChatUnread(0)
-        })
-    }
-    load()
-    const id = window.setInterval(load, 10000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [user?.id, user?.role, location.pathname])
+  const chatUnread = useChatUnreadStore((s) => s.unread)
 
   if (!user) return null
 

@@ -283,12 +283,12 @@ export default function PlanningSejourEditorPage() {
 
       <RichDocToolbar editor={editor} highlightColors={PLANNING_HIGHLIGHT_COLORS} />
 
-      <div className="editor-scroll flex-1 overflow-auto py-8 px-4 flex justify-center bg-white">
+      <div className="editor-scroll flex-1 overflow-auto py-4 sm:py-8 px-2 sm:px-4 bg-white">
         <div
-          className="doc-shell bg-white shadow-2xl"
+          className="doc-shell bg-white shadow-2xl mx-auto"
           style={{
             width: 794,
-            maxWidth: '100%',
+            minWidth: 794,
             padding: '48px 56px 56px',
             boxSizing: 'border-box',
             background: '#fff',

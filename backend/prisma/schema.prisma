@@ -31,6 +31,8 @@ enum DossierStatus {
   intervention
   post_op
   suivi_termine
+  /// Classé sans suite : hors du fil actif, historique conservé
+  abstention
 }
 
 enum FormulaireStatus {
@@ -122,10 +124,12 @@ model Patient {
   nationalite    String?
   ville          String?
   pays           String?
-  sourceContact  String?       @map("source_contact")
-  status         DossierStatus @default(nouveau)
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+  sourceContact           String?        @map("source_contact")
+  status                  DossierStatus  @default(nouveau)
+  /// Statut avant classement en abstention (pour réouverture)
+  statusBeforeAbstention  DossierStatus? @map("status_before_abstention")
+  createdAt               DateTime       @default(now()) @map("created_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   formulaires   Formulaire[]
@@ -189,7 +193,14 @@ model Rapport {
   interventionsRecommandees String[] @map("interventions_recommandees")
   valeurMedicale           String?  @map("valeur_medicale")
   forfaitPropose           Float?   @map("forfait_propose")
+  /** Nuits préopératoires en clinique (obligatoire). */
+  nuitsPreoperatoires      Int?     @map("nuits_preoperatoires")
+  /** Nuits postopératoires en clinique (obligatoire, ancien champ nuits_clinique). */
   nuitsClinique            Int?     @map("nuits_clinique")
+  /** Nuits hôtel prescrites par le médecin (obligatoire). */
+  nuitsHotel               Int?     @map("nuits_hotel")
+  /** Vêtement de contention prescrit (obligatoire). */
+  vetementContention       Boolean? @map("vetement_contention")
   anesthesieGenerale       Boolean? @map("anesthesie_generale")
   /** Durée globale du séjour en Tunisie (jours). */
   dureeSejourTunisie       Int?     @map("duree_sejour_tunisie")
@@ -304,17 +315,20 @@ model SuiviPostOp {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Message {
-  id           String   @id @default(uuid())
-  patientId    String   @map("patient_id")
-  expediteurId String   @map("expediteur_id")
-  expediteurRole String @map("expediteur_role")
-  contenu      String
-  lu           Boolean  @default(false)
-  dateEnvoi    DateTime @default(now()) @map("date_envoi")
+  id             String   @id @default(uuid())
+  patientId      String   @map("patient_id")
+  expediteurId   String   @map("expediteur_id")
+  expediteurRole String   @map("expediteur_role")
+  contenu        String
+  pieceJointeUrl String?  @map("piece_jointe_url")
+  pieceJointeNom String?  @map("piece_jointe_nom")
+  lu             Boolean  @default(false)
+  dateEnvoi      DateTime @default(now()) @map("date_envoi")
 
   patient    Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   expediteur User    @relation(fields: [expediteurId], references: [id], onDelete: Cascade)
 
+  @@index([patientId, dateEnvoi])
   @@map("messages")
 }
 

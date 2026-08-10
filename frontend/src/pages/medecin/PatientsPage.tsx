@@ -1,32 +1,42 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Search, Users, Clock, CheckCircle2, AlertTriangle, AlertCircle,
-  RefreshCw, ChevronRight, UserPlus, Phone, Mail, MapPin, Filter,
-  Trash2, Pencil, X, Save,
+  Search, Users, AlertCircle,
+  RefreshCw, ChevronRight, UserPlus, Phone, Mail, MapPin,
+  Trash2, Pencil, X, Save, Archive, RotateCcw,
 } from 'lucide-react'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
+import { PageHeader, KpiStrip } from '@/components/PageHeader'
+import { EmptyState } from '@/components/EmptyState'
+import { StatusBadge } from '@/lib/statusUi'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { STATUS_LABELS, STATUS_COLORS, getPatientDisplayReference } from '@/lib/utils'
+import { getPatientDisplayReference } from '@/lib/utils'
 import type { DossierStatus } from '@/types'
 import { medecinApi, gestionnaireApi } from '@/lib/api'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
-import type { PatientListItem } from '@/lib/api'
+import type { DossierBucketCounts, PatientListItem } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const STATUS_FILTERS: Array<{ key: DossierStatus | 'all'; label: string; color: string }> = [
-  { key: 'all',                 label: 'Tous',            color: '' },
-  { key: 'formulaire_complete', label: 'À analyser',      color: 'text-amber-700  bg-amber-50  border-amber-200' },
-  { key: 'rapport_genere',      label: 'Rapport généré',  color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
-  { key: 'devis_envoye',        label: 'Devis envoyé',    color: 'text-blue-700   bg-blue-50   border-blue-200' },
-  { key: 'date_reservee',       label: 'RDV fixé',        color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-  { key: 'post_op',             label: 'Post-Op',         color: 'text-rose-700   bg-rose-50   border-rose-200' },
+type ListFilter = DossierStatus | 'all' | 'non_traites' | 'traites'
+
+const BUCKET_FILTERS: Array<{ key: ListFilter; label: string; color: string }> = [
+  { key: 'non_traites', label: 'Non traités', color: 'text-amber-700 bg-amber-50 border-amber-200' },
+  { key: 'traites', label: 'Traités', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+  { key: 'abstention', label: 'Abstention', color: 'text-slate-700 bg-slate-100 border-slate-300' },
+  { key: 'all', label: 'Tous (actifs)', color: '' },
+]
+
+const DETAIL_FILTERS: Array<{ key: DossierStatus; label: string; color: string }> = [
+  { key: 'formulaire_complete', label: 'À analyser', color: 'text-amber-700  bg-amber-50  border-amber-200' },
+  { key: 'rapport_genere', label: 'Rapport généré', color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
+  { key: 'devis_envoye', label: 'Devis envoyé', color: 'text-blue-700   bg-blue-50   border-blue-200' },
+  { key: 'date_reservee', label: 'RDV fixé', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+  { key: 'post_op', label: 'Post-Op', color: 'text-rose-700   bg-rose-50   border-rose-200' },
 ]
 
 const SOURCE_STYLES: Record<string, { label: string; color: string }> = {
@@ -41,7 +51,6 @@ const SOURCE_STYLES: Record<string, { label: string; color: string }> = {
   direct:    { label: 'Direct',    color: 'bg-slate-100 text-slate-600 border border-slate-200' },
 }
 
-// Couleur de l'avatar selon le statut
 const AVATAR_COLOR: Record<string, string> = {
   formulaire_complete: 'bg-amber-100 text-amber-700 ring-2 ring-amber-300',
   en_analyse:          'bg-indigo-100 text-indigo-700',
@@ -50,10 +59,24 @@ const AVATAR_COLOR: Record<string, string> = {
   date_reservee:       'bg-emerald-100 text-emerald-700',
   post_op:             'bg-rose-100 text-rose-700',
   suivi_termine:       'bg-slate-100 text-slate-600',
+  abstention:          'bg-slate-200 text-slate-500',
 }
 
 function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function parseInitialFilter(raw: string | null): ListFilter {
+  if (!raw) return 'non_traites'
+  if (raw === 'all' || raw === 'non_traites' || raw === 'traites' || raw === 'abstention') return raw
+  return raw as DossierStatus
+}
+
+function reopenStatusFor(patient: PatientListItem, isGestionnaire: boolean): string {
+  if (patient.statusBeforeAbstention && patient.statusBeforeAbstention !== 'abstention') {
+    return patient.statusBeforeAbstention
+  }
+  return isGestionnaire ? 'rapport_genere' : 'formulaire_complete'
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
@@ -75,8 +98,6 @@ function ListSkeleton() {
     </div>
   )
 }
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 // ─── Modal Modifier ───────────────────────────────────────────────────────────
 
@@ -132,11 +153,10 @@ function EditModal({ patient, onClose, onSaved }: {
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border bg-background shadow-2xl overflow-hidden mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b">
+      <div className="relative z-10 w-full max-w-md max-h-[min(90dvh,90vh)] flex flex-col rounded-2xl border bg-background shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
           <div>
             <p className="font-bold text-base">Modifier le patient</p>
             <p className="text-xs text-muted-foreground mt-0.5">{getPatientDisplayReference(patient)}</p>
@@ -146,8 +166,7 @@ function EditModal({ patient, onClose, onSaved }: {
           </button>
         </div>
 
-        {/* Body */}
-        <div className="px-5 py-5 space-y-3 max-h-[70vh] overflow-y-auto">
+        <div className="px-5 py-5 space-y-3 overflow-y-auto min-h-0">
           {err && (
             <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <AlertCircle className="h-4 w-4 shrink-0" /> {err}
@@ -177,8 +196,7 @@ function EditModal({ patient, onClose, onSaved }: {
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-4 border-t flex items-center justify-end gap-2">
+        <div className="px-5 py-4 border-t flex items-center justify-end gap-2 shrink-0">
           <Button variant="ghost" onClick={onClose}>Annuler</Button>
           <Button variant="brand" onClick={() => void handleSave()} disabled={saving || !form.fullName.trim() || !form.email.trim()}>
             <Save className="h-4 w-4 mr-2" />
@@ -253,6 +271,88 @@ function DeleteModal({ patient, asGestionnaire, onClose, onDeleted }: {
   )
 }
 
+// ─── Modal Abstention ─────────────────────────────────────────────────────────
+
+function AbstentionModal({ patient, asGestionnaire, mode, onClose, onDone }: {
+  patient: PatientListItem
+  asGestionnaire: boolean
+  mode: 'classer' | 'reouvrir'
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const handleConfirm = async () => {
+    setSaving(true); setErr(null)
+    try {
+      const nextStatus = mode === 'classer'
+        ? 'abstention'
+        : reopenStatusFor(patient, asGestionnaire)
+      if (asGestionnaire) await gestionnaireApi.updatePatientStatus(patient.id, nextStatus)
+      else await medecinApi.updatePatientStatus(patient.id, nextStatus)
+      onDone()
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Erreur lors de la mise à jour.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border bg-background shadow-2xl overflow-hidden mx-4">
+        <div className="px-5 pt-5 pb-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${
+              mode === 'classer' ? 'bg-slate-100' : 'bg-emerald-50'
+            }`}>
+              {mode === 'classer'
+                ? <Archive className="h-5 w-5 text-slate-600" />
+                : <RotateCcw className="h-5 w-5 text-emerald-600" />}
+            </div>
+            <div>
+              <p className="font-bold text-sm">
+                {mode === 'classer' ? 'Classer en abstention ?' : 'Réouvrir ce dossier ?'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {mode === 'classer'
+                  ? 'Le dossier disparaît du fil actif ; l’historique est conservé.'
+                  : 'Le dossier revient dans le fil des non traités / traités.'}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-xl bg-muted/50 border px-4 py-3">
+            <p className="font-semibold text-sm">{patient.user.fullName}</p>
+            <p className="text-xs text-muted-foreground">{getPatientDisplayReference(patient)}</p>
+          </div>
+          {err && (
+            <div className="flex items-center gap-2 mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" /> {err}
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t flex items-center justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose}>Annuler</Button>
+          <Button
+            variant={mode === 'classer' ? 'outline' : 'brand'}
+            size="sm"
+            onClick={() => void handleConfirm()}
+            disabled={saving}
+          >
+            {saving
+              ? 'Enregistrement...'
+              : mode === 'classer'
+                ? 'Classer en abstention'
+                : 'Réouvrir'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PatientsPage() {
@@ -260,27 +360,33 @@ export default function PatientsPage() {
   const { user }      = useAuthStore()
   const isGestionnaire = user?.role === 'gestionnaire'
   const [searchParams] = useSearchParams()
-  const initialStatus  = (searchParams.get('status') ?? 'all') as DossierStatus | 'all'
+  const initialStatus  = parseInitialFilter(searchParams.get('status'))
 
   const [search, setSearch]             = useState('')
-  const [statusFilter, setStatusFilter] = useState<DossierStatus | 'all'>(initialStatus)
+  const [statusFilter, setStatusFilter] = useState<ListFilter>(initialStatus)
   const [patients, setPatients]         = useState<PatientListItem[]>([])
+  const [counts, setCounts]             = useState<DossierBucketCounts | null>(null)
   const [loading, setLoading]           = useState(true)
   const [error, setError]               = useState<string | null>(null)
   const [editTarget, setEditTarget]     = useState<PatientListItem | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<PatientListItem | null>(null)
+  const [abstentionTarget, setAbstentionTarget] = useState<{
+    patient: PatientListItem
+    mode: 'classer' | 'reouvrir'
+  } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
       const params = {
         search: search || undefined,
-        status: statusFilter !== 'all' ? statusFilter : undefined,
+        status: statusFilter,
       }
       const res = isGestionnaire
         ? await gestionnaireApi.getPatients(params)
         : await medecinApi.getPatients(params)
       setPatients(res.patients)
+      if (res.counts) setCounts(res.counts)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
@@ -294,142 +400,137 @@ export default function PatientsPage() {
   }, [load])
 
   const stats = {
-    total:     patients.length,
-    aAnalyser: patients.filter((p) => p.status === 'formulaire_complete').length,
-    enCours:   patients.filter((p) => ['en_analyse', 'rapport_genere', 'devis_preparation', 'devis_envoye'].includes(p.status)).length,
-    termines:  patients.filter((p) => ['devis_accepte', 'date_reservee', 'intervention', 'post_op', 'suivi_termine'].includes(p.status)).length,
+    nonTraites: counts?.non_traites ?? 0,
+    traites:    counts?.traites ?? 0,
+    abstention: counts?.abstention ?? 0,
+    actifs:     counts?.actifs ?? patients.length,
   }
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-5">
 
-      {/* ── Header ── */}
-      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <h2 className="text-lg sm:text-xl font-bold tracking-tight">Patients</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {loading ? '—' : `${stats.total} patient${stats.total > 1 ? 's' : ''} enregistré${stats.total > 1 ? 's' : ''}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            <span className="ml-2 hidden sm:inline">Actualiser</span>
-          </Button>
-          {!isGestionnaire && (
-            <Button variant="brand" size="sm" className="gap-2" onClick={() => navigate('/medecin/patients/nouveau')}>
-              <UserPlus className="h-4 w-4" />
-              <span className="hidden sm:inline">Nouveau patient</span>
-              <span className="sm:hidden">Nouveau</span>
+      <PageHeader
+        title="Patients"
+        description={
+          loading
+            ? 'Chargement des dossiers…'
+            : `${stats.actifs} dossier${stats.actifs > 1 ? 's' : ''} actif${stats.actifs > 1 ? 's' : ''}${stats.abstention > 0 ? ` · ${stats.abstention} en abstention` : ''}`
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <span className="ml-2 hidden sm:inline">Actualiser</span>
             </Button>
-          )}
-        </div>
-      </div>
-
-      {/* ── KPIs ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          {
-            label: 'Total patients',
-            value: stats.total,
-            icon: Users,
-            iconClass: 'text-brand-600',
-            bgClass: 'bg-brand-50/60',
-            borderClass: 'border-brand-100',
-          },
-          {
-            label: 'À analyser',
-            value: stats.aAnalyser,
-            icon: AlertTriangle,
-            iconClass: stats.aAnalyser > 0 ? 'text-amber-600' : 'text-slate-400',
-            bgClass: stats.aAnalyser > 0 ? 'bg-amber-50' : 'bg-slate-50',
-            borderClass: stats.aAnalyser > 0 ? 'border-amber-200' : 'border-slate-200',
-            pulse: stats.aAnalyser > 0,
-          },
-          {
-            label: 'En cours',
-            value: stats.enCours,
-            icon: Clock,
-            iconClass: 'text-indigo-600',
-            bgClass: 'bg-indigo-50/60',
-            borderClass: 'border-indigo-100',
-          },
-          {
-            label: 'Finalisés',
-            value: stats.termines,
-            icon: CheckCircle2,
-            iconClass: 'text-emerald-600',
-            bgClass: 'bg-emerald-50/60',
-            borderClass: 'border-emerald-100',
-          },
-        ].map(({ label, value, icon: Icon, iconClass, bgClass, borderClass, pulse }) => (
-          <div
-            key={label}
-            className={`relative rounded-2xl border ${borderClass} ${bgClass} px-3 py-3 sm:px-4 sm:py-4 flex items-center gap-2 sm:gap-3 overflow-hidden`}
-          >
-            <div className={`rounded-xl p-2 sm:p-2.5 bg-white/80 shadow-sm ${iconClass} shrink-0`}>
-              <Icon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xl sm:text-2xl font-bold leading-none">{loading ? '—' : value}</p>
-              <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-1 leading-tight">{label}</p>
-            </div>
-            {pulse && (
-              <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            {!isGestionnaire && (
+              <Button variant="brand" size="sm" className="gap-2" onClick={() => navigate('/medecin/patients/nouveau')}>
+                <UserPlus className="h-4 w-4" />
+                <span className="hidden sm:inline">Nouveau patient</span>
+                <span className="sm:hidden">Nouveau</span>
+              </Button>
             )}
-          </div>
-        ))}
-      </div>
+          </>
+        }
+      />
 
-      {/* ── Panel principal ── */}
+      <KpiStrip
+        items={[
+          { key: 'non_traites', label: 'Non traités', value: loading ? '—' : stats.nonTraites, tone: 'amber', active: statusFilter === 'non_traites', onClick: () => setStatusFilter('non_traites') },
+          { key: 'traites', label: 'Traités', value: loading ? '—' : stats.traites, tone: 'emerald', active: statusFilter === 'traites', onClick: () => setStatusFilter('traites') },
+          { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'default', active: statusFilter === 'abstention', onClick: () => setStatusFilter('abstention') },
+          { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'brand', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
+        ]}
+      />
+
       <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
 
-        {/* Barre de recherche + filtres */}
-        <div className="px-4 sm:px-5 py-4 border-b border-border bg-muted/20 space-y-3">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Nom, n° dossier, date, mot-clé opération..."
-                className="pl-9 h-9 bg-background"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Filter className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden sm:inline">Filtrer :</span>
-            </div>
+        {/* ── Barre de recherche + filtres ── */}
+        <div className="px-4 sm:px-5 pt-4 pb-3 border-b border-border bg-white space-y-3">
+
+          {/* Ligne 1 : Recherche */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Rechercher par nom, n° dossier, opération…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-10 pr-10 py-2.5 text-sm border border-border rounded-xl bg-muted/30 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-300/50 focus:border-brand-400 transition-shadow"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
-          {/* Filtres pill — scroll horizontal sur mobile */}
-          <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
-            {STATUS_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setStatusFilter(f.key)}
-                className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium border transition-all ${
-                  statusFilter === f.key
-                    ? f.key === 'all'
-                      ? 'bg-foreground text-background border-foreground'
-                      : f.color + ' font-semibold'
-                    : 'border-border text-muted-foreground hover:border-brand-300 hover:text-brand-700 bg-background'
-                }`}
-              >
-                {f.label}
-                {f.key !== 'all' && !loading && (
-                  <span className="ml-1.5 opacity-70">
-                    {patients.filter((p) => p.status === f.key).length > 0
-                      ? `(${patients.filter((p) => p.status === f.key).length})`
-                      : ''}
-                  </span>
-                )}
-              </button>
-            ))}
+          {/* Ligne 2 : Filtres bucket (tabs) — scroll horizontal sur mobile */}
+          <div className="flex bg-muted/50 rounded-xl p-1 gap-0.5 overflow-x-auto scrollbar-none">
+            {BUCKET_FILTERS.map((f) => {
+              const count = !loading && counts
+                ? f.key === 'non_traites' ? counts.non_traites
+                  : f.key === 'traites' ? counts.traites
+                  : f.key === 'abstention' ? counts.abstention
+                  : counts.actifs
+                : null
+              const isActive = statusFilter === f.key
+              const shortLabel =
+                f.key === 'non_traites' ? 'Non traités'
+                : f.key === 'traites' ? 'Traités'
+                : f.key === 'abstention' ? 'Abstention'
+                : 'Tous'
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setStatusFilter(f.key)}
+                  className={`shrink-0 py-2 sm:py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+                    isActive
+                      ? 'bg-white shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className="sm:hidden">{shortLabel}</span>
+                  <span className="hidden sm:inline">{f.label}</span>
+                  {count !== null && (
+                    <span className={`ml-1 text-[10px] font-bold ${isActive ? 'opacity-70' : 'opacity-50'}`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Ligne 3 : Filtres rapides par étape */}
+          <div>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">Étape spécifique</p>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+              {DETAIL_FILTERS.map((f) => {
+                const isActive = statusFilter === f.key
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setStatusFilter(isActive ? 'non_traites' : f.key)}
+                    className={`shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold border transition-all duration-150 ${
+                      isActive
+                        ? f.color + ' shadow-sm'
+                        : 'border-border/60 text-muted-foreground bg-background hover:border-brand-200 hover:text-brand-700 hover:bg-brand-50/40'
+                    }`}
+                  >
+                    {f.label}
+                    {isActive && <X className="inline h-2.5 w-2.5 ml-1.5 opacity-70" />}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
 
-        {/* Erreur */}
         {error && (
           <div className="flex items-center gap-2 mx-4 my-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" /> {error}
@@ -437,32 +538,34 @@ export default function PatientsPage() {
           </div>
         )}
 
-        {/* Liste */}
         {loading ? (
           <ListSkeleton />
         ) : patients.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-center px-4">
-            <div className="h-16 w-16 rounded-2xl bg-muted flex items-center justify-center">
-              <Users className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="font-medium text-sm">Aucun patient trouvé</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {search
-                  ? `Aucun résultat pour "${search}"`
-                  : isGestionnaire
-                    ? 'Modifiez le filtre pour afficher d’autres dossiers'
-                    : 'Modifiez le filtre ou ajoutez un nouveau patient'}
-              </p>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter('all') }}>
-              Réinitialiser les filtres
-            </Button>
-          </div>
+          <EmptyState
+            icon={Users}
+            title="Aucun patient trouvé"
+            description={
+              search
+                ? `Aucun résultat pour « ${search} »`
+                : statusFilter === 'abstention'
+                  ? 'Aucun dossier classé en abstention'
+                  : statusFilter === 'non_traites'
+                    ? 'Aucun dossier à traiter pour le moment'
+                    : isGestionnaire
+                      ? 'Modifiez le filtre pour afficher d’autres dossiers'
+                      : 'Modifiez le filtre ou ajoutez un nouveau patient'
+            }
+            actionLabel={!isGestionnaire && !search ? 'Nouveau patient' : 'Voir les non traités'}
+            onAction={() => {
+              if (!isGestionnaire && !search && statusFilter === 'all') navigate('/medecin/patients/nouveau')
+              else { setSearch(''); setStatusFilter('non_traites') }
+            }}
+          />
         ) : (
           <div className="divide-y divide-border/50">
             {patients.map((p, idx) => {
-              const isUrgent   = p.status === 'formulaire_complete'
+              const isUrgent   = p.status === 'formulaire_complete' || (isGestionnaire && (p.status === 'rapport_genere' || p.status === 'devis_preparation'))
+              const isAbstention = p.status === 'abstention'
               const avatarCls  = AVATAR_COLOR[p.status] ?? 'bg-brand-100 text-brand-700'
               const srcKey = (p.sourceContact ?? '').toLowerCase()
               const source = p.sourceContact
@@ -476,47 +579,36 @@ export default function PatientsPage() {
                 <div
                   key={p.id}
                   className={`group flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer transition-all duration-150
-                    ${isUrgent ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-muted/40'}
+                    ${isAbstention ? 'bg-slate-50/80 hover:bg-slate-100/80 opacity-90' : isUrgent ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-muted/40'}
                     ${idx === 0 ? '' : ''}`}
                   onClick={() =>
                     navigate(isGestionnaire ? `/gestionnaire/devis/${p.id}` : `/medecin/patients/${p.id}`)
                   }
                 >
-                  {/* Avatar */}
                   <div className="relative shrink-0">
                     <Avatar className="h-9 w-9 sm:h-11 sm:w-11">
                       <AvatarFallback className={`text-xs sm:text-sm font-bold ${avatarCls}`}>
                         {getInitials(p.user.fullName)}
                       </AvatarFallback>
                     </Avatar>
-                    {isUrgent && (
+                    {isUrgent && !isAbstention && (
                       <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-amber-500 border-2 border-white animate-pulse" />
                     )}
                   </div>
 
-                  {/* Infos principales */}
                   <div className="flex-1 min-w-0 space-y-1">
-                    {/* Nom (ligne 1) */}
                     <p className="font-semibold text-sm leading-snug truncate">{p.user.fullName}</p>
-
-                    {/* Référence dossier — toujours sur une seule ligne */}
                     <p className="text-[10px] font-mono text-brand-700 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded w-fit whitespace-nowrap">
                       {getPatientDisplayReference(p)}
                     </p>
-
-                    {/* Statut + source */}
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <Badge className={`text-[10px] font-medium ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-                        {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
-                      </Badge>
+                      <StatusBadge kind="dossier" value={p.status} />
                       {source && (
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${source.color}`}>
                           {source.label}
                         </span>
                       )}
                     </div>
-
-                    {/* Coordonnées — tablette+ */}
                     <div className="hidden sm:flex items-center gap-2 flex-wrap">
                       <span className="flex items-center gap-1 text-[11px] text-muted-foreground min-w-0">
                         <Mail className="h-3 w-3 shrink-0" />
@@ -537,7 +629,6 @@ export default function PatientsPage() {
                     </div>
                   </div>
 
-                  {/* Actions */}
                   <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
                     {!isGestionnaire && (
                       <button
@@ -547,6 +638,33 @@ export default function PatientsPage() {
                         onClick={(e) => { e.stopPropagation(); setEditTarget(p) }}
                       >
                         <Pencil className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                      </button>
+                    )}
+                    {isAbstention ? (
+                      <button
+                        type="button"
+                        className="h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-xl sm:rounded-lg hover:bg-emerald-50 text-muted-foreground hover:text-emerald-700 transition-colors"
+                        title="Réouvrir le dossier"
+                        aria-label="Réouvrir le dossier"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setAbstentionTarget({ patient: p, mode: 'reouvrir' })
+                        }}
+                      >
+                        <RotateCcw className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-xl sm:rounded-lg hover:bg-slate-100 text-muted-foreground hover:text-slate-700 transition-colors"
+                        title="Classer en abstention"
+                        aria-label="Classer en abstention"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setAbstentionTarget({ patient: p, mode: 'classer' })
+                        }}
+                      >
+                        <Archive className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                       </button>
                     )}
                     <button
@@ -566,26 +684,24 @@ export default function PatientsPage() {
           </div>
         )}
 
-        {/* Footer */}
         {!loading && patients.length > 0 && (
           <div className="px-5 py-3 border-t border-border/60 bg-muted/10 flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
               {patients.length} patient{patients.length > 1 ? 's' : ''}
-              {statusFilter !== 'all' ? ` · filtre actif` : ''}
+              {statusFilter !== 'non_traites' ? ' · filtre actif' : ''}
             </p>
-            {statusFilter !== 'all' && (
+            {statusFilter !== 'non_traites' && (
               <button
                 className="text-xs text-brand-600 hover:underline"
-                onClick={() => setStatusFilter('all')}
+                onClick={() => setStatusFilter('non_traites')}
               >
-                Voir tous les patients
+                Voir les non traités
               </button>
             )}
           </div>
         )}
       </div>
 
-      {/* ── Modals ── */}
       {editTarget && (
         <EditModal
           patient={editTarget}
@@ -603,6 +719,19 @@ export default function PatientsPage() {
           onDeleted={() => {
             setPatients((prev) => prev.filter((p) => p.id !== deleteTarget.id))
             setDeleteTarget(null)
+            void load()
+          }}
+        />
+      )}
+      {abstentionTarget && (
+        <AbstentionModal
+          patient={abstentionTarget.patient}
+          asGestionnaire={isGestionnaire}
+          mode={abstentionTarget.mode}
+          onClose={() => setAbstentionTarget(null)}
+          onDone={() => {
+            setAbstentionTarget(null)
+            void load()
           }}
         />
       )}

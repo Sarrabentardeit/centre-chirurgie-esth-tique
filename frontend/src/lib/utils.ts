@@ -46,22 +46,25 @@ export const STATUS_LABELS: Record<DossierStatus, string> = {
   intervention: 'Intervention',
   post_op: 'Suivi post-opératoire',
   suivi_termine: 'Suivi terminé',
+  abstention: 'Abstention',
 }
 
+/** Aligné charte teal / bronze / amber / emerald / slate */
 export const STATUS_COLORS: Record<DossierStatus, string> = {
-  nouveau: 'bg-slate-100 text-slate-700',
-  formulaire_en_cours: 'bg-amber-100 text-amber-700',
-  formulaire_complete: 'bg-blue-100 text-blue-700',
-  en_analyse: 'bg-purple-100 text-purple-700',
-  rapport_genere: 'bg-indigo-100 text-indigo-700',
-  devis_preparation: 'bg-orange-100 text-orange-700',
-  devis_envoye: 'bg-cyan-100 text-cyan-700',
-  devis_accepte: 'bg-teal-100 text-teal-700',
-  date_reservee: 'bg-green-100 text-green-700',
-  logistique: 'bg-lime-100 text-lime-700',
-  intervention: 'bg-rose-100 text-rose-700',
-  post_op: 'bg-pink-100 text-pink-700',
-  suivi_termine: 'bg-emerald-100 text-emerald-700',
+  nouveau: 'bg-slate-100 text-slate-700 border-slate-200',
+  formulaire_en_cours: 'bg-amber-50 text-amber-800 border-amber-200',
+  formulaire_complete: 'bg-brand-100 text-brand-800 border-brand-200',
+  en_analyse: 'bg-[rgba(6,42,48,0.08)] text-brand-950 border-[rgba(6,42,48,0.15)]',
+  rapport_genere: 'bg-[rgba(6,42,48,0.08)] text-brand-950 border-[rgba(6,42,48,0.15)]',
+  devis_preparation: 'bg-amber-50 text-amber-800 border-amber-200',
+  devis_envoye: 'bg-brand-100 text-brand-800 border-brand-200',
+  devis_accepte: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  date_reservee: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  logistique: 'bg-brand-100 text-brand-800 border-brand-200',
+  intervention: 'bg-rose-50 text-rose-800 border-rose-200',
+  post_op: 'bg-[rgba(6,42,48,0.08)] text-brand-950 border-[rgba(6,42,48,0.15)]',
+  suivi_termine: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  abstention: 'bg-slate-200 text-slate-600 border-slate-300',
 }
 
 export const PARCOURS_STEPS: Array<{ key: DossierStatus; label: string; icon: string }> = [

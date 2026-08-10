@@ -27,6 +27,7 @@ import DossierPatientPage from './pages/medecin/DossierPatientPage'
 import RapportsPage from './pages/medecin/RapportsPage'
 import AgendaMedecinPage from './pages/medecin/AgendaMedecinPage'
 import NouveauPatientPage from './pages/medecin/NouveauPatientPage'
+import DevisMedecinPage from './pages/medecin/DevisMedecinPage'
 
 // Gestionnaire pages
 import DashboardGestionnairePage from './pages/gestionnaire/DashboardGestionnairePage'
@@ -160,6 +161,14 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['medecin']}>
                   <RapportsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/medecin/devis"
+              element={
+                <ProtectedRoute allowedRoles={['medecin']}>
+                  <DevisMedecinPage />
                 </ProtectedRoute>
               }
             />

@@ -7,23 +7,28 @@ import TextAlign from '@tiptap/extension-text-align'
 import { Color } from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
-import { ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw, Send } from 'lucide-react'
+import { toast } from '@/store/toastStore'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
 import { parseSejourMeta, devisSejourDefaultsFromRapport } from '@/lib/devisSejourNotes'
 import { formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
 import { buildDevisAmountSentence, replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
+import { inlineHtmlImages } from '@/lib/pdf'
 import {
-  DEVIS_HEADER_SUBTITLE,
+  DEVIS_HEADER_SUBTITLE_SHORT,
   DEVIS_LOGO_SRC,
   DEVIS_SIGNATURE,
   buildDevisContactFooterHtml,
   buildDevisDocumentEndHtml,
   buildDevisHeaderLogoHtml,
+  buildDevisHeaderRightHtml,
 } from '@/lib/devisBranding'
 import {
   DEVIS_ACCENT,
   DEVIS_CHARTE,
+  DEVIS_OFFER_PREVIEW_CSS,
+  buildDevisOfferBlockHtml,
   buildDevisPrintStyles,
   devisFieldRow,
   devisHighlightBox,
@@ -41,44 +46,55 @@ const CONTENT_BREAK = '|||EDITOR_BREAK|||'
 const GLOBAL_CSS = `
 .ProseMirror {
   font-family: Arial, Helvetica, sans-serif;
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.7;
   color: ${DEVIS_CHARTE.charcoal};
   outline: none;
   min-height: 20px;
 }
-.ProseMirror p { margin: 1.5px 0; }
+.ProseMirror p { margin: 0 0 8px; }
 .ProseMirror ul,
-.ProseMirror ol { padding-left: 20px; margin: 3px 0; }
-.ProseMirror li { margin: 1px 0; }
+.ProseMirror ol { padding-left: 20px; margin: 0 0 10px; }
+.ProseMirror li { margin: 0 0 5px; break-inside: avoid; page-break-inside: avoid; }
 .ProseMirror hr { border: none; border-top: 1px solid ${DEVIS_CHARTE.rose}; margin: 14px 0 12px; }
 .ProseMirror strong { font-weight: 700; }
-.ProseMirror em { font-style: italic; }
-.ProseMirror u { text-decoration: underline; }
+.ProseMirror em { font-style: italic; color: ${DEVIS_CHARTE.gray}; }
+.ProseMirror u { text-decoration: none; border-bottom: 1px solid ${DEVIS_CHARTE.rose}; }
 .ProseMirror mark { background: ${DEVIS_CHARTE.cream}; padding: 0 1px; }
-.ProseMirror li { break-inside: avoid; page-break-inside: avoid; }
 .doc-shell .tiptap { min-height: 0; }
 
+/* Titres générés (devisSectionHeading) dans l’aperçu écran */
+.ProseMirror .devis-heading,
+.doc-shell .devis-heading {
+  margin: 14px 0 8px;
+  padding: 8px 12px;
+  background: ${DEVIS_CHARTE.cream};
+  border-left: 4px solid ${DEVIS_CHARTE.bronze};
+  font-size: 13px;
+  font-weight: 700;
+  color: ${DEVIS_CHARTE.bronze};
+}
+
 .devis-contact-footer {
-  padding: 14px 0 4px;
+  padding: 10px 0 2px;
   border-top: 1px solid ${DEVIS_CHARTE.rose};
   background: transparent;
   text-align: center;
   font-size: 10.5px;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 .devis-contact-footer .contact-line {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin: 3px 0;
+  gap: 6px;
+  margin: 2px 0;
   color: ${DEVIS_CHARTE.charcoal};
   text-decoration: none;
 }
 .devis-contact-footer svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   flex-shrink: 0;
   stroke: ${DEVIS_ACCENT};
   fill: none;
@@ -87,26 +103,47 @@ const GLOBAL_CSS = `
   stroke-linejoin: round;
 }
 
-.devis-logo-block { display: flex; flex-direction: column; align-items: center; max-width: 168px; }
-.devis-logo-block .logo-img { width: 158px; height: auto; display: block; object-fit: contain; border-radius: 6px; }
+.devis-logo-block { display: flex; flex-direction: column; align-items: center; max-width: 132px; }
+.devis-logo-block .logo-img { width: 118px; height: auto; display: block; object-fit: contain; border-radius: 4px; }
 .devis-logo-block .logo-slogan {
-  margin: 9px 0 0; padding-top: 8px; width: 100%; text-align: center;
-  font-size: 9px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
-  color: ${DEVIS_ACCENT}; border-top: 1px solid ${DEVIS_CHARTE.rose}; line-height: 1.35;
+  margin: 6px 0 0; padding-top: 5px; width: 100%; text-align: center;
+  font-size: 8px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: ${DEVIS_ACCENT}; border-top: 1px solid ${DEVIS_CHARTE.rose}; line-height: 1.3;
 }
 
-/* Impression directe (Ctrl+P depuis le navigateur — non utilisée normalement) */
+/* Aperçu écran / mobile */
+.editor-scroll {
+  background:
+    radial-gradient(1200px 400px at 50% -10%, rgba(129,87,45,0.06), transparent 60%),
+    #f4f2ef;
+}
+.doc-shell {
+  border: 1px solid rgba(40,39,39,0.06);
+  border-radius: 4px;
+}
+${DEVIS_OFFER_PREVIEW_CSS}
+
+@media (max-width: 840px) {
+  .editor-scroll { padding: 12px 10px !important; }
+  .doc-shell {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 22px 18px 28px !important;
+    box-shadow: 0 8px 28px rgba(15,23,42,0.08) !important;
+  }
+  .ProseMirror { font-size: 14px; line-height: 1.75; }
+}
+
 @media print {
   @page { size: A4 portrait; margin: 0mm; }
   .no-print { display: none !important; }
   html, body { background: white !important; height: auto !important; overflow: visible !important; }
   .editor-root { position: static !important; height: auto !important; overflow: visible !important; }
-  .editor-scroll { overflow: visible !important; height: auto !important; padding: 0 !important; }
+  .editor-scroll { overflow: visible !important; height: auto !important; padding: 0 !important; background: white !important; }
   .doc-shell {
     width: auto !important; max-width: none !important; min-height: 0 !important;
-    margin: 0 !important; padding: 0 !important; box-shadow: none !important;
+    margin: 0 !important; padding: 0 !important; box-shadow: none !important; border: none !important;
   }
-  .doc-table th, .doc-table td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .avoid-break { break-inside: avoid; page-break-inside: avoid; }
 }
 `
@@ -153,18 +190,28 @@ function sejourPdfFromPatient(p: GestionnairePatientDetail) {
   const sej = parseSejourMeta(dv?.notesSejour ?? '')
   const nGestClin = parseGestNights(sej.cliniqueNuits)
   const nGestHotel = parseGestNights(sej.hotelNuits)
-  const nuitsClinRap = rap?.nuitsClinique ?? 0
+  const nuitsClinRap = (rap?.nuitsClinique ?? 0) + (rap?.nuitsPreoperatoires ?? 0)
 
   const noteLines = (dv?.notesSejour ?? '').split('\n')
   const convStr =
     noteLines.find((l) => l.startsWith('DELAIS_CONVALESCENCE:'))?.replace('DELAIS_CONVALESCENCE:', '').trim() ?? ''
   const convNightsLegacy = parseNights(convStr) ?? 0
 
-  const nClinForHosp = nGestClin ?? (nuitsClinRap > 0 ? nuitsClinRap : null)
+  // nPreop = nuits préopératoires du rapport (défaut 1)
+  const nPreop = rap?.nuitsPreoperatoires ?? 1
+  // nPostop = nuits postopératoires du rapport
+  const nPostop = rap?.nuitsClinique ?? 0
+  // Pour le champ "nuits clinique" du devis (total pour séjour clinique), on prend nGestClin si défini par le gestionnaire, sinon le total rapport
+  const nClinForHosp = nGestClin ?? (nuitsClinRap > 0 ? nPostop : null)
+
   const dureeHosp =
-    nClinForHosp != null && nClinForHosp > 0
-      ? `1 nuit préopératoire et ${nClinForHosp} nuit${nClinForHosp > 1 ? 's' : ''} postopératoire${nClinForHosp > 1 ? 's' : ''} en clinique`
-      : '—'
+    nPreop > 0 && nPostop > 0
+      ? `${nPreop} nuit${nPreop > 1 ? 's' : ''} préopératoire${nPreop > 1 ? 's' : ''} et ${nPostop} nuit${nPostop > 1 ? 's' : ''} postopératoire${nPostop > 1 ? 's' : ''} en clinique`
+      : nPreop > 0
+        ? `${nPreop} nuit${nPreop > 1 ? 's' : ''} préopératoire${nPreop > 1 ? 's' : ''} en clinique`
+        : nClinForHosp != null && nClinForHosp > 0
+          ? `${nClinForHosp} nuit${nClinForHosp > 1 ? 's' : ''} en clinique`
+          : '—'
 
   const cliniqueRetenue = sej.cliniqueNom.trim() || '—'
 
@@ -177,30 +224,34 @@ function sejourPdfFromPatient(p: GestionnairePatientDetail) {
 
   const hotelSejour = sej.hotelNom.trim() || '—'
 
+  // nClinTot = total nuits clinique (pré-op + post-op) pour calcul durée séjour
   const nClinTot = nGestClin ?? nuitsClinRap
   const nHotelTot = nGestHotel != null ? nGestHotel : convNightsLegacy
-  const totalNights = nClinTot + nHotelTot
+  const totalNights = Math.max(0, nClinTot) + Math.max(0, nHotelTot)
+
+  // Priorité : jours = nuits clinique + nuits hôtel (ex. 3 + 4 = 7 jours)
+  const hasNuitsSaisies = nGestClin != null || nGestHotel != null || totalNights > 0
+  const joursFromNuits = hasNuitsSaisies && totalNights >= 0 ? totalNights : NaN
 
   const dureeFromDevis = sej.dureeSejourTotale.trim() !== '' ? Number(sej.dureeSejourTotale) : NaN
   const dureeFromRapport = rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0 ? rap.dureeSejourTunisie : NaN
-  const dureeJours = Number.isFinite(dureeFromDevis) && dureeFromDevis > 0
-    ? dureeFromDevis
-    : Number.isFinite(dureeFromRapport)
-      ? dureeFromRapport
-      : NaN
+  const dureeJours = Number.isFinite(joursFromNuits)
+    ? joursFromNuits
+    : Number.isFinite(dureeFromDevis) && dureeFromDevis > 0
+      ? dureeFromDevis
+      : Number.isFinite(dureeFromRapport)
+        ? dureeFromRapport
+        : NaN
 
   const dureeTotale =
     Number.isFinite(dureeJours)
       ? `${dureeJours} jour${dureeJours > 1 ? 's' : ''}`
-      : totalNights > 0
-        ? `${totalNights + 1} jours / ${totalNights} nuits`
-        : '—'
-  const jours = Number.isFinite(dureeJours) ? dureeJours : totalNights + 1
+      : '—'
   const sejourLine =
-    Number.isFinite(dureeJours)
-      ? `Séjour ${dureeJours} jour${dureeJours > 1 ? 's' : ''}`
-      : totalNights > 0
-        ? `Séjour ${totalNights} nuit${totalNights > 1 ? 's' : ''} / ${jours} jour${jours > 1 ? 's' : ''}`
+    Number.isFinite(dureeJours) && totalNights > 0
+      ? `Séjour ${dureeJours} jour${dureeJours > 1 ? 's' : ''} (${totalNights} nuit${totalNights > 1 ? 's' : ''})`
+      : Number.isFinite(dureeJours)
+        ? `Séjour ${dureeJours} jour${dureeJours > 1 ? 's' : ''}`
         : ''
 
   const formPayload = (p.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
@@ -459,6 +510,10 @@ export default function DevisEditorPage() {
   const [error, setError]               = useState<string | null>(null)
   const [saving, setSaving]             = useState(false)
   const [saved, setSaved]               = useState(false)
+  const [sending, setSending]           = useState(false)
+  const [exporting, setExporting]       = useState(false)
+  const [sentOk, setSentOk]             = useState(false)
+  const [sendError, setSendError]       = useState<string | null>(null)
   const [initialTopHtml, setInitialTopHtml] = useState<string>('')
   const [initialBottomHtml, setInitialBottomHtml] = useState<string>('')
   const [activeZone, setActiveZone] = useState<'top' | 'bottom'>('top')
@@ -592,8 +647,47 @@ export default function DevisEditorPage() {
     try {
       await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
       setSaved(true)
-    } catch { /* silencieux */ }
+      toast({ title: 'Devis sauvegardé', variant: 'success' })
+    } catch {
+      toast({ title: 'Sauvegarde impossible', variant: 'error' })
+    }
     finally { setSaving(false) }
+  }
+
+  /** Valider + envoyer au patient — reste sur cette page (pas de retour liste). */
+  const handleValidateAndSend = async () => {
+    const id = devisIdRef.current
+    if (!id) {
+      setSendError('Aucun devis à envoyer. Créez d’abord un brouillon.')
+      return
+    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    setSending(true)
+    setSendError(null)
+    setSentOk(false)
+    try {
+      const topHtml = editorTopRef.current?.getHTML() ?? ''
+      const botHtml = editorBotRef.current?.getHTML() ?? ''
+      await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
+      setSaved(true)
+
+      // Même HTML que « Exporter PDF » → rendu Chromium côté serveur (rendu identique)
+      const fullHtml = await inlineHtmlImages(buildDevisFullHtml())
+      await gestionnaireApi.sendDevis(id, { html: fullHtml })
+      setSentOk(true)
+      toast({
+        title: 'Devis envoyé au patient',
+        description: 'PDF personnalisé joint dans le chat.',
+        variant: 'success',
+      })
+
+      await load()
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : 'Envoi impossible.')
+      toast({ title: 'Envoi impossible', description: e instanceof Error ? e.message : undefined, variant: 'error' })
+    } finally {
+      setSending(false)
+    }
   }
 
   /* Réinitialiser */
@@ -625,48 +719,24 @@ export default function DevisEditorPage() {
   const operationTitle =
     interventionLabel || firstLigneLabel || 'Séjour médical personnalisé'
 
-  /* Export PDF — HTML construit depuis le contenu TipTap (pas depuis le DOM React) */
-  const handlePrint = () => {
-    const topHtml  = editorTopRef.current?.getHTML() ?? ''
-    let botHtml  = editorBotRef.current?.getHTML() ?? ''
+  /* Construit le HTML complet du devis personnalisé (utilisé pour l'impression et le PDF blob) */
+  const buildDevisFullHtml = () => {
+    const topHtml = editorTopRef.current?.getHTML() ?? ''
+    let botHtml   = editorBotRef.current?.getHTML() ?? ''
     botHtml = replaceDevisAmountPlaceholders(botHtml, total, tndPerEur)
-
-    if (!topHtml && !botHtml) {
-      window.alert("Le document est vide. Réinitialisez ou saisissez du contenu d'abord.")
-      return
-    }
-
-    const popup = window.open('', '_blank', 'width=1050,height=960')
-    if (!popup) { window.alert("Autorisez les popups pour exporter en PDF."); return }
 
     const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
     const sigUrl  = `${window.location.origin}/signature.jpg`
 
-    /* Tableau « Notre meilleure offre » */
-    const tableHtml = lignes.length > 0 ? `
-<div class="offer-block">
-  <hr class="section-hr"/>
-  <p class="section-title">Notre meilleure offre :</p>
-  <table class="offer-table">
-    <thead>
-      <tr>
-        <th class="col-desc">Description</th>
-        <th class="col-price">Tarif en <span style="color:${DEVIS_ACCENT}">dt</span><br/><span class="price-sub">(Ferme et définitif)</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td class="desc-cell">
-          <div class="op-title">${operationTitle}</div>
-          ${sejourLine ? `<div class="sejour-badge">${sejourLine}</div>` : ''}
-        </td>
-        <td class="price-cell">${fmtNum(total)}</td>
-      </tr>
-    </tbody>
-  </table>
-</div>` : ''
+    const tableHtml = lignes.length > 0
+      ? buildDevisOfferBlockHtml({
+          operationTitle,
+          sejourLine,
+          totalFormatted: fmtNum(total),
+        })
+      : ''
 
-    const html = `<!doctype html>
+    return `<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8"/>
@@ -675,59 +745,57 @@ export default function DevisEditorPage() {
 </head>
 <body>
   <table class="page-table">
-
-    <!-- ══ HEADER : se répète automatiquement sur chaque page ══ -->
     <thead>
       <tr><td>
         <div class="doc-header">
           ${buildDevisHeaderLogoHtml(logoUrl)}
-          <div class="header-right">
-            <div class="header-ref">${devisHeaderRef}</div>
-            <div class="header-sub">${DEVIS_HEADER_SUBTITLE}</div>
-          </div>
+          ${buildDevisHeaderRightHtml(devisHeaderRef)}
         </div>
       </td></tr>
     </thead>
-
-    <!-- ══ FOOTER VIDE : espace réservé en bas de chaque page ══ -->
-    <tfoot>
-      <tr><td></td></tr>
-    </tfoot>
-
-    <!-- ══ CONTENU ══ -->
+    <tfoot><tr><td></td></tr></tfoot>
     <tbody>
       <tr><td>
-        <div class="doc-body">${topHtml}</div>
-        ${tableHtml}
-        <div class="doc-body" style="margin-top:10px; break-before:avoid; page-break-before:avoid;">${botHtml}</div>
-        ${buildDevisDocumentEndHtml(sigUrl)}
+        <div class="doc-body devis-top">${topHtml}</div>
+        <div class="devis-closing">
+          ${tableHtml}
+          <div class="doc-body devis-bot">${botHtml}</div>
+          ${buildDevisDocumentEndHtml(sigUrl)}
+        </div>
       </td></tr>
     </tbody>
-
   </table>
 </body>
 </html>`
+  }
 
-    popup.document.open()
-    popup.document.write(html)
-    popup.document.close()
-    popup.focus()
+  /* Export PDF — même moteur Chromium que l’envoi chat (fichier identique) */
+  const handlePrint = async () => {
+    const topHtml  = editorTopRef.current?.getHTML() ?? ''
+    const botHtml  = editorBotRef.current?.getHTML() ?? ''
 
-    const waitAndPrint = () => {
-      const imgs = Array.from(popup.document.images)
-      if (imgs.length === 0) { popup.print(); popup.close(); return }
-      let loaded = 0
-      const done = () => { if (++loaded >= imgs.length) { popup.print(); popup.close() } }
-      imgs.forEach(img => {
-        if (img.complete) done()
-        else {
-          img.addEventListener('load',  done, { once: true })
-          img.addEventListener('error', done, { once: true })
-        }
-      })
-      setTimeout(() => { if (loaded < imgs.length) { popup.print(); popup.close() } }, 2000)
+    if (!topHtml && !botHtml) {
+      window.alert("Le document est vide. Réinitialisez ou saisissez du contenu d'abord.")
+      return
     }
-    setTimeout(waitAndPrint, 200)
+
+    setExporting(true)
+    try {
+      const html = await inlineHtmlImages(buildDevisFullHtml())
+      const blob = await gestionnaireApi.renderDevisPdf(html)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `Devis-${devisHeaderRef || 'document'}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Export PDF impossible.')
+    } finally {
+      setExporting(false)
+    }
   }
 
   /* ── États chargement / erreur ── */
@@ -789,11 +857,12 @@ export default function DevisEditorPage() {
             <CheckCircle2 className="h-3.5 w-3.5" /> Sauvegarder
           </button>
           <button
-            onClick={handlePrint}
-            className="flex items-center gap-1.5 h-10 sm:h-8 px-4 text-xs font-semibold text-white rounded-lg transition-colors"
+            onClick={() => void handlePrint()}
+            disabled={exporting}
+            className="flex items-center gap-1.5 h-10 sm:h-8 px-4 text-xs font-semibold text-white rounded-lg transition-colors disabled:opacity-60"
             style={{ background: DEVIS_ACCENT }}
           >
-            <Printer className="h-3.5 w-3.5" /> Exporter PDF
+            <Printer className="h-3.5 w-3.5" /> {exporting ? 'Export…' : 'Exporter PDF'}
           </button>
         </div>
       </div>
@@ -810,35 +879,35 @@ export default function DevisEditorPage() {
       {/* ══ Toolbar ══ */}
       <RichDocToolbar editor={activeZone === 'top' ? editorTop : editorBot} />
 
-      {/* ══ Document A4 ══ */}
-      <div className="editor-scroll flex-1 overflow-auto py-8 px-4 flex justify-center bg-white">
+      {/* ══ Document A4 — aperçu écran / mobile ══ */}
+      <div className="editor-scroll flex-1 overflow-auto py-4 sm:py-8 px-2 sm:px-4">
         <div
-          className="doc-shell bg-white shadow-2xl"
+          className="doc-shell bg-white shadow-2xl mx-auto"
           style={{
             width: 794,
-            maxWidth: '100%',
-            padding: '40px 48px 40px',
+            minWidth: 794,
+            padding: '36px 44px 40px',
             fontFamily: 'Arial, Helvetica, sans-serif',
-            fontSize: 12.5,
-            lineHeight: 1.6,
+            fontSize: 13,
+            lineHeight: 1.7,
             color: DEVIS_CHARTE.charcoal,
             boxSizing: 'border-box',
             backgroundColor: '#ffffff',
             display: 'flex',
             flexDirection: 'column',
-            gap: 20,
+            gap: 22,
           }}
         >
-          {/* ── En-tête : logo + numéro dossier ── */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0 }}>
+          {/* ── En-tête allégé : logo + référence ── */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0, gap: 12 }}>
             <div
               dangerouslySetInnerHTML={{
                 __html: buildDevisHeaderLogoHtml(DEVIS_LOGO_SRC),
               }}
             />
-            <div style={{ textAlign: 'right', fontSize: 11, color: DEVIS_CHARTE.gray, lineHeight: 1.5 }}>
-              <p style={{ fontWeight: 700, color: DEVIS_ACCENT, margin: 0 }}>{devisHeaderRef}</p>
-              <p style={{ margin: '2px 0 0', color: DEVIS_CHARTE.gray }}>{DEVIS_HEADER_SUBTITLE}</p>
+            <div style={{ textAlign: 'right', fontSize: 11, color: DEVIS_CHARTE.gray, lineHeight: 1.35 }}>
+              <p style={{ fontWeight: 700, fontSize: 13, color: DEVIS_ACCENT, margin: 0, letterSpacing: '0.02em' }}>{devisHeaderRef}</p>
+              <p style={{ margin: '3px 0 0', color: DEVIS_CHARTE.gray, fontSize: 10 }}>{DEVIS_HEADER_SUBTITLE_SHORT}</p>
             </div>
           </div>
 
@@ -847,98 +916,89 @@ export default function DevisEditorPage() {
             <EditorContent editor={editorTop} />
           </div>
 
-          {/* ── Tableau "Notre meilleure offre" ── */}
+          {/* ── Tableau offre (même structure que le PDF) ── */}
           {lignes.length > 0 && (
-            <div className="avoid-break" style={{ flexShrink: 0 }}>
-              <div style={{ height: 1, background: '#e5e7eb', margin: '0 0 12px' }} aria-hidden />
-              <p style={{ fontWeight: 700, textDecoration: 'underline', marginBottom: 10, fontSize: 13, color: DEVIS_CHARTE.teal }}>
-                Notre meilleure offre :
-              </p>
-              <table className="doc-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    <th style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '7px 10px', textAlign: 'left', fontWeight: 700, background: DEVIS_CHARTE.cream, color: DEVIS_CHARTE.teal, width: '72%' }}>
-                      Description
-                    </th>
-                    <th style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '7px 10px', textAlign: 'center', fontWeight: 700, background: DEVIS_CHARTE.cream, color: DEVIS_CHARTE.teal }}>
-                      Tarif en <span style={{ color: DEVIS_ACCENT }}>dt</span>
-                      <span style={{ display: 'block', fontSize: 10, fontWeight: 600, color: DEVIS_CHARTE.gray }}>(Ferme et définitif)</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '10px 10px', verticalAlign: 'top' }}>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontWeight: 700,
-                          color: DEVIS_ACCENT,
-                          lineHeight: 1.5,
-                          background: DEVIS_CHARTE.cream,
-                          padding: '8px 10px',
-                          borderRadius: 4,
-                          borderLeft: `3px solid ${DEVIS_CHARTE.teal}`,
-                        }}
-                      >
-                        {operationTitle}
-                      </p>
-                      {sejourLine ? (
-                        <p
-                          style={{
-                            margin: '8px 0 0',
-                            fontWeight: 600,
-                            fontSize: 12,
-                          color: DEVIS_ACCENT,
-                          background: DEVIS_CHARTE.rose,
-                            padding: '6px 10px',
-                            borderRadius: 4,
-                            display: 'inline-block',
-                            lineHeight: 1.45,
-                          }}
-                        >
-                          {sejourLine}
-                        </p>
-                      ) : null}
-                    </td>
-                    <td style={{ border: `1.5px solid ${DEVIS_CHARTE.charcoal}`, padding: '10px', textAlign: 'center', verticalAlign: 'middle', fontWeight: 700, fontSize: 22, letterSpacing: '0.01em', color: DEVIS_CHARTE.charcoal }}>
-                      {fmtNum(total)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            <div
+              className="avoid-break doc-offer-preview"
+              style={{ flexShrink: 0 }}
+              dangerouslySetInnerHTML={{
+                __html: buildDevisOfferBlockHtml({
+                  operationTitle,
+                  sejourLine,
+                  totalFormatted: fmtNum(total),
+                }),
+              }}
+            />
           )}
 
-          {/* ── Bas de document (suite + signature) ── */}
+          {/* ── Bas de document (modalités + validité) ── */}
           <div className="doc-section-bottom">
             <EditorContent editor={editorBot} />
           </div>
 
-          <div className="avoid-break" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="avoid-break" style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
             <div style={{ textAlign: 'right' }}>
-              <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{DEVIS_SIGNATURE.cabinet}</p>
-              <p style={{ fontSize: 12, color: '#555', margin: '2px 0 0' }}>{DEVIS_SIGNATURE.specialty}</p>
+              <p style={{ fontWeight: 700, fontSize: 11.5, margin: 0 }}>{DEVIS_SIGNATURE.cabinet}</p>
+              <p style={{ fontSize: 10, color: DEVIS_CHARTE.gray, margin: '1px 0 0' }}>{DEVIS_SIGNATURE.specialty}</p>
               <img
                 src="/signature.jpg"
                 alt="Signature"
-                style={{ marginTop: 6, width: 100, height: 50, objectFit: 'contain', display: 'block', marginLeft: 'auto' }}
+                style={{ marginTop: 3, width: 72, height: 38, objectFit: 'contain', display: 'block', marginLeft: 'auto' }}
                 onError={(e) => {
                   const img = e.currentTarget as HTMLImageElement
                   if (!img.src.includes('/assets/')) { img.src = '/assets/signature.jpg'; return }
                   img.style.display = 'none'
                 }}
               />
-              <div style={{ marginTop: 6, width: 150, height: 1, borderBottom: '1px solid #d1d5db', marginLeft: 'auto' }} />
+              <div style={{ marginTop: 3, width: 110, height: 1, borderBottom: `1px solid ${DEVIS_CHARTE.rose}`, marginLeft: 'auto' }} />
             </div>
           </div>
 
           <div
             className="no-print-devis-footer"
             dangerouslySetInnerHTML={{ __html: buildDevisContactFooterHtml() }}
-            style={{ marginTop: 20 }}
+            style={{ marginTop: 8 }}
           />
 
+        </div>
+      </div>
+
+      {/* ══ Pied de page : Valider et envoyer (reste sur l’éditeur) ══ */}
+      <div className="no-print shrink-0 border-t border-slate-200 bg-white px-3 sm:px-5 py-3 shadow-[0_-4px_16px_rgba(15,23,42,0.06)]">
+        {sendError && (
+          <p className="text-xs text-red-600 mb-2 text-center sm:text-left">{sendError}</p>
+        )}
+        {(sentOk || dv?.statut === 'envoye') && !sendError && (
+          <p className="text-xs text-emerald-600 mb-2 text-center sm:text-left flex items-center justify-center sm:justify-start gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {dv?.statut === 'envoye' || sentOk
+              ? 'Devis validé et envoyé au patient. Vous restez sur cette page — Exporter PDF disponible ci-dessus.'
+              : null}
+          </p>
+        )}
+        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2">
+          <p className="text-[11px] text-slate-400 text-center sm:text-left">
+            {dv?.statut === 'accepte'
+              ? 'Devis accepté par le patient.'
+              : dv?.statut === 'envoye'
+                ? 'Déjà envoyé. Modifiez le contenu puis sauvegardez si besoin.'
+                : 'Enregistre le document puis l’envoie au patient, sans quitter cette page.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleValidateAndSend()}
+            disabled={sending || saving || !devisId || dv?.statut === 'envoye' || dv?.statut === 'accepte' || sentOk}
+            className="inline-flex items-center justify-center gap-2 h-11 sm:h-10 px-5 text-sm font-semibold text-white rounded-xl disabled:opacity-50 transition-colors shrink-0"
+            style={{ background: DEVIS_ACCENT }}
+          >
+            {sending ? (
+              <><RefreshCw className="h-4 w-4 animate-spin" /> Envoi…</>
+            ) : sentOk || dv?.statut === 'envoye' ? (
+              <><CheckCircle2 className="h-4 w-4" /> Envoyé au patient</>
+            ) : (
+              <><Send className="h-4 w-4" /> Valider et envoyer</>
+            )}
+          </button>
         </div>
       </div>
     </div>

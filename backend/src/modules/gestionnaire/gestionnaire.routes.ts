@@ -9,14 +9,17 @@ import {
   planningSejourSchema,
   refuseDevisSchema,
   saveDevisContentSchema,
+  sendDevisSchema,
+  renderDevisPdfSchema,
   updateUserByGestionnaireSchema,
   updateTemplateSchema,
   upsertDevisDraftSchema,
 } from './gestionnaire.schema.js'
-import { createAgendaEventSchema, updateAgendaEventSchema } from '../medecin/medecin.schema.js'
+import { createAgendaEventSchema, updateAgendaEventSchema, updatePatientStatusSchema } from '../medecin/medecin.schema.js'
 import * as gestionnaireService from './gestionnaire.service.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { getTndEurRate } from '../../lib/exchangeRate.js'
+import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 
 function pid(v: string | string[] | undefined): string {
   const s = Array.isArray(v) ? v[0] : v
@@ -76,6 +79,19 @@ gestionnaireRouter.delete('/patients/:id', async (req: Request, res: Response, n
   }
 })
 
+gestionnaireRouter.patch(
+  '/patients/:id/status',
+  validate(updatePatientStatusSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.updatePatientStatus(req.auth!.sub, pid(req.params.id), req.body)
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
 gestionnaireRouter.post(
   '/patients/:patientId/devis/brouillon',
   validate(upsertDevisDraftSchema),
@@ -106,14 +122,37 @@ gestionnaireRouter.patch(
   }
 )
 
-gestionnaireRouter.post('/devis/:devisId/envoyer', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await gestionnaireService.sendDevis(req.auth!.sub, pid(req.params.devisId))
-    res.json({ ok: true, ...result })
-  } catch (e) {
-    next(e)
-  }
-})
+gestionnaireRouter.post(
+  '/devis/render-pdf',
+  validate(renderDevisPdfSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const pdf = await renderHtmlToPdf(req.body.html as string)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', 'attachment; filename="devis.pdf"')
+      res.send(pdf)
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.post(
+  '/devis/:devisId/envoyer',
+  validate(sendDevisSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.sendDevis(
+        req.auth!.sub,
+        pid(req.params.devisId),
+        typeof req.body?.html === 'string' ? req.body.html : undefined,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
 
 gestionnaireRouter.post(
   '/devis/:devisId/refuser',

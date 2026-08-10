@@ -9,9 +9,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { STATUS_COLORS, STATUS_LABELS, formatCurrency, formatDate, formatDateTime, type CurrencyUnit } from '@/lib/utils'
+import { PageHeader, KpiStrip } from '@/components/PageHeader'
+import { EmptyState } from '@/components/EmptyState'
+import { StatusBadge } from '@/lib/statusUi'
+import { toast } from '@/store/toastStore'
+import { formatCurrency, formatDate, formatDateTime, type CurrencyUnit } from '@/lib/utils'
 import { useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
@@ -34,6 +37,7 @@ import {
   resolveCliniqueFromNom,
   resolveHotelFromNom,
   devisSejourDefaultsFromRapport,
+  joursSejourFromNuits,
 } from '@/lib/devisSejourNotes'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
@@ -176,18 +180,36 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
           </div>
         </div>
       )}
-      {(r.nuitsClinique != null || r.anesthesieGenerale != null || r.dureeSejourTunisie != null || r.nbAdultesSejour != null) && (
+      {(r.nuitsClinique != null || r.nuitsPreoperatoires != null || r.nuitsHotel != null || r.vetementContention != null || r.anesthesieGenerale != null || r.dureeSejourTunisie != null || r.nbAdultesSejour != null) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
-            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits clinique</p>
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits préopératoires</p>
+            <p className="text-sm font-semibold text-cyan-900">
+              {r.nuitsPreoperatoires != null ? `${r.nuitsPreoperatoires} nuit(s)` : 'Non précisé'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits postopératoires</p>
             <p className="text-sm font-semibold text-cyan-900">
               {r.nuitsClinique != null ? `${r.nuitsClinique} nuit(s)` : 'Non précisé'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits hôtel</p>
+            <p className="text-sm font-semibold text-cyan-900">
+              {r.nuitsHotel != null ? `${r.nuitsHotel} nuit(s)` : 'Non précisé'}
             </p>
           </div>
           <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
             <p className="text-[11px] uppercase tracking-wide font-semibold text-indigo-700 mb-1">Anesthésie générale</p>
             <p className="text-sm font-semibold text-indigo-900">
               {r.anesthesieGenerale ? 'Oui' : 'Non'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-indigo-700 mb-1">Vêtement de contention</p>
+            <p className="text-sm font-semibold text-indigo-900">
+              {r.vetementContention == null ? 'Non précisé' : r.vetementContention ? 'Oui' : 'Non'}
             </p>
           </div>
           {r.dureeSejourTunisie != null && (
@@ -297,14 +319,14 @@ function DevisModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
 
       {/* Carte modale */}
-      <div className="relative z-10 w-full max-w-5xl max-h-[94vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
+      <div className="relative z-10 w-full max-w-5xl max-h-[min(94dvh,94vh)] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
 
         {/* Header */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 shrink-0">
@@ -460,7 +482,7 @@ function DevisModal({
                       value={cliniqueNuits}
                       onChange={(e) => setCliniqueNuits(e.target.value)}
                     />
-                    <p className="text-[11px] text-slate-400 mt-1">Rapport médecin</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Nuits en clinique</p>
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
@@ -479,7 +501,7 @@ function DevisModal({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="mouradi">Mouradi Gammarth</SelectItem>
-                        <SelectItem value="darMarsa">Hotel Dar Marsa La Soukra</SelectItem>
+                        <SelectItem value="darMarsa">Hotel Dar Marsa La Marsa</SelectItem>
                         <SelectItem value="autre">Autre</SelectItem>
                       </SelectContent>
                     </Select>
@@ -503,7 +525,7 @@ function DevisModal({
                       value={hotelNuits}
                       onChange={(e) => setHotelNuits(e.target.value)}
                     />
-                    <p className="text-[11px] text-slate-400 mt-1">Auto : total − 1 − clinique</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Nuits à l&apos;hôtel</p>
                   </div>
                 </div>
               </div>
@@ -511,15 +533,15 @@ function DevisModal({
                 <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1.5">Séjour total (jours)</label>
                   <Input
-                    className="h-9 text-sm border-slate-200 bg-white"
+                    className="h-9 text-sm border-slate-200 bg-slate-50 text-slate-800 font-semibold"
                     type="number"
                     min={0}
                     step={1}
-                    placeholder="Ex. : 6"
+                    readOnly
                     value={dureeSejourTotale}
-                    onChange={(e) => setDureeSejourTotale(e.target.value)}
+                    title="Calculé automatiquement : nuits clinique + nuits hôtel"
                   />
-                  <p className="text-[11px] text-slate-400 mt-1">Depuis le rapport médecin.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Auto : nuits clinique + nuits hôtel</p>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1.5">Nombre d&apos;adultes</label>
@@ -625,6 +647,7 @@ export default function DevisGestionnairePage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [pageError, setPageError]         = useState<string | null>(null)
   const [search, setSearch]               = useState('')
+  const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'accepte' | 'refuse'>('all')
   const [view, setView]                   = useState<PageView>('list')
   const [selectedPatient, setSelectedPatient] = useState('')
   const [patientDetail, setPatientDetail] = useState<GestionnairePatientDetail | null>(null)
@@ -651,14 +674,24 @@ export default function DevisGestionnairePage() {
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
+  // Séjour total (jours) = nuits clinique + nuits hôtel
+  useEffect(() => {
+    setDureeSejourTotale(joursSejourFromNuits(cliniqueNuits, hotelNuits))
+  }, [cliniqueNuits, hotelNuits])
+
   const patientsFiltered = useMemo(() => {
     const all = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
     const q = search.trim().toLowerCase()
-    if (!q) return all
-    return all.filter((p) =>
+    const bySearch = !q ? all : all.filter((p) =>
       p.user.fullName.toLowerCase().includes(q) || p.dossierNumber.toLowerCase().includes(q)
     )
-  }, [patients, search])
+    if (devisFilter === 'all') return bySearch
+    return bySearch.filter((p) => {
+      const statut = p.devis[0]?.statut ?? null
+      if (devisFilter === 'aucun') return !statut
+      return statut === devisFilter
+    })
+  }, [patients, search, devisFilter])
 
   const loadTauxEur = useCallback(async () => {
     try {
@@ -841,8 +874,11 @@ export default function DevisGestionnairePage() {
     }
     setActionLoading(true); setPageError(null)
     try {
-      const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
+      const payload = buildPayload()
+      const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, payload)
       await gestionnaireApi.sendDevis(r.devis.id)
+      // Le PDF personnalisé est joint depuis la page Personnalisation (même rendu que « Exporter PDF »)
+      toast({ title: 'Devis envoyé', description: 'Le patient a reçu le devis dans son espace.', variant: 'success' })
       setSent(true); setTimeout(() => { setSent(false); setShowModal(false) }, 2000)
       setIsEditingExisting(false)
       await loadPatientDetail(selectedPatient); await loadPatients()
@@ -919,133 +955,174 @@ export default function DevisGestionnairePage() {
   }
 
   /* ══════ RENDER : Vue liste ══════ */
-  const renderList = () => (
+  const renderList = () => {
+    const allDevisPatients = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
+    const kpi = {
+      total:     allDevisPatients.length,
+      aucun:     allDevisPatients.filter((p) => !p.devis[0]?.statut).length,
+      brouillon: allDevisPatients.filter((p) => p.devis[0]?.statut === 'brouillon').length,
+      envoye:    allDevisPatients.filter((p) => p.devis[0]?.statut === 'envoye').length,
+      accepte:   allDevisPatients.filter((p) => p.devis[0]?.statut === 'accepte').length,
+      refuse:    allDevisPatients.filter((p) => p.devis[0]?.statut === 'refuse').length,
+    }
+
+    return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-8">
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 space-y-5">
 
-        {/* Barre de recherche */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-            <input
-              className="w-full pl-9 pr-4 h-10 text-sm rounded-xl border border-slate-200 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-400 transition shadow-sm"
-              placeholder="Rechercher un patient ou dossier..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <span className="text-sm text-slate-400 font-medium shrink-0">
-            {patientsFiltered.length} patient{patientsFiltered.length > 1 ? 's' : ''}
-          </span>
-        </div>
+        <PageHeader
+          title="Gestion des devis"
+          description="Préparez, personnalisez et envoyez les devis patients."
+          actions={
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void loadPatients()} disabled={listLoading}>
+              <RefreshCw className={`h-3.5 w-3.5 ${listLoading ? 'animate-spin' : ''}`} /> Actualiser
+            </Button>
+          }
+        />
 
-        {/* Skeleton loading */}
-        {listLoading && (
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, k) => (
-              <div key={k} className="bg-white rounded-2xl border border-slate-200 p-5 flex items-center gap-4">
-                <Skeleton className="h-11 w-11 rounded-full shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-48 rounded" />
-                  <Skeleton className="h-3 w-32 rounded" />
-                </div>
-                <Skeleton className="h-7 w-24 rounded-full" />
-                <Skeleton className="h-7 w-28 rounded-full" />
-              </div>
-            ))}
-          </div>
-        )}
+        <KpiStrip
+          items={[
+            { key: 'all', label: 'Total', value: listLoading ? '—' : kpi.total, tone: 'default', active: devisFilter === 'all', onClick: () => setDevisFilter('all') },
+            { key: 'aucun', label: 'Sans devis', value: listLoading ? '—' : kpi.aucun, tone: 'default', active: devisFilter === 'aucun', onClick: () => setDevisFilter('aucun') },
+            { key: 'brouillon', label: 'Brouillon', value: listLoading ? '—' : kpi.brouillon, tone: 'amber', active: devisFilter === 'brouillon', onClick: () => setDevisFilter('brouillon') },
+            { key: 'envoye', label: 'Envoyé', value: listLoading ? '—' : kpi.envoye, tone: 'brand', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
+            { key: 'accepte', label: 'Accepté', value: listLoading ? '—' : kpi.accepte, tone: 'emerald', active: devisFilter === 'accepte', onClick: () => setDevisFilter('accepte') },
+            { key: 'refuse', label: 'Refusé', value: listLoading ? '—' : kpi.refuse, tone: 'rose', active: devisFilter === 'refuse', onClick: () => setDevisFilter('refuse') },
+          ]}
+        />
 
-        {/* Vide */}
-        {!listLoading && patientsFiltered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center">
-              <FileText className="h-7 w-7 text-slate-300" />
+        {/* ── Barre de recherche + filtres ── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3.5 border-b flex flex-col sm:flex-row gap-2.5">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              <input
+                className="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl border border-slate-200 bg-muted/20 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400/30 focus:border-brand-400 transition"
+                placeholder="Rechercher nom, n° dossier…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
-            <p className="text-sm font-semibold text-slate-500">Aucun patient trouvé</p>
-            <p className="text-xs text-slate-400 max-w-xs">
-              Les patients apparaissent ici une fois leur rapport médical généré.
-            </p>
+            <div className="flex bg-muted/50 rounded-xl p-1 gap-0.5 w-full sm:w-auto overflow-x-auto scrollbar-none">
+              {([
+                { key: 'all'       as const, label: 'Tous' },
+                { key: 'aucun'     as const, label: 'Sans devis' },
+                { key: 'brouillon' as const, label: 'Brouillon' },
+                { key: 'envoye'    as const, label: 'Envoyé' },
+                { key: 'accepte'   as const, label: 'Accepté' },
+                { key: 'refuse'    as const, label: 'Refusé' },
+              ]).map(({ key, label }) => (
+                <button key={key} type="button"
+                  onClick={() => setDevisFilter(key)}
+                  className={`shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+                    devisFilter === key ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
 
-        {/* Liste */}
-        {!listLoading && patientsFiltered.length > 0 && (
-          <div className="space-y-2.5">
-            {patientsFiltered.map((p) => {
+          <div className="flex items-center justify-between px-4 py-2 bg-muted/10">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{patientsFiltered.length}</span> patient{patientsFiltered.length > 1 ? 's' : ''}
+              {devisFilter !== 'all' || search ? ' (filtrés)' : ''}
+            </p>
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => void loadPatients()} disabled={listLoading}>
+              <RefreshCw className={`h-3.5 w-3.5 ${listLoading ? 'animate-spin' : ''}`} /> Actualiser
+            </Button>
+          </div>
+
+          {/* Skeleton loading */}
+          {listLoading && (
+            <div className="divide-y divide-border/40">
+              {Array.from({ length: 5 }).map((_, k) => (
+                <div key={k} className="px-5 py-4 flex items-center gap-4">
+                  <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-48 rounded" />
+                    <Skeleton className="h-3 w-32 rounded" />
+                  </div>
+                  <Skeleton className="h-6 w-24 rounded-lg hidden sm:block" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Vide */}
+          {!listLoading && patientsFiltered.length === 0 && (
+            <EmptyState
+              icon={FileText}
+              title="Aucun patient trouvé"
+              description={
+                search
+                  ? `Aucun résultat pour « ${search} »`
+                  : devisFilter !== 'all'
+                    ? 'Aucun devis dans cette catégorie'
+                    : 'Les patients apparaissent ici une fois leur rapport médical généré.'
+              }
+              actionLabel={search || devisFilter !== 'all' ? 'Effacer les filtres' : undefined}
+              onAction={
+                search || devisFilter !== 'all'
+                  ? () => { setSearch(''); setDevisFilter('all') }
+                  : undefined
+              }
+            />
+          )}
+
+          {/* Liste */}
+          {!listLoading && patientsFiltered.length > 0 && (
+            <div className="divide-y divide-border/40">
+              {patientsFiltered.map((p) => {
               const lastDevis = p.devis[0]
               const devisStatut = lastDevis?.statut
               const hasDevis = !!devisStatut
               const isRead    = !!lastDevis?.vuParPatientAt
 
-              /* Config badge devis */
-              const devisConfig = {
-                accepte:  { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
-                refuse:   { label: 'Refusé',   cls: 'bg-red-100 text-red-600 border-red-200',             dot: 'bg-red-500'     },
-                envoye:   { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700 border-blue-200',           dot: 'bg-blue-500'    },
-                brouillon:{ label: 'Brouillon', cls: 'bg-amber-100 text-amber-700 border-amber-200',       dot: 'bg-amber-400'   },
-              }[devisStatut ?? ''] ?? { label: 'Pas de devis', cls: 'bg-slate-100 text-slate-500 border-slate-200', dot: 'bg-slate-300' }
-
               return (
                 <div
                   key={p.id}
-                  className="w-full bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all px-3 sm:px-5 py-3 sm:py-4 flex items-center gap-2 sm:gap-4 group"
+                  className="flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-muted/20 group transition-colors"
                 >
                   <button
                     type="button"
                     onClick={() => openDetail(p.id)}
-                    className="flex-1 min-w-0 flex items-center gap-2 sm:gap-4 text-left"
+                    className="flex-1 min-w-0 flex items-center gap-3 text-left"
                   >
                   {/* Avatar */}
-                  <Avatar className="h-9 w-9 sm:h-11 sm:w-11 shrink-0">
-                    <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-xs sm:text-sm">
+                  <Avatar className="h-9 w-9 sm:h-10 sm:w-10 shrink-0">
+                    <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-xs rounded-xl">
                       {initials(p.user.fullName)}
                     </AvatarFallback>
                   </Avatar>
 
                   {/* Info principale */}
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <p className="text-sm font-bold text-slate-900 truncate">{p.user.fullName}</p>
-                    <p className="text-[10px] font-mono text-slate-500 whitespace-nowrap w-fit">{p.dossierNumber}</p>
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Badge className={`text-[10px] font-medium ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-                        {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
-                      </Badge>
-                      {p.user.email && <span className="text-xs text-slate-400 hidden sm:inline truncate max-w-[180px]">{p.user.email}</span>}
+                      <p className="text-sm font-semibold text-slate-900 truncate">{p.user.fullName}</p>
+                      <span className="text-[10px] font-mono text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">{p.dossierNumber}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <StatusBadge kind="dossier" value={p.status} />
+                      {p.user.email && <span className="text-[11px] text-slate-400 hidden md:inline truncate max-w-[180px]">{p.user.email}</span>}
                     </div>
                   </div>
 
-                  {/* Bloc devis mobile — badge seul */}
-                  <div className="sm:hidden shrink-0">
+                  {/* Bloc devis */}
+                  <div className="hidden sm:flex flex-col items-end gap-1 shrink-0 min-w-[190px]">
                     <div className="flex items-center gap-1.5">
-                      <div className={`w-2 h-2 rounded-full ${devisConfig.dot}`} />
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${devisConfig.cls}`}>
-                        {devisConfig.label}
-                      </span>
+                      {hasDevis && devisStatut
+                        ? <StatusBadge kind="devis" value={devisStatut} />
+                        : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">Pas de devis</span>}
+                      {lastDevis?.dateCreation && hasDevis && (
+                        <span className="text-[10px] text-muted-foreground">· {formatDate(lastDevis.dateCreation)}</span>
+                      )}
                     </div>
-                  </div>
-
-                  {/* Bloc devis — statut + indicateurs lecture/décision */}
-                  <div className="hidden sm:flex flex-col items-end gap-1.5 shrink-0 min-w-[200px]">
-
-                    {/* Badge statut */}
-                    <div className="flex items-center gap-1.5">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${devisConfig.dot}`} />
-                      <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${devisConfig.cls}`}>
-                        {devisConfig.label}
-                        {lastDevis?.dateCreation && hasDevis && (
-                          <span className="font-normal ml-1 opacity-70">
-                            · {formatDate(lastDevis.dateCreation)}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-
-                    {/* Indicateur lecture :
-                        - envoye  → affiche "Lu le…" ou "Non consulté"
-                        - accepte/refuse → affiche "Lu le…" seulement si vuParPatientAt est renseigné
-                          (un devis accepté/refusé a forcément été vu, mais l'horodatage peut manquer
-                           pour les dossiers antérieurs à la fonctionnalité) */}
                     {devisStatut === 'envoye' && (
                       <span className={`flex items-center gap-1 text-[11px] font-medium ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {isRead
@@ -1054,12 +1131,10 @@ export default function DevisGestionnairePage() {
                       </span>
                     )}
                     {(devisStatut === 'accepte' || devisStatut === 'refuse') && isRead && (
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-slate-500">
+                      <span className="flex items-center gap-1 text-[11px] text-slate-400">
                         <Eye className="h-3 w-3" /> Lu le {formatDateTime(lastDevis!.vuParPatientAt!)}
                       </span>
                     )}
-
-                    {/* Indicateur décision (accepté / refusé avec horodatage) */}
                     {devisStatut === 'accepte' && lastDevis?.updatedAt && (
                       <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
                         <CheckCircle2 className="h-3 w-3" /> Accepté le {formatDateTime(lastDevis.updatedAt)}
@@ -1070,38 +1145,45 @@ export default function DevisGestionnairePage() {
                         <X className="h-3 w-3" /> Refusé le {formatDateTime(lastDevis.updatedAt)}
                       </span>
                     )}
-
                     {!hasDevis && (
                       <span className="text-[11px] text-slate-400">Créer un devis →</span>
                     )}
                   </div>
 
+                  <div className="sm:hidden shrink-0">
+                    {hasDevis && devisStatut
+                      ? <StatusBadge kind="devis" value={devisStatut} />
+                      : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500">Sans devis</span>}
+                  </div>
+
                   <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 shrink-0 transition-colors" />
                   </button>
 
-                  {/* Supprimer devis uniquement */}
+                  {/* Supprimer devis */}
                   {lastDevis ? (
                     <button
                       type="button"
                       title="Supprimer le devis"
-                      aria-label="Supprimer le devis"
                       disabled={actionLoading}
                       onClick={(e) => handleDeleteDevisFromList(e, lastDevis.id)}
-                      className="shrink-0 h-10 w-10 sm:h-9 sm:w-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 transition-colors disabled:opacity-50"
+                      className="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   ) : (
-                    <span className="shrink-0 h-10 w-10 sm:h-9 sm:w-9" aria-hidden />
+                    <span className="shrink-0 h-8 w-8" />
                   )}
                 </div>
               )
             })}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
-  )
+    )
+  }
 
   /* ══════ RENDER : Vue dossier ══════ */
   const renderDetail = () => {
@@ -1133,46 +1215,32 @@ export default function DevisGestionnairePage() {
               Retour à la liste
             </button>
 
-              {/* Identité + actions */}
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-3">
+              {/* Identité + actions — colonne sur mobile, rangée sur desktop */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-3 min-w-0">
                 <Avatar className="h-10 w-10 sm:h-14 sm:w-14 shrink-0">
                   <AvatarFallback className="bg-brand-100 text-brand-700 text-base sm:text-lg font-bold">
                     {initials(patientRow.user.fullName)}
                   </AvatarFallback>
                 </Avatar>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h2 className="text-base sm:text-xl font-bold text-slate-900 truncate">{patientRow.user.fullName}</h2>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <span className="text-xs sm:text-sm font-mono text-slate-400">{patientRow.dossierNumber}</span>
-                    <Badge className={`text-xs font-medium ${STATUS_COLORS[patientRow.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-                      {STATUS_LABELS[patientRow.status as keyof typeof STATUS_LABELS] ?? patientRow.status}
-                    </Badge>
+                    <StatusBadge kind="dossier" value={patientRow.status} />
                     {patientRow.user.email && (
-                      <span className="text-xs text-slate-400 hidden sm:inline">{patientRow.user.email}</span>
+                      <span className="text-xs text-slate-400 hidden sm:inline truncate">{patientRow.user.email}</span>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* CTA Devis */}
-              <div className="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto shrink-0">
-                <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
-                  {existingDevis && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="gap-1.5 h-10 text-sm text-destructive border-destructive/30 hover:bg-destructive/10 flex-1 sm:flex-none min-w-[44px]"
-                      disabled={actionLoading}
-                      onClick={() => handleDeleteDevis()}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      <span className="sm:inline">Supprimer devis</span>
-                    </Button>
-                  )}
+              {/* CTA Devis — empilés sur mobile pour éviter le chevauchement */}
+              <div className="flex flex-col gap-2 w-full sm:items-end">
+                <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:justify-end gap-2 w-full">
                   <Button
                     variant="brand"
-                    className="gap-2 px-4 sm:px-5 h-10 text-sm font-semibold flex-1 sm:flex-none"
+                    className="gap-2 w-full sm:w-auto h-11 sm:h-10 text-sm font-semibold justify-center"
                     onClick={() => openModal(!!existingDevis && existingDevis.statut !== 'refuse')}
                     disabled={detailLoading || !devisAllowed}
                     title={
@@ -1184,23 +1252,45 @@ export default function DevisGestionnairePage() {
                     <FileText className="h-4 w-4" />
                     {devisActionLabel}
                   </Button>
+                  {existingDevis && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-1.5 w-full sm:w-auto h-11 sm:h-10 text-sm text-slate-700 border-slate-200 hover:bg-slate-50 justify-center"
+                      onClick={() => navigate(`/gestionnaire/devis/${patientRow.id}/personnaliser`)}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Consulter le devis
+                    </Button>
+                  )}
+                  {existingDevis && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-1.5 w-full sm:w-auto h-11 sm:h-10 text-sm text-destructive border-destructive/30 hover:bg-destructive/10 justify-center"
+                      disabled={actionLoading}
+                      onClick={() => handleDeleteDevis()}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Supprimer devis
+                    </Button>
+                  )}
                 </div>
                 {!devisAllowed && (
-                  <p className="text-xs text-amber-700 max-w-xs text-right">
+                  <p className="text-xs text-amber-700 sm:text-right">
                     Rapport médical requis avant devis.
                   </p>
                 )}
 
-                {/* Statut lecture — "Non consulté" uniquement si envoyé et pas encore ouvert */}
                 {devisStatut === 'envoye' && (
-                  <div className={`flex items-center gap-1.5 text-xs font-medium ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  <div className={`flex items-center gap-1.5 text-xs font-medium sm:justify-end ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
                     {isRead
                       ? <><Eye className="h-3.5 w-3.5" /> Vu le {formatDateTime(existingDevis!.vuParPatientAt!)}</>
                       : <><EyeOff className="h-3.5 w-3.5" /> Pas encore consulté</>}
                   </div>
                 )}
                 {devisStatut === 'accepte' && (
-                  <div className="flex flex-col items-end gap-0.5">
+                  <div className="flex flex-col gap-0.5 sm:items-end">
                     <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5">
                       <CheckCircle2 className="h-3.5 w-3.5" /> Accepté par le patient
                     </span>
@@ -1348,6 +1438,15 @@ export default function DevisGestionnairePage() {
                                   : <><EyeOff className="h-3.5 w-3.5" /> Non consulté</>}
                               </span>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
+                              onClick={() => navigate(`/gestionnaire/devis/${patientRow.id}/personnaliser`)}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              Consulter
+                            </Button>
                             {d.statut === 'envoye' && (
                               <Button
                                 variant="ghost"

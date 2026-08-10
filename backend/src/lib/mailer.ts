@@ -15,6 +15,22 @@ const NOTIFICATION_RECIPIENTS = env.NOTIFICATION_EMAILS
   ? env.NOTIFICATION_EMAILS.split(',').map((e) => e.trim()).filter(Boolean)
   : []
 
+/** Log SMTP readiness at boot (no secrets). */
+export function logMailerStatus(): void {
+  const smtpOk = Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS)
+  console.log('[mailer] Config', {
+    recipients: NOTIFICATION_RECIPIENTS.length,
+    smtpConfigured: smtpOk,
+    host: env.SMTP_HOST || null,
+    port: env.SMTP_PORT,
+  })
+  if (NOTIFICATION_RECIPIENTS.length === 0) {
+    console.warn('[mailer] ATTENTION : NOTIFICATION_EMAILS vide — aucun email ne sera envoyé')
+  } else if (!smtpOk) {
+    console.warn('[mailer] ATTENTION : SMTP incomplet — aucun email ne sera envoyé')
+  }
+}
+
 /**
  * Envoie un email de notification aux destinataires configurés.
  * Ne bloque pas si l'envoi échoue (erreur loguée uniquement).

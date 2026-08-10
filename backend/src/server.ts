@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
-import { rateLimit } from 'express-rate-limit'
 import pinoHttp, { type Options as PinoHttpOptions } from 'pino-http'
 import { env } from './config/env.js'
 import { logger } from './lib/logger.js'
@@ -19,6 +18,7 @@ import { publicRouter } from './modules/public/public.routes.js'
 import { chatRouter } from './modules/chat/chat.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { startGoogleCalendarScheduler } from './modules/google-calendar/google-calendar.scheduler.js'
+import { logMailerStatus } from './lib/mailer.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const allowedCorsOrigins = env.CORS_ORIGINS
@@ -34,29 +34,31 @@ app.use(
     origin:
       env.NODE_ENV === 'production'
         ? (allowedCorsOrigins.length > 0 ? allowedCorsOrigins : ['https://votre-domaine.vercel.app'])
-        : ['http://localhost:5173', 'http://localhost:5174'],
+        : (origin, callback) => {
+            // Dev : Vite peut démarrer sur 5173, 5174, 5175…
+            if (!origin || /^http:\/\/localhost:\d+$/.test(origin) || /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
+              callback(null, true)
+              return
+            }
+            callback(new Error(`CORS blocked: ${origin}`))
+          },
     credentials: true,
   }),
 )
 
 // ── Rate limiting ────────────────────────────────────────────────────────────
-app.use(
-  '/api',
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 300,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { ok: false, code: 'TOO_MANY_REQUESTS', message: 'Trop de requêtes, réessayez plus tard.' },
-  }),
-)
+// PAS de limite globale sur /api : le front poll chat/unread/messages en continu.
+// Une limite globale provoquait « Trop de requêtes » en usage normal.
+// La protection anti-abus est ciblée :
+//   - auth (login/register) → auth.routes.ts
+//   - upload public → public.routes.ts
 
 // ── Logging HTTP ─────────────────────────────────────────────────────────────
 const pinoHttpMiddleware = (pinoHttp as unknown as (opts: PinoHttpOptions) => ReturnType<typeof express>)({ logger })
 app.use(pinoHttpMiddleware)
 
 // ── Body parsing ─────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '5mb' }))
+app.use(express.json({ limit: '15mb' }))
 app.use(express.urlencoded({ extended: true }))
 
 // ── Fichiers statiques (uploads) ─────────────────────────────────────────────
@@ -135,6 +137,7 @@ app.use(errorHandler)
 // ── Démarrage ────────────────────────────────────────────────────────────────
 app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, '🚀 Serveur démarré')
+  logMailerStatus()
   startGoogleCalendarScheduler()
 })
 

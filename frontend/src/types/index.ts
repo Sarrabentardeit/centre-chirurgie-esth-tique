@@ -23,6 +23,7 @@ export type DossierStatus =
   | 'intervention'
   | 'post_op'
   | 'suivi_termine'
+  | 'abstention'
 
 export interface Patient {
   id: string

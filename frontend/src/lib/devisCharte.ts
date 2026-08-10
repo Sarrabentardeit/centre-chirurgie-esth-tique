@@ -54,7 +54,7 @@ export function devisFieldRow(
 
 /** Encadré info importante. */
 export function devisHighlightBox(label: string, value: string): string {
-  const { rose, bronze, charcoal } = DEVIS_CHARTE
+  const { bronze, charcoal } = DEVIS_CHARTE
   return `<p class="devis-highlight"><strong style="color:${bronze}">${label}</strong> <span style="color:${charcoal};font-weight:700">${value}</span></p>`
 }
 

@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar,
   Bell, Heart, ClipboardList, FileCheck,
@@ -43,7 +43,6 @@ const BOTTOM_NAV_ITEMS: Record<UserRole, BottomNavItem[]> = {
 
 export function BottomNav() {
   const { user } = useAuthStore()
-  const location = useLocation()
   const chatUnread = useChatUnreadStore((s) => s.unread)
 
   if (!user) return null

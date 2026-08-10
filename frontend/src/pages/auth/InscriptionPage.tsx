@@ -107,6 +107,7 @@ export default function InscriptionPage() {
         password: data.password,
         fullName: `${data.prenom} ${data.nom}`,
         phone: data.phone,
+        nationalite: 'À compléter',
       })
       const user: User = {
         id: result.user.id,

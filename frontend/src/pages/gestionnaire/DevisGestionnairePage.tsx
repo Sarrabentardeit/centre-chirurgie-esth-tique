@@ -303,7 +303,7 @@ function DevisModal({
   hotelNuits, setHotelNuits,
   nbAdultes, setNbAdultes,
   nbEnfants, setNbEnfants,
-  dureeSejourTotale, setDureeSejourTotale,
+  dureeSejourTotale,
   notesSejour, setNotesSejour,
   sent, savedDraft, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
   tauxEur,

@@ -30,7 +30,10 @@ interface Rapport {
   interventionsRecommandees: string[]
   valeurMedicale: string | null
   forfaitPropose: number | null
+  nuitsPreoperatoires?: number | null
   nuitsClinique?: number | null
+  nuitsHotel?: number | null
+  vetementContention?: boolean | null
   anesthesieGenerale?: boolean | null
   dureeSejourTunisie?: number | null
   nbAdultesSejour?: number | null
@@ -160,7 +163,10 @@ export default function RapportsPage() {
   const [interventions, setInterventions] = useState('')
   const [valeur, setValeur]               = useState('')
   const [forfait, setForfait]             = useState('')
+  const [nuitsPreoperatoires, setNuitsPreoperatoires] = useState('1')
   const [nuitsClinique, setNuitsClinique] = useState('')
+  const [nuitsHotel, setNuitsHotel]       = useState('')
+  const [vetementContention, setVetementContention] = useState<boolean | null>(null)
   const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
   const [nbAdultesSejour, setNbAdultesSejour] = useState('')
   const [nbEnfantsSejour, setNbEnfantsSejour] = useState('')
@@ -215,7 +221,8 @@ export default function RapportsPage() {
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
     setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
-    setNuitsClinique(''); setDureeSejourTunisie(''); setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false); setNotes('')
+    setNuitsPreoperatoires('1'); setNuitsClinique(''); setNuitsHotel(''); setVetementContention(null)
+    setDureeSejourTunisie(''); setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
     try {
@@ -239,7 +246,10 @@ export default function RapportsPage() {
             ? String(Math.round(Number(r.forfaitPropose.toFixed(2))))
             : ''
         )
+        setNuitsPreoperatoires(r.nuitsPreoperatoires != null ? String(r.nuitsPreoperatoires) : '1')
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
+        setNuitsHotel(r.nuitsHotel != null ? String(r.nuitsHotel) : '')
+        setVetementContention(r.vetementContention ?? null)
         setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
         setNbAdultesSejour(r.nbAdultesSejour != null ? String(r.nbAdultesSejour) : '')
         setNbEnfantsSejour(r.nbEnfantsSejour != null ? String(r.nbEnfantsSejour) : '')
@@ -267,6 +277,22 @@ export default function RapportsPage() {
 
   const handleSave = async () => {
     if (!selectedId || !diagnostic.trim()) return
+    if (!forfait || Number(forfait) <= 0) {
+      setSaveError('Le forfait médical est obligatoire.')
+      return
+    }
+    if (nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '') {
+      setSaveError('Nuits préopératoires, postopératoires et hôtel sont obligatoires.')
+      return
+    }
+    if (vetementContention === null) {
+      setSaveError('Indiquez si un vêtement de contention est prescrit.')
+      return
+    }
+    const nPre = Number(nuitsPreoperatoires)
+    const nPost = Number(nuitsClinique)
+    const nHotel = Number(nuitsHotel)
+    const totalTunisie = nPre + nPost + nHotel
     setSaving(true); setSaveError(null)
     try {
       const examensPayload = [...examensDemandes]
@@ -280,9 +306,12 @@ export default function RapportsPage() {
         examensDemandes: examensPayload,
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
         valeurMedicale: valeur || undefined,
-        forfaitPropose: forfait ? Number(forfait) : undefined,
-        nuitsClinique: nuitsClinique === '' ? undefined : Number(nuitsClinique),
-        dureeSejourTunisie: dureeSejourTunisie === '' ? undefined : Number(dureeSejourTunisie),
+        forfaitPropose: Number(forfait),
+        nuitsPreoperatoires: nPre,
+        nuitsClinique: nPost,
+        nuitsHotel: nHotel,
+        vetementContention,
+        dureeSejourTunisie: dureeSejourTunisie === '' ? totalTunisie : Number(dureeSejourTunisie),
         nbAdultesSejour: nbAdultesSejour === '' ? undefined : Number(nbAdultesSejour),
         nbEnfantsSejour: nbEnfantsSejour === '' ? undefined : Number(nbEnfantsSejour),
         anesthesieGenerale,
@@ -300,9 +329,12 @@ export default function RapportsPage() {
               examensDemandes: examensPayload,
               interventionsRecommandees: interventions.split('\n').filter(Boolean),
               valeurMedicale: valeur,
-              forfaitPropose: forfait ? Number(forfait) : null,
-              nuitsClinique: nuitsClinique === '' ? null : Number(nuitsClinique),
-              dureeSejourTunisie: dureeSejourTunisie === '' ? null : Number(dureeSejourTunisie),
+              forfaitPropose: Number(forfait),
+              nuitsPreoperatoires: nPre,
+              nuitsClinique: nPost,
+              nuitsHotel: nHotel,
+              vetementContention,
+              dureeSejourTunisie: dureeSejourTunisie === '' ? totalTunisie : Number(dureeSejourTunisie),
               nbAdultesSejour: nbAdultesSejour === '' ? null : Number(nbAdultesSejour),
               nbEnfantsSejour: nbEnfantsSejour === '' ? null : Number(nbEnfantsSejour),
               anesthesieGenerale,
@@ -851,49 +883,96 @@ export default function RapportsPage() {
                 title="Séjour clinique & anesthésie"
                 color="bg-cyan-100 text-cyan-600"
                 subtitle={
-                  `${nuitsClinique.trim() ? `${nuitsClinique} nuit(s)` : 'Nuits non précisées'} · ${
-                    dureeSejourTunisie.trim() ? `${dureeSejourTunisie} j. Tunisie` : 'Séjour global non précisé'
-                  } · ${
-                    anesthesieGenerale ? 'Anesthésie générale: oui' : 'Anesthésie générale: non'
-                  }`
+                  `Clinique: ${(Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0)} · Hôtel: ${nuitsHotel || '—'} · Tunisie: ${
+                    dureeSejourTunisie || (Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0) + (Number(nuitsHotel) || 0) || '—'
+                  } · ${anesthesieGenerale ? 'AG oui' : 'AG non'}`
                 }
                 open={openSections.clinique}
                 onToggle={() => toggleSection('clinique')}
               >
                 <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                        Nuits préopératoires *
+                      </label>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={nuitsPreoperatoires}
+                          onChange={(e) => setNuitsPreoperatoires(e.target.value)}
+                          className="w-[120px] h-10"
+                        />
+                        <span className="text-xs text-muted-foreground">défaut 1</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                        Nuits postopératoires *
+                      </label>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={60}
+                          placeholder="Ex: 2"
+                          value={nuitsClinique}
+                          onChange={(e) => setNuitsClinique(e.target.value)}
+                          className="w-[120px] h-10"
+                        />
+                        <span className="text-xs text-muted-foreground">nuit(s)</span>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Séjour clinique = préop + postop ={' '}
+                    <strong>{(Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0)}</strong> nuit(s)
+                  </p>
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                      Nombre de nuits en clinique
+                      Nuits hôtel *
                     </label>
                     <div className="mt-1.5 flex items-center gap-2">
                       <Input
                         type="number"
                         min={0}
                         max={60}
-                        placeholder="Ex: 2"
-                        value={nuitsClinique}
-                        onChange={(e) => setNuitsClinique(e.target.value)}
+                        placeholder="Ex: 4"
+                        value={nuitsHotel}
+                        onChange={(e) => setNuitsHotel(e.target.value)}
                         className="w-[120px] h-10"
                       />
                       <span className="text-xs text-muted-foreground">nuit(s)</span>
                     </div>
                   </div>
-
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                      Nombre de séjour global (Tunisie)
+                      Séjour total Tunisie (auto)
                     </label>
                     <div className="mt-1.5 flex items-center gap-2">
                       <Input
                         type="number"
                         min={0}
                         max={90}
-                        placeholder="Ex: 6"
-                        value={dureeSejourTunisie}
-                        onChange={(e) => setDureeSejourTunisie(e.target.value)}
-                        className="w-[120px] h-10"
+                        readOnly
+                        value={
+                          dureeSejourTunisie ||
+                          String((Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0) + (Number(nuitsHotel) || 0))
+                        }
+                        className="w-[120px] h-10 bg-muted/40"
                       />
-                      <span className="text-xs text-muted-foreground">jour(s)</span>
+                      <span className="text-xs text-muted-foreground">= clinique + hôtel</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Vêtement de contention *
+                    </label>
+                    <div className="mt-1.5 flex gap-2">
+                      <Button type="button" size="sm" variant={vetementContention === true ? 'brand' : 'outline'} onClick={() => setVetementContention(true)}>Oui</Button>
+                      <Button type="button" size="sm" variant={vetementContention === false ? 'brand' : 'outline'} onClick={() => setVetementContention(false)}>Non</Button>
                     </div>
                   </div>
 

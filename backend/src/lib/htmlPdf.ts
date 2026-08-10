@@ -172,7 +172,7 @@ export async function renderHtmlToPdf(html: string): Promise<Buffer> {
   try {
     const page = await browser.newPage()
     await page.setViewport({ width: 794, height: PAGE_HEIGHT_PX, deviceScaleFactor: 2 })
-    await page.setContent(html, { waitUntil: ['load', 'networkidle0'], timeout: 45_000 })
+    await page.setContent(html, { waitUntil: 'load', timeout: 45_000 })
 
     await page.evaluate(waitImagesFn)
     await page.evaluate(layout3PagesFn, PAGE_HEIGHT_PX)

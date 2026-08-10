@@ -28,6 +28,7 @@ RUN apt-get update \
     fonts-liberation \
     fonts-noto-core \
     ca-certificates \
+    wget \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/package*.json ./

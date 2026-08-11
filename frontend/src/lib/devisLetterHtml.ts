@@ -13,8 +13,9 @@ import {
 } from '@/lib/devisCharte'
 import {
   DEVIS_EXCLUT_ITEMS,
-  DEVIS_INCLUT_ITEMS,
   labelsForIds,
+  labelsForInclut,
+  resolveDrainageNb,
   resolveExclutIds,
   resolveInclutIds,
 } from '@/lib/devisOfferInclus'
@@ -39,6 +40,8 @@ export type DevisLetterRapport = {
   dureeSejourTunisie?: number | null
   nbAdultesSejour?: number | null
   nbEnfantsSejour?: number | null
+  drainage?: boolean | null
+  nbSeancesDrainage?: number | null
 }
 
 /** Contexte minimal pour synchroniser / générer le HTML avant PDF / éditeur. */
@@ -517,6 +520,7 @@ export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext)
   let out = refreshConvalescenceInTopHtml(html, ctx)
   out = stripDureeInterventionLine(out)
   out = refreshExamensInTopHtml(out, ctx)
+  out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = normalizeInclutExclutLabels(out)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
   out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
@@ -652,30 +656,50 @@ ${buildExamensMedicauxHtml(ctx)}
 <p></p>
 
 ${devisSectionHeading('Offre de prix :')}
-<p><strong>Votre devis inclut :</strong></p>
-<ul>
-<li>Assistance depuis votre arrivée à l'aéroport de Tunis-Carthage et jusqu'à votre départ,</li>
-<li>Transferts multiples aéroport/hôtel et hôtel/clinique,</li>
-<li>Consultation préopératoire à Tunis,</li>
-<li>Honoraires du chirurgien et de l'anesthésiste,</li>
-<li>Frais de la clinique et séjour (bloc opératoire, consommables, pharmacie, médication…),</li>
-<li>Les produits pharmaceutiques pour votre traitement postopératoire,</li>
-<li>Convalescence dans un hôtel,</li>
-<li>2 Séances de drainage lymphatique : massages par un kinésithérapeute,</li>
-<li>Consultation post opératoire en Tunisie avant votre départ,</li>
-<li>Suivi post-opératoire gratuit avec votre chirurgien ou son équipe pendant 6 mois.</li>
-</ul>
-<p></p>
-
-<p><strong>Notre forfait exclut :</strong></p>
-<ul>
-<li>Les vols aller-retour,</li>
-<li>Les dépenses personnelles (extras à l'hôtel ou à la clinique tels que les boissons, téléphone, etc…),</li>
-<li>Les poches de sang en cas de besoin de transfusion,</li>
-<li>Le prolongement de votre séjour initial en cas de nécessité,</li>
-<li>Les bilans sanguins préopératoires.</li>
-</ul>
+${buildOffreInclutExclutHtml(ctx)}
 `
+}
+
+const OFFRE_INCLUT_START = '<!-- DEVIS_OFFRE_INCLUT -->'
+const OFFRE_INCLUT_END = '<!-- /DEVIS_OFFRE_INCLUT -->'
+const OFFRE_EXCLUT_START = '<!-- DEVIS_OFFRE_EXCLUT -->'
+const OFFRE_EXCLUT_END = '<!-- /DEVIS_OFFRE_EXCLUT -->'
+
+function ulFromLabels(labels: string[]): string {
+  if (labels.length === 0) {
+    return '<p><em>—</em></p>'
+  }
+  return `<ul>\n${labels.map((l) => `<li>${l}</li>`).join('\n')}\n</ul>`
+}
+
+/** Blocs « Votre devis inclut / Notre forfait exclut » selon les cases cochées. */
+export function buildOffreInclutExclutHtml(ctx: DevisLetterContext): string {
+  const notes = pickDevis(ctx)?.notesSejour ?? ''
+  const drainageNb = resolveDrainageNb(notes, ctx.rapports?.[0] ?? null)
+  const inclut = labelsForInclut(resolveInclutIds(notes), drainageNb)
+  const exclut = labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes))
+  return `${OFFRE_INCLUT_START}
+<p><strong>Votre devis inclut :</strong></p>
+${ulFromLabels(inclut)}
+${OFFRE_INCLUT_END}
+<p></p>
+${OFFRE_EXCLUT_START}
+<p><strong>Notre forfait exclut :</strong></p>
+${ulFromLabels(exclut)}
+${OFFRE_EXCLUT_END}`
+}
+
+function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetterContext): string {
+  const fresh = buildOffreInclutExclutHtml(ctx)
+  const marked = new RegExp(`${OFFRE_INCLUT_START}[\\s\\S]*?${OFFRE_EXCLUT_END}`)
+  if (marked.test(html)) return html.replace(marked, fresh)
+
+  // Sans marqueurs : remplacer tout ce qui suit le titre « Offre de prix »
+  const offreIdx = html.search(/Offre de prix\s*:/i)
+  if (offreIdx < 0) return html
+  const close = html.indexOf('</p>', offreIdx)
+  if (close < 0) return html
+  return `${html.slice(0, close + 4)}\n${fresh}`
 }
 
 export function buildDevisLetterBottomHtml(total: number, tndPerEur = DEFAULT_TND_PER_EUR): string {

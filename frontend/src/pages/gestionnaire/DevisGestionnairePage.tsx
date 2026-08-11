@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import {
-  Plus, Trash2, Save, Send, CheckCircle2, FileText, AlertCircle,
+  Plus, Minus, Trash2, Save, Send, CheckCircle2, FileText, AlertCircle,
   RefreshCw, Search, Eye, EyeOff, ChevronDown, ChevronRight,
   Stethoscope, ClipboardList, Scissors, Heart, ArrowLeft, X, FilePenLine,
   User, Mail, Phone, MapPin, Calendar, MessageSquare, Ban,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -40,6 +41,14 @@ import {
   devisSejourDefaultsFromRapport,
   joursSejourFromNuits,
 } from '@/lib/devisSejourNotes'
+import {
+  DEVIS_EXCLUT_ITEMS,
+  DEVIS_INCLUT_ITEMS,
+  defaultDrainageNbFromRapport,
+  defaultExclutIds,
+  defaultInclutIds,
+  toggleId,
+} from '@/lib/devisOfferInclus'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import {
@@ -422,6 +431,9 @@ interface DevisModalProps {
   nbEnfants: string; setNbEnfants: (v: string) => void
   dureeSejourTotale: string; setDureeSejourTotale: (v: string) => void
   notesSejour: string; setNotesSejour: (v: string) => void
+  inclutIds: string[]; setInclutIds: (v: string[] | ((prev: string[]) => string[])) => void
+  exclutIds: string[]; setExclutIds: (v: string[] | ((prev: string[]) => string[])) => void
+  drainageNb: number; setDrainageNb: (v: number | ((prev: number) => number)) => void
   sent: boolean; savedDraft: boolean; actionLoading: boolean
   onSend: () => void; onSaveDraft: () => void
   onDelete: () => void
@@ -445,6 +457,9 @@ function DevisModal({
   nbEnfants, setNbEnfants,
   dureeSejourTotale,
   notesSejour, setNotesSejour,
+  inclutIds, setInclutIds,
+  exclutIds, setExclutIds,
+  drainageNb, setDrainageNb,
   sent, savedDraft, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
   tauxEur,
   formError = null,
@@ -753,6 +768,119 @@ function DevisModal({
                   onChange={(e) => setNotesSejour(e.target.value)}
                 />
               </div>
+
+              {/* Offre : inclut / exclut (cases → PDF & éditeur) */}
+              <div className="space-y-4 pt-2 border-t border-slate-100">
+                <div>
+                  <p
+                    className="text-sm font-bold mb-2"
+                    style={{ color: DEVIS_CHARTE.bronze }}
+                  >
+                    Votre devis inclut :
+                  </p>
+                  <div className="space-y-2 rounded-xl border border-slate-100 bg-white px-3 py-3">
+                    {DEVIS_INCLUT_ITEMS.map((item) => {
+                      const checked = inclutIds.includes(item.id)
+                      if (item.id === 'drainage') {
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-start gap-2.5 text-sm text-slate-700 leading-snug"
+                          >
+                            <Checkbox
+                              className="mt-0.5"
+                              checked={checked}
+                              onCheckedChange={(v) =>
+                                setInclutIds((prev) => toggleId(prev, item.id, v === true))
+                              }
+                            />
+                            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                              <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 shrink-0">
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 inline-flex items-center justify-center text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                                  disabled={drainageNb <= 0}
+                                  aria-label="Diminuer le nombre de séances"
+                                  onClick={() => setDrainageNb((n) => Math.max(0, n - 1))}
+                                >
+                                  <Minus className="h-3.5 w-3.5" />
+                                </button>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  className="h-7 w-10 border-x border-slate-200 bg-white text-center text-sm font-medium tabular-nums outline-none"
+                                  value={drainageNb}
+                                  onChange={(e) => {
+                                    const n = Number.parseInt(e.target.value, 10)
+                                    setDrainageNb(Number.isFinite(n) && n >= 0 ? n : 0)
+                                  }}
+                                  aria-label="Nombre de séances de drainage"
+                                />
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 inline-flex items-center justify-center text-slate-600 hover:bg-slate-100"
+                                  aria-label="Augmenter le nombre de séances"
+                                  onClick={() => setDrainageNb((n) => n + 1)}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              <span>
+                                {drainageNb > 1 ? 'Séances' : 'Séance'} de drainage lymphatique :
+                                massages par un kinésithérapeute,
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      }
+                      return (
+                        <label
+                          key={item.id}
+                          className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer leading-snug"
+                        >
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={checked}
+                            onCheckedChange={(v) =>
+                              setInclutIds((prev) => toggleId(prev, item.id, v === true))
+                            }
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p
+                    className="text-sm font-bold mb-2"
+                    style={{ color: DEVIS_CHARTE.bronze }}
+                  >
+                    Notre forfait exclut :
+                  </p>
+                  <div className="space-y-2 rounded-xl border border-slate-100 bg-white px-3 py-3">
+                    {DEVIS_EXCLUT_ITEMS.map((item) => {
+                      const checked = exclutIds.includes(item.id)
+                      return (
+                        <label
+                          key={item.id}
+                          className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer leading-snug"
+                        >
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={checked}
+                            onCheckedChange={(v) =>
+                              setExclutIds((prev) => toggleId(prev, item.id, v === true))
+                            }
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -852,6 +980,9 @@ export default function DevisGestionnairePage() {
   const [nbEnfants, setNbEnfants]             = useState('0')
   const [dureeSejourTotale, setDureeSejourTotale] = useState('')
   const [notesSejour, setNotesSejour]         = useState('')
+  const [inclutIds, setInclutIds]             = useState<string[]>(() => defaultInclutIds())
+  const [exclutIds, setExclutIds]             = useState<string[]>(() => defaultExclutIds())
+  const [drainageNb, setDrainageNb]           = useState(2)
   const [isEditingExisting, setIsEditingExisting] = useState(false)
   const [sent, setSent]                       = useState(false)
   const [savedDraft, setSavedDraft]           = useState(false)
@@ -1035,6 +1166,9 @@ export default function DevisGestionnairePage() {
       setNbEnfants(fromRapport.nbEnfants !== '' ? fromRapport.nbEnfants : p.nbEnfants)
       setDureeSejourTotale(p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale)
       setNotesSejour(p.noteSejour)
+      setInclutIds(p.inclutIds ?? defaultInclutIds())
+      setExclutIds(p.exclutIds ?? defaultExclutIds())
+      setDrainageNb(p.drainageNb ?? defaultDrainageNbFromRapport(rap))
       setIsEditingExisting(true)
     } else {
       const fp = rap?.forfaitPropose ?? rapportsList[0]?.forfaitPropose
@@ -1056,6 +1190,9 @@ export default function DevisGestionnairePage() {
       setNbEnfants(fromRapport.nbEnfants)
       setDureeSejourTotale(fromRapport.dureeSejourTotale)
       setNotesSejour('')
+      setInclutIds(defaultInclutIds())
+      setExclutIds(defaultExclutIds())
+      setDrainageNb(defaultDrainageNbFromRapport(rap))
       setIsEditingExisting(false)
     }
     setSent(false); setSavedDraft(false)
@@ -1091,6 +1228,9 @@ export default function DevisGestionnairePage() {
           nbEnfants,
           dureeSejourTotale,
           noteSejour: notesSejour,
+          inclutIds,
+          exclutIds,
+          drainageNb,
         }) || null,
       currency,
     }
@@ -1981,6 +2121,9 @@ export default function DevisGestionnairePage() {
           nbEnfants={nbEnfants} setNbEnfants={setNbEnfants}
           dureeSejourTotale={dureeSejourTotale} setDureeSejourTotale={setDureeSejourTotale}
           notesSejour={notesSejour} setNotesSejour={setNotesSejour}
+          inclutIds={inclutIds} setInclutIds={setInclutIds}
+          exclutIds={exclutIds} setExclutIds={setExclutIds}
+          drainageNb={drainageNb} setDrainageNb={setDrainageNb}
           sent={sent} savedDraft={savedDraft} actionLoading={actionLoading}
           onSend={() => void handleSend()}
           onSaveDraft={() => void handleSaveDraft()}

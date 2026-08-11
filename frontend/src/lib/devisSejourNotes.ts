@@ -1,8 +1,10 @@
 /** Lignes structurées dans `notesSejour` du devis (préfixes + texte libre). */
 
 import {
+  DEVIS_DRAINAGE_NB_PREFIX,
   DEVIS_EXCLUT_PREFIX,
   DEVIS_INCLUT_PREFIX,
+  parseDrainageNbFromNotes,
   parseExclutIdsFromNotes,
   parseInclutIdsFromNotes,
 } from '@/lib/devisOfferInclus'
@@ -29,6 +31,7 @@ const META_PREFIXES = [
   SEJOUR_DUREE_TOTALE_PREFIX,
   DEVIS_INCLUT_PREFIX,
   DEVIS_EXCLUT_PREFIX,
+  DEVIS_DRAINAGE_NB_PREFIX,
 ] as const
 
 function lineValue(lines: string[], prefix: string): string {
@@ -52,6 +55,8 @@ export interface ParsedSejourMeta {
   /** null = non renseigné (défaut = tout coché à l’affichage). */
   inclutIds: string[] | null
   exclutIds: string[] | null
+  /** null = non renseigné → défaut = séances du rapport. */
+  drainageNb: number | null
 }
 
 export const CLINIQUE_CHOIX = {
@@ -132,6 +137,7 @@ export function parseSejourMeta(notes: string | null | undefined): ParsedSejourM
     noteSejour: lines.filter((l) => !isMetaLine(l)).join('\n').trim(),
     inclutIds: parseInclutIdsFromNotes(notes),
     exclutIds: parseExclutIdsFromNotes(notes),
+    drainageNb: parseDrainageNbFromNotes(notes),
   }
 }
 
@@ -146,6 +152,9 @@ export function buildSejourNotes(i: ParsedSejourMeta): string {
     i.dureeSejourTotale.trim() !== '' ? `${SEJOUR_DUREE_TOTALE_PREFIX}${i.dureeSejourTotale.trim()}` : '',
     i.inclutIds != null ? `${DEVIS_INCLUT_PREFIX}${i.inclutIds.join(',')}` : '',
     i.exclutIds != null ? `${DEVIS_EXCLUT_PREFIX}${i.exclutIds.join(',')}` : '',
+    i.drainageNb != null && Number.isFinite(i.drainageNb)
+      ? `${DEVIS_DRAINAGE_NB_PREFIX}${Math.max(0, Math.floor(i.drainageNb))}`
+      : '',
     i.noteSejour.trim(),
   ].filter(Boolean).join('\n')
 }

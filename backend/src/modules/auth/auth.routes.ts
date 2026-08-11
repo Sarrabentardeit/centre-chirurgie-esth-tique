@@ -57,10 +57,9 @@ authRouter.post(
   }
 )
 
-// POST /api/auth/refresh
+// POST /api/auth/refresh — pas de rate-limit login (sinon session coupée après polls)
 authRouter.post(
   '/refresh',
-  authAbuseLimiter,
   validate(refreshSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

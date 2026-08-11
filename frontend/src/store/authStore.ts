@@ -12,6 +12,8 @@ interface AuthState {
   logout: () => void
   setLoading: (loading: boolean) => void
   setToken: (token: string) => void
+  /** Met à jour access (+ refresh si rotation) sans toucher au user. */
+  setTokens: (token: string, refreshToken?: string) => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -28,6 +30,11 @@ export const useAuthStore = create<AuthState>()(
         set({ user: null, token: null, refreshToken: null, isAuthenticated: false }),
       setLoading: (isLoading) => set({ isLoading }),
       setToken: (token) => set({ token }),
+      setTokens: (token, refreshToken) =>
+        set((state) => ({
+          token,
+          refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
+        })),
     }),
     {
       name: 'auth-storage',

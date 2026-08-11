@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useAuthStore, getDashboardPath } from '@/store/authStore'
-import { authApi, ApiRequestError } from '@/lib/api'
+import { authApi, ApiRequestError, startSessionKeepAlive } from '@/lib/api'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { User, UserRole } from '@/types'
 
@@ -24,6 +24,12 @@ export function useAuth() {
     window.addEventListener('auth:logout', handler)
     return () => window.removeEventListener('auth:logout', handler)
   }, [logout, navigate])
+
+  // Garde la session vivante (refresh proactif + sync multi-onglets)
+  useEffect(() => {
+    if (!isAuthenticated) return
+    return startSessionKeepAlive()
+  }, [isAuthenticated])
 
   const handleLogin = async (
     email: string,

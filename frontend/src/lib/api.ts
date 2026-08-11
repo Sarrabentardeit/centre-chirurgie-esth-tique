@@ -1,31 +1,62 @@
+import { useAuthStore } from '@/store/authStore'
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api'
 
-// ─── Token helpers (localStorage via authStore persist) ─────────────────────
+// ─── Token helpers ───────────────────────────────────────────────────────────
+// localStorage = source de vérité (multi-onglets + sync immédiate après refresh)
+
+type AuthPersistShape = {
+  state?: {
+    token?: string | null
+    refreshToken?: string | null
+    isAuthenticated?: boolean
+    user?: unknown
+  }
+  version?: number
+}
 
 function getTokens() {
   try {
     const raw = localStorage.getItem('auth-storage')
-    if (!raw) return { access: null, refresh: null }
-    const parsed = JSON.parse(raw) as { state?: { token?: string; refreshToken?: string } }
-    return {
-      access: parsed.state?.token ?? null,
-      refresh: parsed.state?.refreshToken ?? null,
+    if (raw) {
+      const parsed = JSON.parse(raw) as AuthPersistShape
+      const access = parsed.state?.token ?? null
+      const refresh = parsed.state?.refreshToken ?? null
+      if (access || refresh) return { access, refresh }
     }
-  } catch {
-    return { access: null, refresh: null }
-  }
+  } catch { /* ignore */ }
+  const { token, refreshToken } = useAuthStore.getState()
+  return { access: token, refresh: refreshToken }
 }
 
-function setAccessToken(token: string) {
+function saveTokens(accessToken: string, refreshToken?: string) {
+  useAuthStore.getState().setTokens(accessToken, refreshToken)
+  // Écriture synchrone : le persist Zustand est async et peut laisser un vieux refresh
   try {
     const raw = localStorage.getItem('auth-storage')
-    if (!raw) return
-    const parsed = JSON.parse(raw) as { state?: Record<string, unknown> }
-    if (parsed.state) {
-      parsed.state['token'] = token
-      localStorage.setItem('auth-storage', JSON.stringify(parsed))
-    }
-  } catch { /* silent */ }
+    const parsed: AuthPersistShape = raw ? JSON.parse(raw) as AuthPersistShape : { state: {} }
+    if (!parsed.state) parsed.state = {}
+    parsed.state.token = accessToken
+    if (refreshToken !== undefined) parsed.state.refreshToken = refreshToken
+    parsed.state.isAuthenticated = true
+    localStorage.setItem('auth-storage', JSON.stringify(parsed))
+  } catch { /* ignore */ }
+}
+
+function forceSessionExpired() {
+  // Le handler useAuth lit le rôle puis appelle logout()
+  window.dispatchEvent(new Event('auth:logout'))
+}
+
+function getJwtExpMs(token: string): number | null {
+  try {
+    const part = token.split('.')[1]
+    if (!part) return null
+    const payload = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number }
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null
+  } catch {
+    return null
+  }
 }
 
 // ─── Core fetcher ────────────────────────────────────────────────────────────
@@ -50,7 +81,7 @@ export class ApiRequestError extends Error {
 }
 
 let isRefreshing = false
-let refreshQueue: Array<(token: string) => void> = []
+let refreshQueue: Array<(token: string | null) => void> = []
 
 async function tryRefreshToken(): Promise<string | null> {
   const { refresh } = getTokens()
@@ -69,16 +100,54 @@ async function tryRefreshToken(): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: refresh }),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      refreshQueue.forEach((cb) => cb(null))
+      refreshQueue = []
+      return null
+    }
     const data = (await res.json()) as { accessToken: string; refreshToken?: string }
-    setAccessToken(data.accessToken)
+    // Important : le backend fait une rotation du refresh token — il faut le persister
+    saveTokens(data.accessToken, data.refreshToken)
     refreshQueue.forEach((cb) => cb(data.accessToken))
     refreshQueue = []
     return data.accessToken
   } catch {
+    refreshQueue.forEach((cb) => cb(null))
+    refreshQueue = []
     return null
   } finally {
     isRefreshing = false
+  }
+}
+
+/** Renouvelle l’access avant expiration (évite les rafales de 401). */
+export function startSessionKeepAlive(): () => void {
+  const tick = () => {
+    const { access, refresh } = getTokens()
+    if (!access || !refresh) return
+    const expMs = getJwtExpMs(access)
+    if (expMs == null) return
+    if (expMs - Date.now() < 10 * 60 * 1000) {
+      void tryRefreshToken()
+    }
+  }
+  tick()
+  const id = window.setInterval(tick, 60_000)
+
+  const onStorage = (e: StorageEvent) => {
+    if (e.key !== 'auth-storage' || !e.newValue) return
+    try {
+      const parsed = JSON.parse(e.newValue) as AuthPersistShape
+      const access = parsed.state?.token
+      const refresh = parsed.state?.refreshToken
+      if (access) useAuthStore.getState().setTokens(access, refresh ?? undefined)
+    } catch { /* ignore */ }
+  }
+  window.addEventListener('storage', onStorage)
+
+  return () => {
+    window.clearInterval(id)
+    window.removeEventListener('storage', onStorage)
   }
 }
 
@@ -101,12 +170,15 @@ async function request<T>(
 
   // Auto-refresh sur 401
   if (res.status === 401 && !options._retry) {
-    // Ne pas tenter le refresh ni expulser si l'utilisateur n'est pas encore connecté
-    // (ex: tentative de login avec mauvais mot de passe)
-    const { access: currentToken } = getTokens()
-    if (!currentToken) {
-      const data401 = await res.json()
-      throw new ApiRequestError(401, (data401 as ApiError).code ?? 'UNAUTHORIZED', (data401 as ApiError).message ?? 'Email ou mot de passe incorrect.')
+    const { access: currentToken, refresh } = getTokens()
+    // Login / routes publiques : pas de session à rafraîchir
+    if (!currentToken && !refresh) {
+      const data401 = await res.json().catch(() => ({})) as ApiError
+      throw new ApiRequestError(
+        401,
+        data401.code ?? 'UNAUTHORIZED',
+        data401.message ?? 'Email ou mot de passe incorrect.',
+      )
     }
     const newToken = await tryRefreshToken()
     if (newToken) {
@@ -116,9 +188,7 @@ async function request<T>(
       if (!retry.ok) throw new ApiRequestError(retry.status, (retryData as ApiError).code, (retryData as ApiError).message)
       return retryData as T
     }
-    // Refresh échoué → expulser l'utilisateur authentifié
-    localStorage.removeItem('auth-storage')
-    window.dispatchEvent(new Event('auth:logout'))
+    forceSessionExpired()
     throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
   }
 
@@ -377,7 +447,8 @@ export const chatApi = {
         if (!retry.ok) await readUploadError(retry)
         return (await retry.json()) as { ok: true; url: string; name: string; size: number }
       }
-      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
+      forceSessionExpired()
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
     }
     if (!res.ok) await readUploadError(res)
     return (await res.json()) as { ok: true; url: string; name: string; size: number }
@@ -1009,7 +1080,8 @@ export const gestionnaireApi = {
         }
         return retry.blob()
       }
-      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
+      forceSessionExpired()
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
     }
 
     if (!res.ok) {
@@ -1366,7 +1438,8 @@ export async function uploadMedecinFile(file: File): Promise<UploadResponse> {
       if (!retry.ok) await readUploadError(retry)
       return (await retry.json()) as UploadResponse
     }
-    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
+    forceSessionExpired()
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
   }
   if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse
@@ -1391,7 +1464,8 @@ export async function uploadPostOpPhoto(file: File, note?: string): Promise<Uplo
       if (!retry.ok) await readUploadError(retry)
       return (await retry.json()) as UploadResponse & { suivi?: SuiviPostOp }
     }
-    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
+    forceSessionExpired()
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
   }
   if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse & { suivi?: SuiviPostOp }
@@ -1424,7 +1498,8 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
       if (!retry.ok) await readUploadError(retry)
       return (await retry.json()) as UploadResponse
     }
-    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée.')
+    forceSessionExpired()
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
   }
 
   if (!res.ok) await readUploadError(res)

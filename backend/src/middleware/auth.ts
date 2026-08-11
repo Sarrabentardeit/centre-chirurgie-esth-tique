@@ -7,7 +7,7 @@ import type { JwtPayload, UserRole } from '../modules/auth/auth.types.js'
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
   const header = req.headers.authorization
   if (!header?.startsWith('Bearer ')) {
-    return next(new AppError(401, 'UNAUTHORIZED', 'Token manquant.'))
+    return next(new AppError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.'))
   }
 
   const token = header.slice(7)
@@ -16,7 +16,7 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
     req.auth = payload
     next()
   } catch {
-    next(new AppError(401, 'INVALID_TOKEN', 'Token invalide ou expiré.'))
+    next(new AppError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.'))
   }
 }
 

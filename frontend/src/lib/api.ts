@@ -80,6 +80,33 @@ export class ApiRequestError extends Error {
   }
 }
 
+const SESSION_EXPIRED_MSG = 'Session expirée. Veuillez vous reconnecter.'
+
+/** Messages techniques auth → message clair pour le client. */
+function toUserFacingAuthError(code?: string, message?: string): { code: string; message: string } {
+  const raw = (message ?? '').toLowerCase()
+  const isLoginFailure =
+    code === 'INVALID_CREDENTIALS' ||
+    raw.includes('mot de passe') ||
+    raw.includes('email ou')
+  if (isLoginFailure) {
+    return { code: code ?? 'INVALID_CREDENTIALS', message: message ?? 'Email ou mot de passe incorrect.' }
+  }
+  if (
+    code === 'UNAUTHORIZED' ||
+    code === 'INVALID_TOKEN' ||
+    code === 'SESSION_EXPIRED' ||
+    code === 'SESSION_NOT_FOUND' ||
+    code === 'INVALID_REFRESH_TOKEN' ||
+    raw.includes('token manquant') ||
+    raw.includes('token invalide') ||
+    raw.includes('session')
+  ) {
+    return { code: 'SESSION_EXPIRED', message: SESSION_EXPIRED_MSG }
+  }
+  return { code: code ?? 'UNAUTHORIZED', message: message ?? SESSION_EXPIRED_MSG }
+}
+
 let isRefreshing = false
 let refreshQueue: Array<(token: string | null) => void> = []
 
@@ -171,25 +198,38 @@ async function request<T>(
   // Auto-refresh sur 401
   if (res.status === 401 && !options._retry) {
     const { access: currentToken, refresh } = getTokens()
+    const isAuthLoginRoute = path.startsWith('/auth/login') || path.startsWith('/auth/register')
     // Login / routes publiques : pas de session à rafraîchir
     if (!currentToken && !refresh) {
       const data401 = await res.json().catch(() => ({})) as ApiError
-      throw new ApiRequestError(
-        401,
-        data401.code ?? 'UNAUTHORIZED',
-        data401.message ?? 'Email ou mot de passe incorrect.',
-      )
+      if (isAuthLoginRoute) {
+        throw new ApiRequestError(
+          401,
+          data401.code ?? 'INVALID_CREDENTIALS',
+          data401.message ?? 'Email ou mot de passe incorrect.',
+        )
+      }
+      const friendly = toUserFacingAuthError(data401.code, data401.message)
+      forceSessionExpired()
+      throw new ApiRequestError(401, friendly.code, friendly.message)
     }
     const newToken = await tryRefreshToken()
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`
       const retry = await fetch(url, { ...options, headers })
-      const retryData = await retry.json()
-      if (!retry.ok) throw new ApiRequestError(retry.status, (retryData as ApiError).code, (retryData as ApiError).message)
+      const retryData = await retry.json() as ApiError
+      if (!retry.ok) {
+        if (retry.status === 401) {
+          const friendly = toUserFacingAuthError(retryData.code, retryData.message)
+          forceSessionExpired()
+          throw new ApiRequestError(401, friendly.code, friendly.message)
+        }
+        throw new ApiRequestError(retry.status, retryData.code, retryData.message)
+      }
       return retryData as T
     }
     forceSessionExpired()
-    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
   }
 
   const raw = await res.text()
@@ -212,6 +252,10 @@ async function request<T>(
   }
   if (!res.ok) {
     const err = data as ApiError
+    if (res.status === 401) {
+      const friendly = toUserFacingAuthError(err.code, err.message)
+      throw new ApiRequestError(401, friendly.code, friendly.message, err.issues)
+    }
     throw new ApiRequestError(res.status, err.code ?? 'API_ERROR', err.message ?? 'Erreur serveur.', err.issues)
   }
 
@@ -448,7 +492,7 @@ export const chatApi = {
         return (await retry.json()) as { ok: true; url: string; name: string; size: number }
       }
       forceSessionExpired()
-      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
     }
     if (!res.ok) await readUploadError(res)
     return (await res.json()) as { ok: true; url: string; name: string; size: number }
@@ -1081,7 +1125,7 @@ export const gestionnaireApi = {
         return retry.blob()
       }
       forceSessionExpired()
-      throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
     }
 
     if (!res.ok) {
@@ -1439,7 +1483,7 @@ export async function uploadMedecinFile(file: File): Promise<UploadResponse> {
       return (await retry.json()) as UploadResponse
     }
     forceSessionExpired()
-    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
   }
   if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse
@@ -1465,7 +1509,7 @@ export async function uploadPostOpPhoto(file: File, note?: string): Promise<Uplo
       return (await retry.json()) as UploadResponse & { suivi?: SuiviPostOp }
     }
     forceSessionExpired()
-    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
   }
   if (!res.ok) await readUploadError(res)
   return (await res.json()) as UploadResponse & { suivi?: SuiviPostOp }
@@ -1499,7 +1543,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
       return (await retry.json()) as UploadResponse
     }
     forceSessionExpired()
-    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.')
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
   }
 
   if (!res.ok) await readUploadError(res)

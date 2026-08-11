@@ -437,8 +437,8 @@ export default function PatientsPage() {
         items={[
           { key: 'non_traites', label: 'Non traités', value: loading ? '—' : stats.nonTraites, tone: 'amber', active: statusFilter === 'non_traites', onClick: () => setStatusFilter('non_traites') },
           { key: 'traites', label: 'Traités', value: loading ? '—' : stats.traites, tone: 'emerald', active: statusFilter === 'traites', onClick: () => setStatusFilter('traites') },
-          { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'default', active: statusFilter === 'abstention', onClick: () => setStatusFilter('abstention') },
-          { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'brand', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
+          { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'slate', active: statusFilter === 'abstention', onClick: () => setStatusFilter('abstention') },
+          { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'sky', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
         ]}
       />
 

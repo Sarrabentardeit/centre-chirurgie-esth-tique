@@ -1,6 +1,5 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
-import { sendNotificationEmail } from '../../lib/mailer.js'
 import type { UserRole } from '../auth/auth.types.js'
 import type { MarkReadInput, SendMessageInput } from './chat.schema.js'
 
@@ -75,11 +74,7 @@ async function notifyStaffNewPatientMessage(input: {
         },
       }).catch(() => undefined)
     ),
-    sendNotificationEmail({
-      titre,
-      message,
-      lienAction: '/gestionnaire/chat',
-    }),
+    // Pas d'email chat — gestionnaire : email seulement sur rapport généré
   ])
 }
 

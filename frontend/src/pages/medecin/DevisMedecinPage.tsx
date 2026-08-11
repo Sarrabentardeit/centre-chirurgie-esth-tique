@@ -5,7 +5,7 @@ import {
   Calendar, Eye, EyeOff, FileText,
 } from 'lucide-react'
 import { medecinApi, type DevisWithPatient, type DevisLigne } from '@/lib/api'
-import { formatDevisTitle, getDevisDisplayNumber, cn } from '@/lib/utils'
+import { formatDevisListName, formatDevisTitle, getDevisDisplayNumber, cn } from '@/lib/utils'
 import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import {
   DEVIS_LOGO_SRC,
@@ -70,6 +70,7 @@ function exportPdf(dv: DevisWithPatient) {
   const opTitle = lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
   const sejourLine = sejourLineFromDevis(dv)
   const ref = getDevisDisplayNumber(dv, dv.patient.dossierNumber) || dv.patient.dossierNumber
+  const pdfTitle = formatDevisListName(dv.patient.dossierNumber, dv.patient.user.fullName, dv.version)
 
   const tableHtml = lignes.length > 0
     ? buildDevisOfferBlockHtml({
@@ -85,7 +86,7 @@ function exportPdf(dv: DevisWithPatient) {
   const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
   const sigUrl  = `${window.location.origin}/signature.jpg`
   const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"/>
-<title>Devis ${ref}</title><style>${buildDevisPrintStyles()}</style></head>
+<title>${pdfTitle}</title><style>${buildDevisPrintStyles()}</style></head>
 <body><table class="page-table">
   <thead><tr><td><div class="doc-header">
     ${buildDevisHeaderLogoHtml(logoUrl)}
@@ -138,11 +139,11 @@ function PageHeader({ list }: { list: DevisWithPatient[] }) {
         </div>
         <KpiStrip
           items={[
-            { key: 't', label: 'Envoyés', value: total, tone: 'default' },
-            { key: 'e', label: 'En attente', value: envoye, tone: 'brand' },
+            { key: 't', label: 'Envoyés', value: total, tone: 'sky' },
+            { key: 'e', label: 'En attente', value: envoye, tone: 'amber' },
             { key: 'a', label: 'Acceptés', value: accepte, tone: 'emerald' },
             { key: 'x', label: 'Taux', value: `${taux}%`, tone: 'teal' },
-            { key: 'v', label: 'Volume TND', value: fmtAmount(montant), tone: 'brand' },
+            { key: 'v', label: 'Volume TND', value: fmtAmount(montant), tone: 'violet' },
           ]}
         />
       </div>

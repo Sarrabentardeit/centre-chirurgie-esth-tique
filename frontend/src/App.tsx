@@ -19,6 +19,7 @@ import DevisPage from './pages/patient/DevisPage'
 import AgendaPage from './pages/patient/AgendaPage'
 import ChatPage from './pages/patient/ChatPage'
 import PostOpPage from './pages/patient/PostOpPage'
+import PatientNotificationsPage from './pages/patient/NotificationsPage'
 
 // Medecin pages
 import DashboardMedecinPage from './pages/medecin/DashboardMedecinPage'
@@ -119,6 +120,14 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['patient']}>
                   <PostOpPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/patient/notifications"
+              element={
+                <ProtectedRoute allowedRoles={['patient']}>
+                  <PatientNotificationsPage />
                 </ProtectedRoute>
               }
             />

@@ -14,47 +14,18 @@ import {
   resolvePatientReference,
   syncPatientDossierFromDevis,
 } from '../../lib/devisNumber.js'
-import { sendNotificationEmail } from '../../lib/mailer.js'
+import { notifyStaff } from '../../lib/staffNotifications.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 
-async function notifyGestionnaires(input: {
+function notifyGestionnaires(input: {
   titre: string
   message: string
   type?: 'info' | 'warning' | 'success' | 'error'
   lienAction?: string | null
+  /** true uniquement pour « Rapport médical généré » */
+  email?: boolean
 }) {
-  const gestionnaires = await prisma.user.findMany({
-    where: { role: 'gestionnaire' },
-    select: { id: true },
-  })
-
-  const notifPromises = gestionnaires.map(async (gestionnaire) => {
-    const exists = await prisma.notification.findFirst({
-      where: {
-        userId: gestionnaire.id,
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-      select: { id: true },
-    })
-    if (exists) return
-
-    await prisma.notification.create({
-      data: {
-        userId: gestionnaire.id,
-        type: input.type ?? 'info',
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-    })
-  })
-
-  await Promise.all([
-    ...notifPromises,
-    sendNotificationEmail(input),
-  ])
+  return notifyStaff({ ...input, role: 'gestionnaire', email: input.email === true })
 }
 
 async function writeAuditLog(input: {
@@ -715,6 +686,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
       titre: existing ? 'Rapport médical mis à jour' : 'Rapport médical généré',
       message: `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) est ${existing ? 'mis à jour' : 'prêt'}. Devis à préparer.`,
       lienAction: `/gestionnaire/devis/${patientId}`,
+      email: true,
     })
   }
 

@@ -1,67 +1,87 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FileCheck, Download, CheckCircle2, Clock, XCircle,
-  AlertCircle, RefreshCw, MessageSquare,
+  AlertCircle, RefreshCw, MessageSquare, X, ChevronRight, Gift,
 } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { authApi, patientApi } from '@/lib/api'
 import type { Devis } from '@/lib/api'
-import { formatDate, formatCurrency } from '@/lib/utils'
-import { formatDevisSejourNotesForDisplay, parseSejourMeta } from '@/lib/devisSejourNotes'
-import { downloadDevisPdf } from '@/lib/pdf'
-import { DEVIS_LOGO_SRC, buildDevisDocumentEndHtml, buildDevisHeaderLogoHtml, buildDevisHeaderRightHtml, layoutDevisForPrint } from '@/lib/devisBranding'
-import { buildDevisOfferBlockHtml, buildDevisPrintStyles } from '@/lib/devisCharte'
-import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+import {
+  formatDate,
+  formatCurrency,
+  formatDevisPdfFileName,
+  formatDevisListName,
+  cn,
+} from '@/lib/utils'
+import { parseSejourMeta } from '@/lib/devisSejourNotes'
+import { inlineHtmlImages } from '@/lib/pdf'
+import { buildDevisExportHtml } from '@/lib/devisExportHtml'
 
 const DEVIS_STATUS = {
-  brouillon: { label: 'Brouillon',  color: 'secondary',   icon: Clock },
-  envoye:    { label: 'Reçu',       color: 'info',        icon: AlertCircle },
-  accepte:   { label: 'Accepté',    color: 'success',     icon: CheckCircle2 },
-  refuse:    { label: 'Refusé',     color: 'destructive', icon: XCircle },
-} as const
+  brouillon: { label: 'Brouillon', color: 'secondary' as const, icon: Clock, chip: 'bg-slate-100 text-slate-600 border-slate-200' },
+  envoye:    { label: 'Reçu',      color: 'info' as const,      icon: AlertCircle, chip: 'bg-sky-100 text-sky-800 border-sky-200' },
+  accepte:   { label: 'Accepté',   color: 'success' as const,   icon: CheckCircle2, chip: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  refuse:    { label: 'Refusé',    color: 'destructive' as const, icon: XCircle, chip: 'bg-rose-100 text-rose-800 border-rose-200' },
+}
 
-const CONTENT_BREAK = '|||EDITOR_BREAK|||'
+/** Retire les aides entre parenthèses : (nbr de nuitées), (à préciser), etc. */
+function cleanPrestationLabel(raw: string | null | undefined): string {
+  return (raw ?? '')
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
 
 function PageSkeleton() {
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-4">
       <Skeleton className="h-8 w-48" />
-      <Card><CardContent className="pt-5 space-y-4">
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-10 w-32" />
-      </CardContent></Card>
+      <Skeleton className="h-16 w-full rounded-xl" />
+      <Skeleton className="h-16 w-full rounded-xl" />
+      <Skeleton className="h-16 w-full rounded-xl" />
     </div>
   )
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
 export default function DevisPage() {
   const navigate = useNavigate()
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState<string | null>(null)
-  const [devis, setDevis]       = useState<Devis[]>([])
-
-  const [repondingId, setRepondingId]   = useState<string | null>(null)
-  const [refusReason, setRefusReason]   = useState('')
-  const [submitting, setSubmitting]     = useState(false)
-  const [actionDone, setActionDone]     = useState<string | null>(null)
-  const [patientIdentity, setPatientIdentity] = useState<{ nom: string; prenom: string; dossierNumber: string }>({
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [devis, setDevis] = useState<Devis[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showRefuse, setShowRefuse] = useState(false)
+  const [refusReason, setRefusReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [actionDone, setActionDone] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [patientIdentity, setPatientIdentity] = useState<{
+    nom: string
+    prenom: string
+    dossierNumber: string
+    fullName: string
+  }>({
     nom: '',
     prenom: '',
     dossierNumber: '',
+    fullName: '',
   })
 
+  const selected = useMemo(
+    () => devis.find((d) => d.id === selectedId) ?? null,
+    [devis, selectedId],
+  )
+
+  const sortedDevis = useMemo(
+    () => [...devis].sort((a, b) => b.version - a.version || +new Date(b.dateCreation) - +new Date(a.dateCreation)),
+    [devis],
+  )
+
   const load = async () => {
-    setLoading(true); setError(null)
+    setLoading(true)
+    setError(null)
     try {
       const res = await patientApi.getDevis()
       setDevis(res.devis)
@@ -71,18 +91,14 @@ export default function DevisPage() {
         const parts = fullName.split(/\s+/).filter(Boolean)
         const prenom = parts[0] ?? 'Patient'
         const nom = parts.slice(1).join(' ') || prenom
-        setPatientIdentity({ nom, prenom, dossierNumber: me.patient?.dossierNumber ?? '' })
+        setPatientIdentity({
+          nom,
+          prenom,
+          dossierNumber: me.patient?.dossierNumber ?? '',
+          fullName,
+        })
       } catch {
-        // L'export PDF reste possible avec une identité générique.
-      }
-      for (const d of res.devis) {
-        if (d.statut === 'envoye' && !d.vuParPatientAt) {
-          void patientApi.enregistrerConsultationDevis(d.id).then((r) => {
-            setDevis((prev) => prev.map((x) => (x.id === d.id ? r.devis : x)))
-          }).catch(() => {
-            /* silencieux : la consultation reste possible sans notification */
-          })
-        }
+        /* identité générique pour PDF */
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -91,7 +107,37 @@ export default function DevisPage() {
     }
   }
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    void load()
+  }, [])
+
+  const markConsulted = (d: Devis) => {
+    if (d.statut !== 'envoye' || d.vuParPatientAt) return
+    void patientApi
+      .enregistrerConsultationDevis(d.id)
+      .then((r) => {
+        setDevis((prev) => prev.map((x) => (x.id === d.id ? r.devis : x)))
+      })
+      .catch(() => {
+        /* silencieux */
+      })
+  }
+
+  const openDevis = (d: Devis) => {
+    setSelectedId(d.id)
+    setShowRefuse(false)
+    setRefusReason('')
+    setActionDone(false)
+    markConsulted(d)
+  }
+
+  const closeModal = () => {
+    if (submitting) return
+    setSelectedId(null)
+    setShowRefuse(false)
+    setRefusReason('')
+    setActionDone(false)
+  }
 
   const handleRepondre = async (id: string, reponse: 'accepte' | 'refuse') => {
     setSubmitting(true)
@@ -100,13 +146,15 @@ export default function DevisPage() {
         reponse,
         commentaire: reponse === 'refuse' ? refusReason : undefined,
       })
-      setActionDone(id)
-      setRepondingId(null)
+      setActionDone(true)
+      setShowRefuse(false)
       setRefusReason('')
-      // Refresh
       const res = await patientApi.getDevis()
       setDevis(res.devis)
-      if (reponse === 'accepte') navigate('/patient/agenda')
+      if (reponse === 'accepte') {
+        setSelectedId(null)
+        navigate('/patient/agenda')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur lors de la réponse.')
     } finally {
@@ -114,80 +162,56 @@ export default function DevisPage() {
     }
   }
 
-  const handleDownloadPdf = (d: Devis) => {
-    const hasCustom = Boolean(d.customContent?.trim())
-    if (hasCustom) {
-      const raw = d.customContent!.trim()
-      const [topHtml, botRaw] = raw.includes(CONTENT_BREAK) ? raw.split(CONTENT_BREAK) : [raw, '']
-      const lignes = Array.isArray(d.lignes) ? d.lignes : []
-      const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-      const botHtml = replaceDevisAmountPlaceholders(botRaw ?? '', total, DEFAULT_TND_PER_EUR)
-      const operationTitle =
-        lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
-      const sej = parseSejourMeta(d.notesSejour)
-      const nClin = Number.parseInt((sej.cliniqueNuits || '').trim(), 10)
-      const nHotel = Number.parseInt((sej.hotelNuits || '').trim(), 10)
-      const totalNights = (Number.isFinite(nClin) ? Math.max(0, nClin) : 0) + (Number.isFinite(nHotel) ? Math.max(0, nHotel) : 0)
-      const jours = totalNights
-      const sejourLine = totalNights > 0 ? `Séjour ${jours} jour${jours > 1 ? 's' : ''} (${totalNights} nuit${totalNights > 1 ? 's' : ''})` : ''
-      const fmtNum = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(n || 0))
-      const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
-      const sigUrl = `${window.location.origin}/signature.jpg`
-      const tableHtml = lignes.length > 0
-        ? buildDevisOfferBlockHtml({
-            operationTitle,
-            sejourLine,
-            totalFormatted: fmtNum(total),
-          })
-        : ''
-      const html = `<!doctype html>
-<html lang="fr"><head><meta charset="utf-8"/><title>Devis ${patientIdentity.dossierNumber}</title>
-<style>${buildDevisPrintStyles()}</style></head>
-<body><table class="page-table"><thead><tr><td><div class="doc-header">${buildDevisHeaderLogoHtml(logoUrl)}${buildDevisHeaderRightHtml(patientIdentity.dossierNumber)}</div></td></tr></thead>
-<tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="doc-body devis-top">${topHtml}</div><div class="devis-closing">${tableHtml}<div class="doc-body devis-bot">${botHtml}</div>${buildDevisDocumentEndHtml(sigUrl)}</div></td></tr></tbody></table></body></html>`
-      const popup = window.open('', '_blank', 'width=1050,height=960')
-      if (!popup) {
-        setError("Autorisez les popups pour exporter en PDF.")
-        return
-      }
-      popup.document.open()
-      popup.document.write(html)
-      popup.document.close()
-      popup.focus()
-      const waitAndPrint = () => {
-        const imgs = Array.from(popup.document.images)
-        const printNow = () => { layoutDevisForPrint(popup.document); popup.print(); popup.close() }
-        if (imgs.length === 0) { printNow(); return }
-        let loaded = 0
-        const done = () => { if (++loaded >= imgs.length) printNow() }
-        imgs.forEach((img) => {
-          if (img.complete) done()
-          else {
-            img.addEventListener('load', done, { once: true })
-            img.addEventListener('error', done, { once: true })
-          }
-        })
-        setTimeout(() => { if (loaded < imgs.length) printNow() }, 2000)
-      }
-      setTimeout(waitAndPrint, 200)
-      return
-    }
-
+  const handleDownloadPdf = async (d: Devis) => {
+    setExporting(true)
+    setError(null)
     try {
-      downloadDevisPdf({
-        devis: d,
-        patient: { nom: patientIdentity.nom, prenom: patientIdentity.prenom },
-        currency: (d.currency || 'TND') as 'TND' | 'EUR',
-        filename: `devis-${d.id.slice(0, 8)}.pdf`,
-      })
+      const fullName =
+        patientIdentity.fullName ||
+        [patientIdentity.prenom, patientIdentity.nom].filter(Boolean).join(' ')
+      const html = await inlineHtmlImages(
+        buildDevisExportHtml({
+          devis: d,
+          dossierNumber: patientIdentity.dossierNumber || d.numeroDevis || '',
+          patientFullName: fullName,
+        }),
+      )
+      const blob = await patientApi.renderDevisPdf(html)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = formatDevisPdfFileName(
+        patientIdentity.dossierNumber || d.numeroDevis,
+        fullName,
+        d.version,
+      )
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Impossible d'exporter le PDF.")
+    } finally {
+      setExporting(false)
     }
   }
 
-  if (loading) return <div className="p-6"><PageSkeleton /></div>
+  const devisTitle = (d: Devis) =>
+    formatDevisListName(
+      patientIdentity.dossierNumber || d.numeroDevis,
+      patientIdentity.fullName || `${patientIdentity.prenom} ${patientIdentity.nom}`.trim(),
+      d.version,
+    )
 
-  if (error) {
+  if (loading) {
+    return (
+      <div className="p-6">
+        <PageSkeleton />
+      </div>
+    )
+  }
+
+  if (error && devis.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
         <AlertCircle className="h-10 w-10 text-destructive" />
@@ -202,13 +226,13 @@ export default function DevisPage() {
   if (devis.length === 0) {
     return (
       <div className="max-w-2xl mx-auto mt-12 text-center px-4">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted mx-auto mb-4">
-          <FileCheck className="h-8 w-8 text-muted-foreground" />
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#fdeada] border border-[#e4c8bd] mx-auto mb-4">
+          <FileCheck className="h-8 w-8 text-[#81572d]" />
         </div>
         <h3 className="text-lg font-semibold mb-2">Aucun devis disponible</h3>
         <p className="text-muted-foreground text-sm">
-          Votre devis sera disponible une fois que le médecin aura analysé votre dossier
-          et que l'équipe l'aura préparé.
+          Votre devis sera disponible une fois que le médecin aura analysé votre dossier et que
+          l&apos;équipe l&apos;aura préparé.
         </p>
         <Button variant="outline" className="mt-6" onClick={() => navigate('/patient/formulaire')}>
           Voir mon formulaire médical
@@ -218,174 +242,366 @@ export default function DevisPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
+    <div className="max-w-3xl mx-auto space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">Mes Devis</h2>
-        <p className="text-sm text-muted-foreground">{devis.length} devis disponible(s)</p>
+        <h2 className="font-display text-2xl font-semibold text-[#062a30] tracking-tight">Mes Devis</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          {sortedDevis.length} devis — cliquez pour consulter le détail
+        </p>
       </div>
 
-      {devis.map((d) => {
-        const statusInfo = DEVIS_STATUS[d.statut] ?? DEVIS_STATUS.brouillon
+      {error && (
+        <div className="flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-[#e4c8bd]/80 bg-white shadow-sm overflow-hidden divide-y divide-[#e4c8bd]/50">
+        {sortedDevis.map((d) => {
+          const statusInfo = DEVIS_STATUS[d.statut] ?? DEVIS_STATUS.brouillon
+          const StatusIcon = statusInfo.icon
+          const isNew = d.statut === 'envoye' && !d.vuParPatientAt
+
+          return (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => openDevis(d)}
+              className="w-full text-left px-4 sm:px-5 py-4 hover:bg-[#fdeada]/35 transition-colors flex items-start sm:items-center gap-3 sm:gap-4"
+            >
+              <div className="h-10 w-10 rounded-xl bg-[#fdeada] border border-[#e4c8bd] flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                <FileCheck className="h-5 w-5 text-[#81572d]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-[#062a30] break-words">{devisTitle(d)}</p>
+                  {isNew && (
+                    <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-[#81572d] text-white">
+                      Nouveau
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>Version {d.version}</span>
+                  <span>{formatDate(d.dateCreation)}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 sm:hidden">
+                  <p className="text-sm font-bold text-[#81572d] tabular-nums">{formatCurrency(d.total)}</p>
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border',
+                      statusInfo.chip,
+                    )}
+                  >
+                    <StatusIcon className="h-3 w-3" />
+                    {statusInfo.label}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                <div className="text-right hidden sm:block">
+                  <p className="text-sm font-bold text-[#81572d] tabular-nums">{formatCurrency(d.total)}</p>
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 mt-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border',
+                      statusInfo.chip,
+                    )}
+                  >
+                    <StatusIcon className="h-3 w-3" />
+                    {statusInfo.label}
+                  </span>
+                </div>
+                <ChevronRight className="h-4 w-4 text-[#81572d]/70 mt-1 sm:mt-0" />
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Modal détail */}
+      {selected && (() => {
+        const statusInfo = DEVIS_STATUS[selected.statut] ?? DEVIS_STATUS.brouillon
         const StatusIcon = statusInfo.icon
-        const lignes = Array.isArray(d.lignes) ? d.lignes : []
-        const isPending = d.statut === 'envoye'
+        const lignes = Array.isArray(selected.lignes) ? selected.lignes : []
+        const paidLignes = lignes.filter((l) => (l.total ?? 0) > 0)
+        const offeredLignes = lignes.filter((l) => (l.total ?? 0) === 0)
+        const offerLabel = cleanPrestationLabel(
+          paidLignes.find((l) => l.description?.trim())?.description ||
+            lignes.find((l) => l.description?.trim())?.description ||
+            'Offre de soins personnalisée',
+        )
+        const sej = parseSejourMeta(selected.notesSejour)
+        const sejourCards = [
+          sej.cliniqueNom && { label: 'Clinique', value: sej.cliniqueNom },
+          sej.cliniqueNuits && { label: 'Nuits clinique', value: sej.cliniqueNuits },
+          sej.hotelNom && { label: 'Hôtel', value: sej.hotelNom },
+          sej.hotelNuits && { label: 'Nuits hôtel', value: sej.hotelNuits },
+          sej.dureeSejourTotale && { label: 'Séjour', value: `${sej.dureeSejourTotale} jour(s)` },
+          sej.nbAdultes !== '' && { label: 'Adultes', value: sej.nbAdultes },
+          sej.nbEnfants !== '' && { label: 'Enfants', value: sej.nbEnfants },
+        ].filter(Boolean) as Array<{ label: string; value: string }>
 
         return (
-          <Card key={d.id} className="overflow-hidden">
-            {/* ── Header ── */}
-            <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-4 sm:px-6 py-4 border-b">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground mb-1 truncate">
-                    Devis N° {d.id.slice(0, 8).toUpperCase()} — Version {d.version}
-                  </p>
-                  <p className="font-semibold text-foreground">Offre de soins personnalisée</p>
-                </div>
-                <Badge variant={statusInfo.color as 'info' | 'success' | 'secondary' | 'destructive'} className="gap-1 shrink-0">
-                  <StatusIcon className="h-3 w-3" />
-                  {statusInfo.label}
-                </Badge>
-              </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-muted-foreground">
-                <span>Créé le {formatDate(d.dateCreation)}</span>
-                {d.dateValidite && <span>Valable jusqu'au {formatDate(d.dateValidite)}</span>}
-              </div>
-            </div>
-
-            <CardContent className="pt-5 space-y-5 px-4 sm:px-6">
-              {/* ── Offre (aperçu écran lisible) ── */}
-              {lignes.length > 0 ? (
-                <div className="rounded-xl border border-[#e4c8bd]/bg-[#fdeada]/30 p-4 sm:p-5 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-[#81572d]">Notre meilleure offre</p>
-                      <p className="mt-1 text-sm font-semibold text-[#282727] leading-snug break-words">
-                        {lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-2xl font-bold text-[#81572d] tracking-tight">{formatCurrency(d.total)}</p>
-                      <p className="text-[11px] text-muted-foreground">Ferme et définitif</p>
+          <div
+            className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="devis-modal-title"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-[#062a30]/60 backdrop-blur-sm"
+              onClick={closeModal}
+              aria-label="Fermer"
+            />
+            <div className="relative z-10 w-full sm:max-w-2xl max-h-[96dvh] sm:max-h-[92vh] overflow-hidden rounded-t-[1.75rem] sm:rounded-[1.75rem] bg-[#f7f1eb] shadow-[0_28px_80px_rgba(6,42,48,0.35)] flex flex-col">
+              {/* Header compact */}
+              <div className="shrink-0 relative overflow-hidden bg-[#062a30] px-5 sm:px-6 pt-5 pb-6">
+                <div className="absolute -right-8 -top-10 h-36 w-36 rounded-full bg-[#81572d]/25 blur-2xl" />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#e4c8bd]">
+                      Devis personnalisé
+                    </p>
+                    <h3
+                      id="devis-modal-title"
+                      className="mt-2 font-display text-[1.15rem] sm:text-xl font-semibold text-white leading-snug"
+                    >
+                      {devisTitle(selected)}
+                    </h3>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#81572d] text-white">
+                        <StatusIcon className="h-3 w-3" />
+                        {statusInfo.label}
+                      </span>
+                      <span className="text-[11px] text-white/65">
+                        v{selected.version} · {formatDate(selected.dateCreation)}
+                      </span>
                     </div>
                   </div>
-                  <div className="overflow-x-auto -mx-1 px-1">
-                    <table className="w-full text-sm min-w-[280px]">
-                      <tbody className="divide-y divide-[#e4c8bd]/70">
-                        {lignes.map((ligne, i) => (
-                          <tr key={i}>
-                            <td className="py-2.5 pr-2 text-[#282727] break-words">{ligne.description}</td>
-                            <td className="text-right font-semibold whitespace-nowrap text-[#282727]">
-                              {ligne.total === 0
-                                ? <Badge variant="success" className="text-xs">Offert</Badge>
-                                : formatCurrency(ligne.total)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    disabled={submitting}
+                    className="h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center shrink-0 transition-colors"
+                    aria-label="Fermer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Montant flottant */}
+              <div className="shrink-0 px-5 sm:px-6 -mt-4 relative z-10">
+                <div className="rounded-2xl bg-white border border-[#e4c8bd]/80 px-5 py-4 shadow-md flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d]">
+                      Total
+                    </p>
+                    <p className="mt-0.5 text-sm text-[#282727]/75 truncate">{offerLabel}</p>
                   </div>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground italic">Détail des prestations non disponible.</p>
-              )}
-
-              {/* ── Planning médical ── */}
-              {d.planningMedical && (
-                <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm">
-                  <p className="font-semibold text-blue-800 mb-1">Planning médical</p>
-                  <p className="text-blue-700 whitespace-pre-line">{d.planningMedical}</p>
-                </div>
-              )}
-
-              {/* ── Notes séjour ── */}
-              {d.notesSejour && (
-                <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm">
-                  <p className="font-semibold text-amber-800 mb-1">Informations séjour</p>
-                  <p className="text-amber-700 whitespace-pre-line">
-                    {formatDevisSejourNotesForDisplay(d.notesSejour)}
+                  <p className="text-3xl font-bold tabular-nums tracking-tight text-[#062a30] shrink-0">
+                    {formatCurrency(selected.total)}
                   </p>
                 </div>
-              )}
+              </div>
 
-              {/* ── Confirmation action ── */}
-              {actionDone === d.id && (
-                <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  Votre réponse a bien été enregistrée.
-                </div>
-              )}
+              {/* Body */}
+              <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5 space-y-4">
+                {lignes.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic text-center py-6">
+                    Détail des prestations non disponible.
+                  </p>
+                ) : (
+                  <div className="rounded-2xl bg-white border border-[#e4c8bd]/70 overflow-hidden shadow-sm">
+                    {paidLignes.length > 0 && (
+                      <div className="px-4 sm:px-5 py-4">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d] mb-2.5">
+                          Prestations
+                        </p>
+                        <ul className="divide-y divide-[#f0e6df]">
+                          {paidLignes.map((ligne, i) => (
+                            <li
+                              key={`p-${i}`}
+                              className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0"
+                            >
+                              <span className="text-sm text-[#282727]">
+                                {cleanPrestationLabel(ligne.description)}
+                              </span>
+                              <span className="text-sm font-semibold tabular-nums text-[#062a30] shrink-0">
+                                {formatCurrency(ligne.total)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
-              {/* ── Actions ── */}
-              <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3 pt-1">
-                {isPending && (
-                  <>
+                    {offeredLignes.length > 0 && (
+                      <div
+                        className={cn(
+                          'px-4 sm:px-5 py-4 bg-[#fdeada]/40',
+                          paidLignes.length > 0 && 'border-t border-[#e4c8bd]/50',
+                        )}
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          <Gift className="h-3.5 w-3.5 text-[#81572d]" />
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d]">
+                            Inclus
+                          </p>
+                        </div>
+                        <ul className="columns-1 sm:columns-2 gap-x-6 space-y-2">
+                          {offeredLignes.map((ligne, i) => (
+                            <li
+                              key={`o-${i}`}
+                              className="flex items-start gap-2 text-[13px] text-[#282727] break-inside-avoid"
+                            >
+                              <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#81572d] shrink-0" />
+                              <span className="leading-snug">{cleanPrestationLabel(ligne.description)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selected.planningMedical && (
+                  <div className="rounded-2xl bg-white border border-[#e4c8bd]/70 px-4 sm:px-5 py-4 shadow-sm">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d] mb-2">
+                      Planning médical
+                    </p>
+                    <p className="text-sm text-[#282727] whitespace-pre-line leading-relaxed">
+                      {selected.planningMedical}
+                    </p>
+                  </div>
+                )}
+
+                {sejourCards.length > 0 && (
+                  <div className="rounded-2xl bg-white border border-[#e4c8bd]/70 px-4 sm:px-5 py-4 shadow-sm">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d] mb-3">
+                      Séjour
+                    </p>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {sejourCards.map((item) => (
+                        <div
+                          key={item.label}
+                          className="rounded-xl bg-[#f7f1eb] px-3 py-2.5 min-w-0"
+                        >
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#81572d]/80">
+                            {item.label}
+                          </p>
+                          <p className="mt-0.5 text-sm font-medium text-[#062a30] truncate" title={item.value}>
+                            {item.value}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    {sej.noteSejour && (
+                      <p className="mt-3 text-sm text-[#282727]/80 leading-relaxed">{sej.noteSejour}</p>
+                    )}
+                  </div>
+                )}
+
+                {actionDone && (
+                  <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    Votre réponse a bien été enregistrée.
+                  </div>
+                )}
+
+                {showRefuse && (
+                  <div className="rounded-2xl border border-rose-200 bg-white px-4 sm:px-5 py-4 space-y-3 shadow-sm">
+                    <p className="text-sm font-semibold text-[#062a30]">Motif du refus (optionnel)</p>
+                    <Textarea
+                      value={refusReason}
+                      onChange={(e) => setRefusReason(e.target.value)}
+                      placeholder="Ex. : le tarif ne correspond pas à mon budget…"
+                      className="min-h-[90px] bg-[#f7f1eb] border-[#e4c8bd]"
+                    />
+                    <div className="flex items-center gap-2 justify-end">
+                      <Button variant="ghost" size="sm" onClick={() => setShowRefuse(false)}>
+                        Annuler
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={submitting}
+                        onClick={() => void handleRepondre(selected.id, 'refuse')}
+                      >
+                        Confirmer le refus
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div
+                className="shrink-0 px-5 sm:px-6 pt-4 bg-white border-t border-[#e4c8bd]/60 space-y-2.5"
+                style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+              >
+                {selected.statut === 'envoye' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-2">
                     <Button
-                      variant="brand"
-                      className="gap-2 w-full sm:w-auto min-h-11"
+                      className="gap-2 min-h-12 w-full font-semibold rounded-xl bg-[#81572d] hover:bg-[#6b4825] text-white"
                       disabled={submitting}
-                      onClick={() => handleRepondre(d.id, 'accepte')}
+                      onClick={() => void handleRepondre(selected.id, 'accepte')}
                     >
                       <CheckCircle2 className="h-4 w-4" />
-                      Accepter ce devis
+                      Accepter
                     </Button>
                     <Button
                       variant="outline"
-                      className="gap-2 text-destructive border-destructive/40 hover:bg-destructive/5 w-full sm:w-auto min-h-11"
+                      className="gap-2 min-h-12 w-full rounded-xl border-[#e4c8bd] text-[#282727] hover:bg-[#f7f1eb]"
                       disabled={submitting}
-                      onClick={() => setRepondingId((p) => p === d.id ? null : d.id)}
+                      onClick={() => setShowRefuse((v) => !v)}
                     >
-                      <XCircle className="h-4 w-4" />
                       Refuser
                     </Button>
-                  </>
+                  </div>
                 )}
-                <Button
-                  variant="outline"
-                  className="gap-2 w-full sm:w-auto min-h-11"
-                  onClick={() => navigate('/patient/chat')}
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  Contacter l'équipe
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="gap-2 text-muted-foreground w-full sm:w-auto min-h-11"
-                  onClick={() => handleDownloadPdf(d)}
-                >
-                  <Download className="h-4 w-4" />
-                  Exporter PDF
-                </Button>
-              </div>
-
-              {/* ── Zone refus ── */}
-              {repondingId === d.id && (
-                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-                  <p className="text-sm font-medium">Motif du refus (optionnel)</p>
-                  <Textarea
-                    value={refusReason}
-                    onChange={(e) => setRefusReason(e.target.value)}
-                    placeholder="Ex: le tarif ne correspond pas à mon budget, je souhaite modifier certaines prestations..."
-                    className="min-h-[90px]"
-                  />
-                  <div className="flex items-center gap-2 justify-end">
-                    <Button variant="ghost" size="sm" onClick={() => setRepondingId(null)}>
-                      Annuler
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 h-10 rounded-xl border-[#e4c8bd] text-[#81572d] hover:bg-[#fdeada]/50"
+                      onClick={() => navigate('/patient/chat')}
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      Contacter
                     </Button>
                     <Button
-                      variant="destructive"
+                      variant="outline"
                       size="sm"
-                      disabled={submitting}
-                      onClick={() => handleRepondre(d.id, 'refuse')}
+                      className="gap-1.5 h-10 rounded-xl border-[#81572d]/40 bg-[#fdeada]/40 text-[#062a30] hover:bg-[#fdeada] font-semibold"
+                      disabled={exporting || submitting}
+                      onClick={() => void handleDownloadPdf(selected)}
                     >
-                      Confirmer le refus
+                      {exporting ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                      {exporting ? 'Téléchargement…' : 'Télécharger le PDF'}
                     </Button>
                   </div>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-[#929292] hover:text-[#062a30] px-2 py-1"
+                    onClick={closeModal}
+                    disabled={submitting}
+                  >
+                    Fermer
+                  </button>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </div>
         )
-      })}
+      })()}
     </div>
   )
 }

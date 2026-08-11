@@ -21,9 +21,9 @@ const BOTTOM_NAV_ITEMS: Record<UserRole, BottomNavItem[]> = {
   patient: [
     { label: 'Dossier', href: '/patient/dossier', icon: FileText },
     { label: 'Form.', href: '/patient/formulaire', icon: ClipboardList },
-    { label: 'Chat', href: '/patient/chat', icon: MessageSquare, badgeKey: 'chat' },
+    { label: 'Agenda', href: '/patient/agenda', icon: Calendar },
     { label: 'Devis', href: '/patient/devis', icon: FileCheck },
-    { label: 'Post-op', href: '/patient/post-op', icon: Heart },
+    { label: 'Chat', href: '/patient/chat', icon: MessageSquare, badgeKey: 'chat' },
   ],
   medecin: [
     { label: 'Accueil', href: '/medecin/dashboard', icon: LayoutDashboard },

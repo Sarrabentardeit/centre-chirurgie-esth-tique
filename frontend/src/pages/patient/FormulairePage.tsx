@@ -881,9 +881,11 @@ export default function FormulairePage() {
 
     return (
       <div
-        className="min-h-screen px-4 py-10 sm:py-14"
+        className="min-h-[100dvh] px-4 py-10 sm:py-14"
         style={{
           background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 40%, #1a4a3a 100%)',
+          paddingTop: 'max(2.5rem, env(safe-area-inset-top))',
+          paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))',
         }}
       >
         <div className="w-full max-w-3xl mx-auto animate-fade-in">
@@ -982,16 +984,22 @@ export default function FormulairePage() {
   return (
 
     <div
-      className="min-h-screen flex flex-col"
+      className="min-h-[100dvh] flex flex-col"
       style={{
         backgroundImage: "linear-gradient(rgba(253,234,218,0.25), rgba(228,200,189,0.15)), url('/brand-marble.jpg')",
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'scroll',
+        paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
       {/* â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <header style={{ background: '#062a30' }}>
+      <header
+        style={{
+          background: '#062a30',
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
         <div className="max-w-4xl mx-auto px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="h-10 sm:h-14 w-[140px] sm:w-[205px] overflow-hidden flex items-center shrink-0">
@@ -1020,7 +1028,7 @@ export default function FormulairePage() {
             <button
               type="button"
               onClick={() => navigate('/acces-patient')}
-              className="w-full sm:w-auto text-xs tracking-wide transition-all rounded-full px-4 py-1.5 whitespace-nowrap"
+              className="w-full sm:w-auto min-h-11 text-xs tracking-wide transition-all rounded-full px-4 py-2.5 whitespace-nowrap"
               style={{
                 color: 'rgba(253,234,218,0.75)',
                 border: '1px solid rgba(228,200,189,0.2)',
@@ -1043,7 +1051,7 @@ export default function FormulairePage() {
                 logout()
                 navigate('/formulaire')
               }}
-              className="w-full sm:w-auto text-xs tracking-wide transition-all rounded-full px-4 py-1.5 whitespace-nowrap"
+              className="w-full sm:w-auto min-h-11 text-xs tracking-wide transition-all rounded-full px-4 py-2.5 whitespace-nowrap"
               style={{
                 color: 'rgba(253,234,218,0.9)',
                 border: '1px solid rgba(228,200,189,0.4)',
@@ -2119,7 +2127,11 @@ export default function FormulairePage() {
       {/* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <footer
         className="py-3 text-center text-xs tracking-widest uppercase"
-        style={{ background: '#062a30', color: 'rgba(253,234,218,0.35)' }}
+        style={{
+          background: '#062a30',
+          color: 'rgba(253,234,218,0.35)',
+          paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+        }}
       >
         © 2026 Dr. Mehdi Chennoufi — Chirurgien Esthétique
       </footer>

@@ -5,8 +5,15 @@ import { fileURLToPath } from 'url'
 import multer from 'multer'
 import { validate } from '../../middleware/validate.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
-import { formulaireSubmitSchema, updateProfilSchema, repondreDevisSchema, repondreRendezVousSchema } from './patient.schema.js'
+import {
+  formulaireSubmitSchema,
+  updateProfilSchema,
+  repondreDevisSchema,
+  repondreRendezVousSchema,
+  renderDevisPdfSchema,
+} from './patient.schema.js'
 import * as patientService from './patient.service.js'
+import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 
 const storagePostOp = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -117,6 +124,22 @@ patientRouter.get(
       next(e)
     }
   }
+)
+
+/** Même moteur Chromium que l’export gestionnaire / envoi chat. */
+patientRouter.post(
+  '/devis/render-pdf',
+  validate(renderDevisPdfSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const pdf = await renderHtmlToPdf(req.body.html as string)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', 'attachment; filename="devis.pdf"')
+      res.send(pdf)
+    } catch (e) {
+      next(e)
+    }
+  },
 )
 
 // POST /api/patient/devis/:id/consultation — première ouverture / lecture du devis (notification gestionnaire)
@@ -253,6 +276,46 @@ patientRouter.post(
       const note = typeof req.body.note === 'string' ? req.body.note : undefined
       const result = await patientService.addMyPostOpPhoto(req.auth!.sub, { url, note })
       res.json({ ok: true, url, ...result })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+// GET /api/patient/notifications — cloche patient (devis, messages cabinet…)
+patientRouter.get(
+  '/notifications',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await patientService.listNotifications(req.auth!.sub)
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+patientRouter.patch(
+  '/notifications/:id/lu',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await patientService.markNotificationRead(
+        req.auth!.sub,
+        paramToString(req.params.id),
+      )
+      res.json(result)
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+patientRouter.post(
+  '/notifications/lu-toutes',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await patientService.markAllNotificationsRead(req.auth!.sub)
+      res.json(result)
     } catch (e) {
       next(e)
     }

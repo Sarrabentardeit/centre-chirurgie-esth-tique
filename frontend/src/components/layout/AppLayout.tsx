@@ -9,9 +9,16 @@ import { useChatUnreadStore } from '@/store/chatUnreadStore'
 import { chatApi, type ChatMessage } from '@/lib/api'
 import { playMessageSound, unlockNotificationAudio } from '@/lib/notificationSounds'
 import { Button } from '@/components/ui/button'
-import { MessageCircle, MessageSquare, Send, X } from 'lucide-react'
+import { Download, FileText, MessageCircle, MessageSquare, Send, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
+import {
+  downloadAttachment,
+  isImageUrl,
+  isPdfUrl,
+  resolveAttachmentUrl,
+} from '@/lib/chatAttachments'
 
 const ROUTE_TITLES: Record<string, string> = {
   '/patient/dossier': 'Mon Dossier',
@@ -20,6 +27,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/patient/agenda': 'Mon Agenda',
   '/patient/post-op': 'Suivi Post-Opératoire',
   '/patient/chat': 'Messages',
+  '/patient/notifications': 'Notifications',
   '/medecin/dashboard': 'Tableau de Bord',
   '/medecin/patients': 'Mes Patients',
   '/medecin/rapports': 'Rapports Médicaux',
@@ -149,7 +157,7 @@ export function AppLayout() {
     if (!user || user.role !== 'patient') return
     try {
       const res = await chatApi.getMessages()
-      setWidgetMessages(res.messages.slice(-8))
+      setWidgetMessages(res.messages.slice(-16))
     } catch {
       /* silent */
     }
@@ -201,8 +209,8 @@ export function AppLayout() {
       {!isChatRoute && user?.role === 'patient' && (
         <>
           {chatOpen && (
-            <div className="hidden lg:block fixed bottom-6 right-6 z-40 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-white shadow-xl overflow-hidden">
-              <div className="flex items-center justify-between bg-brand-600 px-4 py-3 text-white">
+            <div className="hidden lg:flex fixed bottom-6 right-6 z-40 w-[440px] max-w-[calc(100vw-2rem)] h-[min(640px,calc(100dvh-5rem))] flex-col rounded-2xl border border-border bg-white shadow-xl overflow-hidden">
+              <div className="flex items-center justify-between bg-brand-600 px-4 py-3.5 text-white shrink-0">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="h-4 w-4" />
                   <p className="font-semibold text-sm">Messages cabinet</p>
@@ -216,25 +224,98 @@ export function AppLayout() {
                 </button>
               </div>
 
-              <ScrollArea className="h-64 p-3">
-                <div className="space-y-2">
+              <ScrollArea className="flex-1 min-h-0 p-3">
+                <div className="space-y-2.5 pr-2">
                   {widgetMessages.length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-6">
+                    <p className="text-xs text-muted-foreground text-center py-8">
                       Écrivez pour contacter l’équipe.
                     </p>
                   ) : (
                     widgetMessages.map((m) => {
                       const own = m.expediteurId === user?.id
+                      const hasFile = Boolean(m.pieceJointeUrl)
+                      const showText =
+                        Boolean(m.contenu?.trim()) &&
+                        !(m.contenu.startsWith('Pièce jointe') && hasFile)
                       return (
                         <div
                           key={m.id}
-                          className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                          className={cn(
+                            'max-w-[92%] rounded-xl px-3 py-2.5 text-sm shadow-sm',
                             own
                               ? 'ml-auto bg-brand-600 text-white'
-                              : 'mr-auto bg-muted text-foreground'
-                          }`}
+                              : 'mr-auto bg-muted text-foreground',
+                          )}
                         >
-                          {m.contenu}
+                          {hasFile && m.pieceJointeUrl && (
+                            <div className={cn(showText && 'mb-2')}>
+                              {isImageUrl(m.pieceJointeUrl) ? (
+                                <a
+                                  href={resolveAttachmentUrl(m.pieceJointeUrl)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block"
+                                >
+                                  <img
+                                    src={resolveAttachmentUrl(m.pieceJointeUrl)}
+                                    alt={m.pieceJointeNom ?? 'Image'}
+                                    className="max-h-40 rounded-lg object-cover"
+                                  />
+                                </a>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void downloadAttachment(
+                                      m.pieceJointeUrl!,
+                                      m.pieceJointeNom ?? 'document.pdf',
+                                    )
+                                  }
+                                  className={cn(
+                                    'w-full text-left inline-flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-medium transition-colors cursor-pointer',
+                                    own
+                                      ? 'bg-white/15 hover:bg-white/25'
+                                      : isPdfUrl(m.pieceJointeUrl, m.pieceJointeNom)
+                                        ? 'bg-[#fdeada] hover:bg-[#f8e4d0] border border-[#e4c8bd] text-[#062a30]'
+                                        : 'bg-white hover:bg-slate-50 border border-slate-200',
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      'h-8 w-8 rounded-lg flex items-center justify-center shrink-0',
+                                      own ? 'bg-white/20' : 'bg-white border border-[#e4c8bd]',
+                                    )}
+                                  >
+                                    <FileText
+                                      className={cn('h-4 w-4', own ? 'text-white' : 'text-[#81572d]')}
+                                    />
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block font-semibold truncate">
+                                      {m.pieceJointeNom ?? 'Document PDF'}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        'block text-[10px] mt-0.5',
+                                        own ? 'text-white/75' : 'text-[#81572d]',
+                                      )}
+                                    >
+                                      Cliquer pour télécharger
+                                    </span>
+                                  </span>
+                                  <Download
+                                    className={cn(
+                                      'h-4 w-4 shrink-0',
+                                      own ? 'text-white/90' : 'text-[#81572d]',
+                                    )}
+                                  />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {showText && (
+                            <p className="whitespace-pre-wrap leading-relaxed">{m.contenu}</p>
+                          )}
                         </div>
                       )
                     })
@@ -242,7 +323,7 @@ export function AppLayout() {
                 </div>
               </ScrollArea>
 
-              <div className="p-3 border-t border-border flex items-center gap-2">
+              <div className="p-3 border-t border-border flex items-center gap-2 shrink-0">
                 <Input
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
@@ -251,10 +332,12 @@ export function AppLayout() {
                   }}
                   placeholder="Écrivez votre message…"
                   disabled={sending}
+                  className="h-11"
                 />
                 <Button
-                  size="sm"
+                  size="icon"
                   variant="brand"
+                  className="h-11 w-11 shrink-0"
                   onClick={() => void handleWidgetSend()}
                   disabled={sending || !chatInput.trim()}
                 >
@@ -263,7 +346,7 @@ export function AppLayout() {
               </div>
               <button
                 type="button"
-                className="w-full text-center text-xs text-brand-700 py-2 border-t border-border hover:bg-muted"
+                className="w-full text-center text-xs text-brand-700 py-2.5 border-t border-border hover:bg-muted shrink-0"
                 onClick={() => {
                   setChatOpen(false)
                   navigate('/patient/chat')
@@ -274,33 +357,21 @@ export function AppLayout() {
             </div>
           )}
 
-          {/* Desktop : widget + FAB */}
-          <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
-            <Button
-              variant="brand"
-              size="icon"
-              className="relative h-14 w-14 rounded-full shadow-lg"
-              onClick={() => setChatOpen((v) => !v)}
-              aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
-            >
-              <MessageCircle className="h-6 w-6" />
-              <ChatUnreadBadge count={chatUnread} />
-            </Button>
-          </div>
-
-          {/* Mobile : bouton rond au-dessus de la BottomNav → page Chat */}
-          <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-3 z-[60] lg:hidden">
-            <Button
-              variant="brand"
-              size="icon"
-              className="relative h-12 w-12 rounded-full shadow-lg"
-              onClick={() => navigate('/patient/chat')}
-              aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
-            >
-              <MessageCircle className="h-6 w-6" />
-              <ChatUnreadBadge count={chatUnread} />
-            </Button>
-          </div>
+          {/* Desktop : FAB widget (masqué quand le popup est ouvert). Mobile = onglet Chat BottomNav. */}
+          {!chatOpen && (
+            <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
+              <Button
+                variant="brand"
+                size="icon"
+                className="relative h-14 w-14 rounded-full shadow-lg"
+                onClick={() => setChatOpen(true)}
+                aria-label={chatUnread > 0 ? `Ouvrir le chat, ${chatUnread} non lu(s)` : 'Ouvrir le chat'}
+              >
+                <MessageCircle className="h-6 w-6" />
+                <ChatUnreadBadge count={chatUnread} />
+              </Button>
+            </div>
+          )}
         </>
       )}
 

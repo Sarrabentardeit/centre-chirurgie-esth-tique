@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
-import { sendNotificationEmail } from '../../lib/mailer.js'
+import { notifyStaff } from '../../lib/staffNotifications.js'
 import type { FormulaireSubmitInput, UpdateProfilInput, RepondreDevisInput, RepondreRendezVousInput } from './patient.schema.js'
 
 const RDV_PATIENT_ACCEPTED_TAG = 'PATIENT_DECISION:ACCEPTE'
@@ -46,44 +46,24 @@ function extractPatientDecision(notes: string | null | undefined): {
   }
 }
 
-async function notifyGestionnaires(input: {
+function notifyGestionnaires(input: {
   titre: string
   message: string
   type?: 'info' | 'warning' | 'success' | 'error'
   lienAction?: string | null
 }) {
-  const gestionnaires = await prisma.user.findMany({
-    where: { role: 'gestionnaire' },
-    select: { id: true },
-  })
+  // In-app seulement — email gestionnaire = rapport généré uniquement
+  return notifyStaff({ role: 'gestionnaire', email: false, ...input })
+}
 
-  const notifPromises = gestionnaires.map(async (gestionnaire) => {
-    const exists = await prisma.notification.findFirst({
-      where: {
-        userId: gestionnaire.id,
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-      select: { id: true },
-    })
-    if (exists) return
-
-    await prisma.notification.create({
-      data: {
-        userId: gestionnaire.id,
-        type: input.type ?? 'info',
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-    })
-  })
-
-  await Promise.all([
-    ...notifPromises,
-    sendNotificationEmail(input),
-  ])
+/** Formulaire patient → email + notif in-app au médecin uniquement. */
+function notifyMedecinsFormulaire(input: {
+  titre: string
+  message: string
+  type?: 'info' | 'warning' | 'success' | 'error'
+  lienAction?: string | null
+}) {
+  return notifyStaff({ role: 'medecin', ...input })
 }
 
 async function syncPostOpReminders(patientId: string, userId: string, dateIntervention: Date) {
@@ -164,11 +144,11 @@ export async function upsertFormulaire(userId: string, input: FormulaireSubmitIn
       select: { dossierNumber: true, user: { select: { fullName: true } } },
     })
     if (patientProfile) {
-      await notifyGestionnaires({
+      await notifyMedecinsFormulaire({
         type: 'info',
         titre: 'Nouveau formulaire patient soumis',
         message: `${patientProfile.user.fullName} (${patientProfile.dossierNumber}) a soumis son formulaire médical.`,
-        lienAction: '/gestionnaire/patients',
+        lienAction: '/medecin/patients',
       })
     }
   } else if (patient.status === 'nouveau') {
@@ -481,4 +461,46 @@ export async function getMyDossier(userId: string) {
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
 
   return { patient }
+}
+
+// ─── Notifications in-app ─────────────────────────────────────────────────────
+
+export async function listNotifications(userId: string) {
+  const rows = await prisma.notification.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  })
+  return {
+    notifications: rows.map((n) => ({
+      id: n.id,
+      userId: n.userId,
+      titre: n.titre,
+      message: n.message,
+      type: n.type,
+      lu: n.lu,
+      dateCreation: n.createdAt.toISOString(),
+      lienAction: n.lienAction,
+    })),
+  }
+}
+
+export async function markNotificationRead(userId: string, notificationId: string) {
+  const n = await prisma.notification.findFirst({
+    where: { id: notificationId, userId },
+  })
+  if (!n) throw new AppError(404, 'NOTIF_NOT_FOUND', 'Notification introuvable.')
+  await prisma.notification.update({
+    where: { id: notificationId },
+    data: { lu: true },
+  })
+  return { ok: true as const }
+}
+
+export async function markAllNotificationsRead(userId: string) {
+  await prisma.notification.updateMany({
+    where: { userId, lu: false },
+    data: { lu: true },
+  })
+  return { ok: true as const }
 }

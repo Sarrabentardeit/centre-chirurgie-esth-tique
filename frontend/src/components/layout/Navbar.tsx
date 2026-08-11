@@ -7,64 +7,77 @@ import { formatRelative } from '@/lib/utils'
 import { playNotificationSound, unlockNotificationAudio } from '@/lib/notificationSounds'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { gestionnaireApi, type GestionnaireNotificationRow } from '@/lib/api'
+import {
+  gestionnaireApi,
+  patientApi,
+  type GestionnaireNotificationRow,
+} from '@/lib/api'
 
 interface NavbarProps {
   onMenuClick: () => void
   title?: string
 }
 
+type ApiNotif = GestionnaireNotificationRow
+
 export function Navbar({ onMenuClick, title }: NavbarProps) {
   const { user } = useAuthStore()
   const navigate = useNavigate()
   const [openNotif, setOpenNotif] = useState(false)
   const notifRef = useRef<HTMLDivElement | null>(null)
-  const [gestionnaireNotifs, setGestionnaireNotifs] = useState<GestionnaireNotificationRow[]>([])
+  const [apiNotifs, setApiNotifs] = useState<ApiNotif[]>([])
   const prevNotifUnreadRef = useRef<number | null>(null)
 
   const notifications = useDemoStore((s) => s.notifications)
   const markNotificationRead = useDemoStore((s) => s.markNotificationRead)
   const markAllNotificationsReadForUser = useDemoStore((s) => s.markAllNotificationsReadForUser)
 
-  const loadGestionnaireNotifications = useCallback(async () => {
-    if (user?.role !== 'gestionnaire') return
+  const usesApiNotifs = user?.role === 'gestionnaire' || user?.role === 'patient'
+
+  const loadApiNotifications = useCallback(async () => {
+    if (!user) return
     try {
-      const res = await gestionnaireApi.getNotifications()
-      setGestionnaireNotifs(res.notifications)
+      if (user.role === 'gestionnaire') {
+        const res = await gestionnaireApi.getNotifications()
+        setApiNotifs(res.notifications)
+      } else if (user.role === 'patient') {
+        const res = await patientApi.getNotifications()
+        setApiNotifs(res.notifications)
+      }
     } catch {
       // Silent fallback: keep current UI state.
     }
-  }, [user?.role])
+  }, [user])
 
   useEffect(() => {
-    if (user?.role !== 'gestionnaire') {
-      setGestionnaireNotifs([])
+    if (!usesApiNotifs) {
+      setApiNotifs([])
       return
     }
-    void loadGestionnaireNotifications()
+    void loadApiNotifications()
     const id = window.setInterval(() => {
-      void loadGestionnaireNotifications()
+      void loadApiNotifications()
     }, 15000)
     return () => window.clearInterval(id)
-  }, [user?.role, loadGestionnaireNotifications])
+  }, [usesApiNotifs, loadApiNotifications])
 
   const unreadCount = useMemo(() => {
     if (!user) return 0
-    if (user.role === 'gestionnaire') {
-      return gestionnaireNotifs.filter((n) => !n.lu).length
+    if (usesApiNotifs) {
+      return apiNotifs.filter((n) => !n.lu).length
     }
     return notifications.filter((n) => n.userId === user.id && !n.lu).length
-  }, [gestionnaireNotifs, notifications, user])
+  }, [apiNotifs, notifications, user, usesApiNotifs])
 
   /** Compte hors messages chat (le son message est déjà géré à part). */
   const nonChatUnreadCount = useMemo(() => {
     if (!user) return 0
     const isChatNotif = (titre: string) => /message chat|nouveau message/i.test(titre)
-    if (user.role === 'gestionnaire') {
-      return gestionnaireNotifs.filter((n) => !n.lu && !isChatNotif(n.titre)).length
+    if (usesApiNotifs) {
+      return apiNotifs.filter((n) => !n.lu && !isChatNotif(n.titre)).length
     }
     return notifications.filter((n) => n.userId === user.id && !n.lu && !isChatNotif(n.titre)).length
-  }, [gestionnaireNotifs, notifications, user])
+  }, [apiNotifs, notifications, user, usesApiNotifs])
 
   // Son quand une nouvelle notification (hors chat) arrive
   useEffect(() => {
@@ -82,8 +95,8 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
 
   const userNotifications = useMemo(() => {
     if (!user) return []
-    if (user.role === 'gestionnaire') {
-      return gestionnaireNotifs
+    if (usesApiNotifs) {
+      return apiNotifs
         .slice()
         .sort((a, b) => new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime())
         .slice(0, 6)
@@ -93,7 +106,7 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
       .slice()
       .sort((a, b) => new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime())
       .slice(0, 6)
-  }, [gestionnaireNotifs, notifications, user])
+  }, [apiNotifs, notifications, user, usesApiNotifs])
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
@@ -107,8 +120,55 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
   const openNotificationsPage = () => {
     if (!user) return
     if (user.role === 'gestionnaire') navigate('/gestionnaire/notifications')
-    if (user.role === 'patient') navigate('/patient/dossier')
+    if (user.role === 'patient') navigate('/patient/notifications')
     if (user.role === 'medecin') navigate('/medecin/dashboard')
+    setOpenNotif(false)
+  }
+
+  const markAllRead = async () => {
+    if (!user) return
+    if (user.role === 'gestionnaire') {
+      try {
+        await gestionnaireApi.markAllNotificationsRead()
+        setApiNotifs((prev) => prev.map((n) => ({ ...n, lu: true })))
+      } catch {
+        // Silent fallback.
+      }
+      return
+    }
+    if (user.role === 'patient') {
+      try {
+        await patientApi.markAllNotificationsRead()
+        setApiNotifs((prev) => prev.map((n) => ({ ...n, lu: true })))
+      } catch {
+        // Silent fallback.
+      }
+      return
+    }
+    markAllNotificationsReadForUser(user.id)
+  }
+
+  const onNotifClick = async (n: ApiNotif | (typeof notifications)[number]) => {
+    if (!n.lu && user) {
+      if (user.role === 'gestionnaire') {
+        try {
+          await gestionnaireApi.markNotificationRead(n.id)
+          setApiNotifs((prev) => prev.map((row) => (row.id === n.id ? { ...row, lu: true } : row)))
+        } catch {
+          // Silent fallback.
+        }
+      } else if (user.role === 'patient') {
+        try {
+          await patientApi.markNotificationRead(n.id)
+          setApiNotifs((prev) => prev.map((row) => (row.id === n.id ? { ...row, lu: true } : row)))
+        } catch {
+          // Silent fallback.
+        }
+      } else {
+        markNotificationRead(n.id)
+      }
+    }
+    if (n.lienAction) navigate(n.lienAction)
     setOpenNotif(false)
   }
 
@@ -120,12 +180,15 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
     .slice(0, 2) ?? 'U'
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 px-4 lg:px-6">
+    <header
+      className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 px-4 lg:px-6"
+      style={{ paddingTop: 'env(safe-area-inset-top)', height: 'calc(4rem + env(safe-area-inset-top))' }}
+    >
       {/* Menu button (mobile) */}
       <Button
         variant="ghost"
         size="icon"
-        className="lg:hidden"
+        className="lg:hidden min-h-11 min-w-11"
         onClick={onMenuClick}
       >
         <Menu className="h-5 w-5" />
@@ -175,18 +238,7 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
                 {user && unreadCount > 0 && (
                   <button
                     className="text-xs text-brand-600 hover:underline"
-                    onClick={async () => {
-                      if (user.role === 'gestionnaire') {
-                        try {
-                          await gestionnaireApi.markAllNotificationsRead()
-                          setGestionnaireNotifs((prev) => prev.map((n) => ({ ...n, lu: true })))
-                        } catch {
-                          // Silent fallback.
-                        }
-                        return
-                      }
-                      markAllNotificationsReadForUser(user.id)
-                    }}
+                    onClick={() => void markAllRead()}
                   >
                     Tout marquer lu
                   </button>
@@ -202,22 +254,7 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
                       <button
                         key={n.id}
                         className="w-full rounded-lg border border-border p-2.5 text-left hover:bg-muted/50 transition-colors"
-                        onClick={async () => {
-                          if (!n.lu && user?.role === 'gestionnaire') {
-                            try {
-                              await gestionnaireApi.markNotificationRead(n.id)
-                              setGestionnaireNotifs((prev) =>
-                                prev.map((row) => (row.id === n.id ? { ...row, lu: true } : row))
-                              )
-                            } catch {
-                              // Silent fallback.
-                            }
-                          } else if (!n.lu) {
-                            markNotificationRead(n.id)
-                          }
-                          if (n.lienAction) navigate(n.lienAction)
-                          setOpenNotif(false)
-                        }}
+                        onClick={() => void onNotifClick(n)}
                       >
                         <div className="flex items-start gap-2">
                           <div className={`mt-1 h-2 w-2 rounded-full ${n.lu ? 'bg-slate-300' : 'bg-brand-600'}`} />

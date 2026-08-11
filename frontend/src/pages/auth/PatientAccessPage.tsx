@@ -40,7 +40,13 @@ export default function PatientAccessPage() {
   }
 
   return (
-    <div className="min-h-screen flex">
+    <div
+      className="min-h-[100dvh] flex"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
       <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 relative overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center"
@@ -87,7 +93,7 @@ export default function PatientAccessPage() {
       </div>
 
       <div
-        className="relative flex flex-1 items-center justify-center p-6 lg:p-12 xl:p-16"
+        className="relative flex flex-1 items-center justify-center px-5 py-8 sm:p-6 lg:p-12 xl:p-16"
         style={{
           backgroundColor: '#f5ede3',
           backgroundImage:

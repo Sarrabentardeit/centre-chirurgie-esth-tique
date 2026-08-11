@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft, Check, CheckCheck, FileText, Filter, Image as ImageIcon,
+  ArrowLeft, Check, CheckCheck, Download, FileText, Filter, Image as ImageIcon,
   MessageSquare, Paperclip, Search, Send, Stethoscope, User, Users, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,12 @@ import {
   type ChatPatientOption,
 } from '@/lib/api'
 import { formatDateTime, cn } from '@/lib/utils'
+import {
+  downloadAttachment,
+  isImageUrl,
+  isPdfUrl,
+  resolveAttachmentUrl,
+} from '@/lib/chatAttachments'
 import { playMessageSound } from '@/lib/notificationSounds'
 import { toast } from '@/store/toastStore'
 
@@ -72,10 +78,6 @@ function dayLabel(iso: string) {
   if (dayKey(iso) === dayKey(today.toISOString())) return 'Aujourd’hui'
   if (dayKey(iso) === dayKey(yesterday.toISOString())) return 'Hier'
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
-}
-
-function isImageUrl(url: string) {
-  return /\.(jpe?g|png|webp)(\?|$)/i.test(url)
 }
 
 type ThreadItem =
@@ -694,26 +696,54 @@ export default function ChatPage() {
                       {m.pieceJointeUrl && (
                         <div className="mb-2">
                           {isImageUrl(m.pieceJointeUrl) ? (
-                            <a href={m.pieceJointeUrl} target="_blank" rel="noreferrer" className="block">
+                            <a
+                              href={resolveAttachmentUrl(m.pieceJointeUrl)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block"
+                            >
                               <img
-                                src={m.pieceJointeUrl}
+                                src={resolveAttachmentUrl(m.pieceJointeUrl)}
                                 alt={m.pieceJointeNom ?? 'Image'}
                                 className="max-h-56 rounded-xl object-cover border border-white/20"
                               />
                             </a>
                           ) : (
-                            <a
-                              href={m.pieceJointeUrl}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void downloadAttachment(
+                                  m.pieceJointeUrl!,
+                                  m.pieceJointeNom ?? 'document.pdf',
+                                )
+                              }
                               className={cn(
-                                'inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium',
-                                own ? 'bg-white/15 hover:bg-white/25' : 'bg-slate-100 hover:bg-slate-200',
+                                'w-full text-left inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer',
+                                own
+                                  ? 'bg-white/15 hover:bg-white/25'
+                                  : isPdfUrl(m.pieceJointeUrl, m.pieceJointeNom)
+                                    ? 'bg-[#fdeada] hover:bg-[#f8e4d0] border border-[#e4c8bd] text-[#062a30]'
+                                    : 'bg-slate-100 hover:bg-slate-200',
                               )}
                             >
-                              <FileText className="h-4 w-4" />
-                              {m.pieceJointeNom ?? 'Document PDF'}
-                            </a>
+                              <span
+                                className={cn(
+                                  'h-9 w-9 rounded-lg flex items-center justify-center shrink-0',
+                                  own ? 'bg-white/20' : 'bg-white border border-[#e4c8bd]',
+                                )}
+                              >
+                                <FileText className={cn('h-4 w-4', own ? 'text-white' : 'text-[#81572d]')} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block font-semibold truncate">
+                                  {m.pieceJointeNom ?? 'Document PDF'}
+                                </span>
+                                <span className={cn('block text-[10px] mt-0.5', own ? 'text-white/75' : 'text-[#81572d]')}>
+                                  Cliquer pour télécharger
+                                </span>
+                              </span>
+                              <Download className={cn('h-4 w-4 shrink-0', own ? 'text-white/90' : 'text-[#81572d]')} />
+                            </button>
                           )}
                         </div>
                       )}

@@ -1,8 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Stethoscope, CheckCircle2, User, Phone, Mail,
-  MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList, Receipt,
-  ChevronDown, ChevronUp,
+  MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -103,126 +102,14 @@ function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-// ─── DevisReadCard ────────────────────────────────────────────────────────────
-
-const DEVIS_STATUT_BADGE: Record<string, string> = {
-  brouillon: 'bg-slate-100 text-slate-600',
-  envoye:    'bg-blue-100 text-blue-700',
-  accepte:   'bg-emerald-100 text-emerald-700',
-  refuse:    'bg-red-100 text-red-700',
-}
-const DEVIS_STATUT_LABEL: Record<string, string> = {
-  brouillon: 'Brouillon',
-  envoye:    'Envoyé',
-  accepte:   'Accepté',
-  refuse:    'Refusé',
-}
-
-function DevisReadCard({ devis }: { devis: import('@/lib/api').Devis }) {
-  const [open, setOpen] = useState(devis.statut === 'envoye' || devis.statut === 'accepte')
-
-  return (
-    <Card className={`overflow-hidden ${devis.statut === 'accepte' ? 'border-emerald-200 shadow-sm' : ''}`}>
-      <CardHeader
-        className="cursor-pointer select-none py-3 px-5"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <Receipt className={`h-4 w-4 shrink-0 ${devis.statut === 'accepte' ? 'text-emerald-600' : 'text-brand-500'}`} />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold leading-tight">
-                {devis.numeroDevis ?? `Devis v${devis.version}`}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Créé le {formatDate(devis.dateCreation)}
-                {devis.dateValidite ? ` · Valide jusqu'au ${formatDate(devis.dateValidite)}` : ''}
-                {devis.vuParPatientAt ? ` · Vu le ${formatDate(devis.vuParPatientAt)}` : ''}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Badge className={`text-[11px] font-semibold ${DEVIS_STATUT_BADGE[devis.statut] ?? ''}`}>
-              {DEVIS_STATUT_LABEL[devis.statut] ?? devis.statut}
-            </Badge>
-            <p className="text-sm font-bold text-foreground">{formatCurrency(devis.total)}</p>
-            {open ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-          </div>
-        </div>
-      </CardHeader>
-
-      {open && (
-        <CardContent className="pt-0 pb-5 px-5 space-y-4 border-t">
-          {/* Lignes */}
-          {devis.lignes.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Prestations</p>
-              <div className="rounded-xl border overflow-hidden overflow-x-auto">
-                <table className="w-full text-sm min-w-[420px]">
-                  <thead className="bg-muted/40">
-                    <tr>
-                      <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Description</th>
-                      <th className="text-center px-3 py-2 text-xs font-medium text-muted-foreground w-12">Qté</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground w-28">P.U.</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground w-28">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {devis.lignes.map((l, i) => (
-                      <tr key={i} className="hover:bg-muted/20">
-                        <td className="px-3 py-2 text-sm">{l.description}</td>
-                        <td className="px-3 py-2 text-center text-sm text-muted-foreground">{l.quantite}</td>
-                        <td className="px-3 py-2 text-right text-sm text-muted-foreground">{formatCurrency(l.prixUnitaire)}</td>
-                        <td className="px-3 py-2 text-right text-sm font-medium">{formatCurrency(l.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-muted/20 border-t-2 border-border">
-                    <tr>
-                      <td colSpan={3} className="px-3 py-2 text-sm font-bold text-right">Total</td>
-                      <td className="px-3 py-2 text-right text-sm font-bold text-brand-700">{formatCurrency(devis.total)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Planning médical */}
-          {devis.planningMedical && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Planning médical</p>
-              <div className="rounded-xl bg-muted/30 border px-4 py-3 text-sm whitespace-pre-line text-foreground/90">
-                {devis.planningMedical}
-              </div>
-            </div>
-          )}
-
-          {/* Notes séjour (affichage simplifié) */}
-          {devis.notesSejour && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Notes séjour</p>
-              <div className="rounded-xl bg-muted/30 border px-4 py-3 text-xs text-muted-foreground leading-relaxed">
-                {devis.notesSejour.split('\n')
-                  .filter((l) => !l.startsWith('DELAIS_CONVALESCENCE:') && !l.startsWith('CLINIQUE_NUITS:') && !l.startsWith('HOTEL_NUITS:') && !l.startsWith('DUREE_SEJOUR:'))
-                  .join('\n')
-                  .trim() || devis.notesSejour}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      )}
-    </Card>
-  )
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function DossierPatientPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const initialTab = searchParams.get('tab') ?? 'profil'
+  const tabParam = searchParams.get('tab')
+  const initialTab = tabParam && tabParam !== 'devis' ? tabParam : 'profil'
   const { user } = useAuthStore()
 
   const [patient, setPatient]   = useState<PatientDetail | null>(null)
@@ -514,15 +401,6 @@ export default function DossierPatientPage() {
             <Stethoscope className="h-3.5 w-3.5 shrink-0" />
             <span>Rapport</span>
           </TabsTrigger>
-          <TabsTrigger value="devis" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none shrink-0 text-xs sm:text-sm">
-            <Receipt className="h-3.5 w-3.5 shrink-0" />
-            <span>Devis</span>
-            {patient.devis.filter((d) => d.statut === 'envoye' || d.statut === 'accepte').length > 0 && (
-              <span className="ml-0.5 rounded-full bg-brand-100 text-brand-700 text-[10px] font-bold px-1.5 py-0.5 leading-none">
-                {patient.devis.filter((d) => d.statut === 'envoye' || d.statut === 'accepte').length}
-              </span>
-            )}
-          </TabsTrigger>
           <TabsTrigger value="suivi" className="gap-1 sm:gap-1.5 flex-1 sm:flex-none shrink-0 text-xs sm:text-sm">
             <ClipboardList className="h-3.5 w-3.5 shrink-0" />
             <span>Suivi</span>
@@ -564,30 +442,6 @@ export default function DossierPatientPage() {
                         </div>
                         <Badge variant={r.statut === 'confirme' ? 'success' : 'warning'} className="text-xs">
                           {r.statut}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle className="text-sm">Devis</CardTitle></CardHeader>
-              <CardContent>
-                {patient.devis.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-3">Aucun devis</p>
-                ) : (
-                  <div className="space-y-2">
-                    {patient.devis.map((d) => (
-                      <div key={d.id} className="flex items-center gap-3 rounded-lg border p-3">
-                        <FileText className="h-4 w-4 text-amber-500 shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">{formatCurrency(d.total)}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(d.dateCreation)} · v{d.version}</p>
-                        </div>
-                        <Badge variant={d.statut === 'accepte' ? 'success' : d.statut === 'refuse' ? 'destructive' : 'info'} className="text-xs capitalize">
-                          {d.statut}
                         </Badge>
                       </div>
                     ))}
@@ -878,22 +732,6 @@ export default function DossierPatientPage() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* ── Devis ── */}
-        <TabsContent value="devis">
-          {patient.devis.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-              <Receipt className="h-10 w-10 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Aucun devis établi pour ce dossier.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {patient.devis.map((d) => (
-                <DevisReadCard key={d.id} devis={d} />
-              ))}
-            </div>
-          )}
         </TabsContent>
 
         {/* ── Suivi ── */}

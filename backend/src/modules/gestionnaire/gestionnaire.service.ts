@@ -16,15 +16,17 @@ import type {
 import type { CreateAgendaEventInput, UpdateAgendaEventInput } from '../medecin/medecin.schema.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import {
+  formatDevisPdfFileName,
   generateNextDevisNumber,
   generateNextMcReference,
   resolvePatientReference,
   syncPatientDossierFromDevis,
 } from '../../lib/devisNumber.js'
-import { sendNotificationEmail } from '../../lib/mailer.js'
+import { notifyStaff } from '../../lib/staffNotifications.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
+import { sendDevisReadyEmail } from '../../lib/mailer.js'
 import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
 
 const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
@@ -122,44 +124,23 @@ function applyTemplate(content: string, vars: Record<string, string>) {
     .split('{reason}').join(vars.reason ?? '')
 }
 
-async function notifyGestionnaires(input: {
+function notifyGestionnaires(input: {
   titre: string
   message: string
   type?: 'info' | 'warning' | 'success' | 'error'
   lienAction?: string | null
 }) {
-  const gestionnaires = await prisma.user.findMany({
-    where: { role: 'gestionnaire' },
-    select: { id: true },
-  })
+  // In-app seulement — email gestionnaire = rapport généré uniquement
+  return notifyStaff({ role: 'gestionnaire', email: false, ...input })
+}
 
-  const notifPromises = gestionnaires.map(async (gestionnaire) => {
-    const exists = await prisma.notification.findFirst({
-      where: {
-        userId: gestionnaire.id,
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-      select: { id: true },
-    })
-    if (exists) return
-
-    await prisma.notification.create({
-      data: {
-        userId: gestionnaire.id,
-        type: input.type ?? 'info',
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-    })
-  })
-
-  await Promise.all([
-    ...notifPromises,
-    sendNotificationEmail(input),
-  ])
+function notifyMedecinsFormulaire(input: {
+  titre: string
+  message: string
+  type?: 'info' | 'warning' | 'success' | 'error'
+  lienAction?: string | null
+}) {
+  return notifyStaff({ role: 'medecin', ...input })
 }
 
 function mapPatientListRow<T extends {
@@ -510,7 +491,7 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
 
   const patient = await prisma.patient.findUnique({
     where: { id: devis.patientId },
-    include: { user: { select: { fullName: true, id: true } } },
+    include: { user: { select: { fullName: true, id: true, email: true } } },
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
@@ -542,20 +523,37 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
     notifLink: '/patient/devis',
   })
 
+  // Email patient personnalisé (charte Centre Est) + lien espace
+  if (patient.user.email?.trim()) {
+    await sendDevisReadyEmail({
+      to: patient.user.email,
+      patientFullName: patient.user.fullName,
+    })
+  } else {
+    console.warn('[sendDevis] Pas d’email patient — notification email ignorée', {
+      patientId: patient.id,
+    })
+  }
+
   // PDF personnalisé (même HTML que « Exporter PDF ») → pièce jointe chat
   if (html?.trim()) {
     try {
       const pdfBuffer = await renderHtmlToPdf(html)
-      const safeRef = String(devis.numeroDevis ?? patient.dossierNumber ?? devisId)
+      const pieceJointeNom = formatDevisPdfFileName(
+        devis.numeroDevis ?? patient.dossierNumber,
+        patient.user.fullName,
+        devis.version,
+      )
+      const diskSlug = pieceJointeNom
+        .replace(/\.pdf$/i, '')
         .replace(/[^\w.-]+/g, '_')
         .slice(0, 80)
-      const filename = `chat-${Date.now()}-Devis-${safeRef}.pdf`
+      const filename = `chat-${Date.now()}-${diskSlug || 'Devis'}.pdf`
       await mkdir(UPLOADS_DIR, { recursive: true })
       await writeFile(path.join(UPLOADS_DIR, filename), pdfBuffer)
 
       const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
       const pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
-      const pieceJointeNom = `Devis-${safeRef}.pdf`
 
       await prisma.message.create({
         data: {
@@ -1366,11 +1364,11 @@ export async function createUserByGestionnaire(actorId: string, input: CreateUse
         where: { id: patient.id },
         data: { status: 'formulaire_complete' },
       })
-      await notifyGestionnaires({
+      await notifyMedecinsFormulaire({
         type: 'info',
         titre: 'Formulaire patient soumis',
         message: `${user.fullName} (${patient.dossierNumber}) a un formulaire médical prêt à traiter.`,
-        lienAction: '/gestionnaire/patients',
+        lienAction: '/medecin/patients',
       })
     }
   }

@@ -32,6 +32,17 @@ const envSchema = z.object({
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined))
     .pipe(z.string().url().optional()),
 
+  /**
+   * URL publique de l’app (liens dans les emails patients).
+   * En prod : https://chennoufi.nav.ovh
+   * Ne pas mettre localhost ici.
+   */
+  PUBLIC_APP_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined))
+    .pipe(z.string().url().optional()),
+
   /** ExchangeRate-API (v6) — conversion indicative TND → EUR (gestionnaire). */
   EXCHANGE_RATE_API_KEY: z
     .string()
@@ -43,8 +54,15 @@ const envSchema = z.object({
   SMTP_PORT: z.coerce.number().optional().default(465),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
-  /** Destinataires séparés par des virgules. */
+  /**
+   * Destinataires email (séparés par des virgules).
+   * - MEDECIN : uniquement formulaires patients
+   * - GESTIONNAIRE : uniquement rapport médical généré
+   * - NOTIFICATION_EMAILS : compat (fallback gestionnaire)
+   */
   NOTIFICATION_EMAILS: z.string().optional(),
+  NOTIFICATION_EMAILS_MEDECIN: z.string().optional(),
+  NOTIFICATION_EMAILS_GESTIONNAIRE: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

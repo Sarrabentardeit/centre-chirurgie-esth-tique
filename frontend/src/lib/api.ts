@@ -506,6 +506,15 @@ export const patientApi = {
       body: JSON.stringify(body),
     }),
 
+  getNotifications: () =>
+    request<{ ok: true; notifications: GestionnaireNotificationRow[] }>('/patient/notifications'),
+
+  markNotificationRead: (id: string) =>
+    request<{ ok: true }>(`/patient/notifications/${id}/lu`, { method: 'PATCH' }),
+
+  markAllNotificationsRead: () =>
+    request<{ ok: true }>('/patient/notifications/lu-toutes', { method: 'POST' }),
+
   getDevis: () =>
     request<{ ok: true; devis: Devis[] }>('/patient/devis'),
 
@@ -519,6 +528,44 @@ export const patientApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /** Même moteur Chromium que l’export gestionnaire / envoi chat. */
+  renderDevisPdf: async (html: string): Promise<Blob> => {
+    const { access } = getTokens()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (access) headers['Authorization'] = `Bearer ${access}`
+
+    const res = await fetch(`${BASE_URL}/patient/devis/render-pdf`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ html }),
+    })
+
+    if (res.status === 401) {
+      const newToken = await tryRefreshToken()
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`
+        const retry = await fetch(`${BASE_URL}/patient/devis/render-pdf`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ html }),
+        })
+        if (!retry.ok) {
+          const err = await retry.json().catch(() => ({})) as { message?: string; code?: string }
+          throw new ApiRequestError(retry.status, err.code ?? 'PDF_ERROR', err.message ?? 'Export PDF impossible.')
+        }
+        return retry.blob()
+      }
+      forceSessionExpired()
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { message?: string; code?: string }
+      throw new ApiRequestError(res.status, err.code ?? 'PDF_ERROR', err.message ?? 'Export PDF impossible.')
+    }
+    return res.blob()
+  },
 
   getRendezVous: () =>
     request<{ ok: true; rendezvous: RendezVous[] }>('/patient/rendezvous'),

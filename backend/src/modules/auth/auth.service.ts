@@ -7,7 +7,7 @@ import { AppError } from '../../middleware/errorHandler.js'
 import type { RegisterInput, LoginInput } from './auth.schema.js'
 import type { UserRole, JwtPayload, RefreshPayload } from './auth.types.js'
 import { generateNextMcReference } from '../../lib/devisNumber.js'
-import { sendNotificationEmail } from '../../lib/mailer.js'
+import { notifyStaff } from '../../lib/staffNotifications.js'
 import { isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '../../lib/phonePolicy.js'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -16,44 +16,14 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
 
-async function notifyGestionnaires(input: {
+function notifyGestionnaires(input: {
   titre: string
   message: string
   type?: 'info' | 'warning' | 'success' | 'error'
   lienAction?: string | null
 }) {
-  const gestionnaires = await prisma.user.findMany({
-    where: { role: 'gestionnaire' },
-    select: { id: true },
-  })
-
-  const notifPromises = gestionnaires.map(async (gestionnaire) => {
-    const exists = await prisma.notification.findFirst({
-      where: {
-        userId: gestionnaire.id,
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-      select: { id: true },
-    })
-    if (exists) return
-
-    await prisma.notification.create({
-      data: {
-        userId: gestionnaire.id,
-        type: input.type ?? 'info',
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
-    })
-  })
-
-  await Promise.all([
-    ...notifPromises,
-    sendNotificationEmail(input),
-  ])
+  // In-app seulement — email gestionnaire = rapport généré uniquement
+  return notifyStaff({ role: 'gestionnaire', email: false, ...input })
 }
 
 function signAccessToken(user: { id: string; email: string; role: UserRole }): string {

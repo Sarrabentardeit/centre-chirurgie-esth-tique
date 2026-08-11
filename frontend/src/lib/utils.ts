@@ -153,3 +153,40 @@ export function formatDevisTitle(
   const num = getDevisDisplayNumber(devis, dossierNumber)
   return num ? `Devis ${num}` : 'Devis'
 }
+
+/**
+ * Lettre de version pour l’affichage liste :
+ * v1 → aucune, v2 → b, v3 → c, …
+ */
+export function getDevisVersionLetter(version: number): string | null {
+  if (!Number.isFinite(version) || version < 2) return null
+  const code = 96 + Math.floor(version) // 2 → 'b'
+  if (code < 98 || code > 122) return String(Math.floor(version))
+  return String.fromCharCode(code)
+}
+
+/** Nom affiché d’un devis : `MC-… NOM PRENOM` (+ ` -b`, ` -c`, … dès la 2ᵉ version). */
+export function formatDevisListName(
+  dossierNumber: string | null | undefined,
+  patientFullName: string | null | undefined,
+  version: number,
+): string {
+  const dossier = dossierNumber?.trim() || 'Dossier'
+  const name = patientFullName?.trim() || ''
+  const base = name ? `${dossier} ${name}` : dossier
+  const letter = getDevisVersionLetter(version)
+  return letter ? `${base} -${letter}` : base
+}
+
+/** Nom de fichier PDF (export / pièce jointe) selon la même règle. */
+export function formatDevisPdfFileName(
+  dossierNumber: string | null | undefined,
+  patientFullName: string | null | undefined,
+  version: number,
+): string {
+  const label = formatDevisListName(dossierNumber, patientFullName, version)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return `${label || 'Devis'}.pdf`
+}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -12,7 +12,7 @@ import { toast } from '@/store/toastStore'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
 import { parseSejourMeta, devisSejourDefaultsFromRapport } from '@/lib/devisSejourNotes'
-import { formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
+import { formatDevisListName, formatDevisPdfFileName, formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
 import { buildDevisAmountSentence, replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { inlineHtmlImages } from '@/lib/pdf'
 import {
@@ -502,7 +502,9 @@ function buildBottomHtml(total: number, tndPerEur = DEFAULT_TND_PER_EUR): string
 ───────────────────────────────────────────────────────── */
 export default function DevisEditorPage() {
   const { patientId } = useParams<{ patientId: string }>()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const requestedDevisId = searchParams.get('devisId')
 
   const [patient, setPatient]           = useState<GestionnairePatientDetail | null>(null)
   const [devisId, setDevisId]           = useState<string | null>(null)
@@ -545,9 +547,11 @@ export default function DevisEditorPage() {
       const tndPerEurRate = taux?.tndPerEur ?? DEFAULT_TND_PER_EUR
       setTndPerEur(tndPerEurRate)
       setPatient(p)
-      const dv = p.devis?.find(d => d.statut === 'brouillon')
-               ?? p.devis?.find(d => ['envoye', 'accepte'].includes(d.statut))
-               ?? null
+      const dv =
+        (requestedDevisId ? p.devis?.find((d) => d.id === requestedDevisId) : null)
+        ?? p.devis?.find((d) => d.statut === 'brouillon')
+        ?? p.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
+        ?? null
       const id = dv?.id ?? null
       setDevisId(id)
       devisIdRef.current = id
@@ -574,7 +578,7 @@ export default function DevisEditorPage() {
     } finally {
       setLoading(false)
     }
-  }, [patientId])
+  }, [patientId, requestedDevisId])
 
   useEffect(() => { void load() }, [load])
 
@@ -694,8 +698,10 @@ export default function DevisEditorPage() {
   const handleReset = () => {
     if (!patient) return
     if (!window.confirm('Réinitialiser le document avec les données actuelles du dossier ?')) return
-    const dv = patient.devis?.find(d => d.statut === 'brouillon')
-      ?? patient.devis?.find(d => ['envoye', 'accepte'].includes(d.statut))
+    const dv =
+      (devisId ? patient.devis?.find((d) => d.id === devisId) : null)
+      ?? patient.devis?.find((d) => d.statut === 'brouillon')
+      ?? patient.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
       ?? null
     const total = (dv?.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
     editorTop?.commands.setContent(refreshConvalescenceInTopHtml(buildTopHtml(patient), patient))
@@ -704,7 +710,9 @@ export default function DevisEditorPage() {
   }
 
   /* Calculs financiers (utilisés par l’aperçu et l’export PDF) */
-  const dv = patient?.devis?.find((d) => d.statut === 'brouillon')
+  const dv =
+    (devisId ? patient?.devis?.find((d) => d.id === devisId) : null)
+    ?? patient?.devis?.find((d) => d.statut === 'brouillon')
     ?? patient?.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
     ?? null
   const rap = patient?.rapports?.[0]
@@ -736,11 +744,17 @@ export default function DevisEditorPage() {
         })
       : ''
 
+    const pdfTitle = formatDevisListName(
+      patient?.dossierNumber ?? devisHeaderRef,
+      patient?.user.fullName,
+      dv?.version ?? 1,
+    )
+
     return `<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8"/>
-  <title>Devis ${devisHeaderRef}</title>
+  <title>${pdfTitle}</title>
   <style>${buildDevisPrintStyles()}</style>
 </head>
 <body>
@@ -786,7 +800,11 @@ export default function DevisEditorPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Devis-${devisHeaderRef || 'document'}.pdf`
+      a.download = formatDevisPdfFileName(
+        patient?.dossierNumber ?? devisHeaderRef,
+        patient?.user.fullName,
+        dv?.version ?? 1,
+      )
       document.body.appendChild(a)
       a.click()
       a.remove()

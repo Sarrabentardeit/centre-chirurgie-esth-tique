@@ -20,6 +20,11 @@ export const repondreDevisSchema = z.object({
 })
 export type RepondreDevisInput = z.infer<typeof repondreDevisSchema>
 
+export const renderDevisPdfSchema = z.object({
+  html: z.string().min(1, 'HTML du devis requis.'),
+})
+export type RenderDevisPdfInput = z.infer<typeof renderDevisPdfSchema>
+
 export const repondreRendezVousSchema = z.object({
   decision: z.enum(['accepter', 'autre_date']),
   message: z.string().max(500).optional(),

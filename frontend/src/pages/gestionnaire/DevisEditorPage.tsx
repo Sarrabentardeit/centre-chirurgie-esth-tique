@@ -2,43 +2,77 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import Paragraph from '@tiptap/extension-paragraph'
 import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
 import { Color } from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
+
+/** Garde les classes HTML (ex. devis-ref-title) — TipTap les retire sinon. */
+const DevisParagraph = Paragraph.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      class: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('class'),
+        renderHTML: (attributes) => {
+          if (!attributes.class) return {}
+          return { class: attributes.class }
+        },
+      },
+    }
+  },
+})
+
+/** font-size dans les spans TextStyle (sinon TipTap le strip). */
+const DevisTextStyle = TextStyle.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      fontSize: {
+        default: null,
+        parseHTML: (element) => element.style.fontSize || null,
+        renderHTML: (attributes) => {
+          if (!attributes.fontSize) return {}
+          return { style: `font-size: ${attributes.fontSize}` }
+        },
+      },
+    }
+  },
+})
 import { ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw, Send } from 'lucide-react'
 import { toast } from '@/store/toastStore'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
-import { parseSejourMeta, devisSejourDefaultsFromRapport } from '@/lib/devisSejourNotes'
-import { formatDevisListName, formatDevisPdfFileName, formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
-import { buildDevisAmountSentence, replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
+import { formatDevisPdfFileName, getDevisDisplayNumber } from '@/lib/utils'
+import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { inlineHtmlImages } from '@/lib/pdf'
 import {
-  DEVIS_HEADER_SUBTITLE_SHORT,
   DEVIS_LOGO_SRC,
   DEVIS_SIGNATURE,
   buildDevisContactFooterHtml,
-  buildDevisDocumentEndHtml,
   buildDevisHeaderLogoHtml,
-  buildDevisHeaderRightHtml,
 } from '@/lib/devisBranding'
 import {
   DEVIS_ACCENT,
   DEVIS_CHARTE,
   DEVIS_OFFER_PREVIEW_CSS,
   buildDevisOfferBlockHtml,
-  buildDevisPrintStyles,
-  devisFieldRow,
-  devisHighlightBox,
-  devisLabel,
-  devisSectionHeading,
-  devisSeparator,
 } from '@/lib/devisCharte'
+import {
+  buildDevisLetterBottomHtml,
+  buildDevisLetterTopHtml,
+  letterContextFromGestionnairePatient,
+  refreshDevisLetterTopHtml,
+  sejourPdfFromContext,
+  type DevisLetterContext,
+} from '@/lib/devisLetterHtml'
+import { buildGestionnaireDevisExportHtml, DEVIS_CONTENT_BREAK } from '@/lib/devisExportHtml'
 // RichDocToolbar — barre d'outils partagée avec Planning séjour
 
-const CONTENT_BREAK = '|||EDITOR_BREAK|||'
+const CONTENT_BREAK = DEVIS_CONTENT_BREAK
 
 /* ─────────────────────────────────────────────────────────
    CSS GLOBAL (éditeur + impression)
@@ -54,8 +88,11 @@ const GLOBAL_CSS = `
 }
 .ProseMirror p { margin: 0 0 8px; }
 .ProseMirror ul,
-.ProseMirror ol { padding-left: 20px; margin: 0 0 10px; }
-.ProseMirror li { margin: 0 0 5px; break-inside: avoid; page-break-inside: avoid; }
+.ProseMirror ol { padding-left: 22px; margin: 0 0 10px; }
+.ProseMirror ol { list-style-type: decimal; }
+.ProseMirror ol > li { margin: 0 0 10px; break-inside: avoid; page-break-inside: avoid; }
+.ProseMirror ul > li { margin: 0 0 5px; break-inside: avoid; page-break-inside: avoid; }
+.ProseMirror ol ul { list-style-type: disc; margin-top: 6px; margin-bottom: 0; }
 .ProseMirror hr { border: none; border-top: 1px solid ${DEVIS_CHARTE.rose}; margin: 14px 0 12px; }
 .ProseMirror strong { font-weight: 700; }
 .ProseMirror em { font-style: italic; color: ${DEVIS_CHARTE.gray}; }
@@ -63,16 +100,36 @@ const GLOBAL_CSS = `
 .ProseMirror mark { background: ${DEVIS_CHARTE.cream}; padding: 0 1px; }
 .doc-shell .tiptap { min-height: 0; }
 
-/* Titres générés (devisSectionHeading) dans l’aperçu écran */
+/* Sous-titres : brun, sans fond ni barre */
 .ProseMirror .devis-heading,
 .doc-shell .devis-heading {
   margin: 14px 0 8px;
-  padding: 8px 12px;
-  background: ${DEVIS_CHARTE.cream};
-  border-left: 4px solid ${DEVIS_CHARTE.bronze};
+  padding: 0;
+  background: transparent;
+  border: none;
   font-size: 13px;
   font-weight: 700;
   color: ${DEVIS_CHARTE.bronze};
+}
+
+/* Titre centré « Devis MC-… » — bronze + plus grand (éditeur) */
+.ProseMirror .devis-ref-title,
+.doc-shell .devis-ref-title {
+  text-align: center !important;
+  margin: 12px 0 10px;
+  font-size: 18px;
+  font-weight: 700;
+  color: ${DEVIS_CHARTE.bronze};
+  letter-spacing: 0.02em;
+}
+.ProseMirror .devis-ref-title strong,
+.ProseMirror .devis-ref-title span,
+.doc-shell .devis-ref-title strong,
+.doc-shell .devis-ref-title span {
+  color: ${DEVIS_CHARTE.bronze} !important;
+  font-size: 18px !important;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .devis-contact-footer {
@@ -151,350 +208,29 @@ ${DEVIS_OFFER_PREVIEW_CSS}
 /* ─────────────────────────────────────────────────────────
    HELPERS
 ───────────────────────────────────────────────────────── */
-function todayFr() {
-  return new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-}
-function computeAge(d: string) {
-  try { return `${new Date().getFullYear() - new Date(d).getFullYear()} ans` } catch { return '' }
-}
-function arr(v: unknown): string[] { return Array.isArray(v) ? v.map(String).filter(Boolean) : [] }
-function str(v: unknown): string { return typeof v === 'string' ? v.trim() : '' }
 function fmtNum(n: number) { return n.toLocaleString('fr-TN', { minimumFractionDigits: 0 }) }
-function parseNights(value: string): number | null {
-  const m = value.match(/(\d+)\s*(nuit|nuits)/i)
-  if (!m) return null
-  const n = Number(m[1])
-  return Number.isFinite(n) ? n : null
+
+function letterCtx(
+  p: GestionnairePatientDetail,
+  activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
+): DevisLetterContext {
+  return letterContextFromGestionnairePatient(p, activeDevis)
 }
 
-/** Nuits saisies par le gestionnaire dans le devis (champ texte → entier > 0). */
-function parseGestNights(s: string): number | null {
-  const t = s.trim()
-  if (!t) return null
-  const n = Number.parseInt(t, 10)
-  return Number.isFinite(n) && n > 0 ? n : null
-}
-
-function pickDevis(p: GestionnairePatientDetail) {
-  return (
-    p.devis?.find((d) => d.statut === 'brouillon')
-    ?? p.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
-    ?? null
-  )
-}
-
-/** Textes séjour / clinique / hôtel pour le PDF (données devis + repli rapport / legacy). */
 function sejourPdfFromPatient(p: GestionnairePatientDetail) {
-  const rap = p.rapports?.[0]
-  const dv = pickDevis(p)
-  const sej = parseSejourMeta(dv?.notesSejour ?? '')
-  const nGestClin = parseGestNights(sej.cliniqueNuits)
-  const nGestHotel = parseGestNights(sej.hotelNuits)
-  const nuitsClinRap = (rap?.nuitsClinique ?? 0) + (rap?.nuitsPreoperatoires ?? 0)
-
-  const noteLines = (dv?.notesSejour ?? '').split('\n')
-  const convStr =
-    noteLines.find((l) => l.startsWith('DELAIS_CONVALESCENCE:'))?.replace('DELAIS_CONVALESCENCE:', '').trim() ?? ''
-  const convNightsLegacy = parseNights(convStr) ?? 0
-
-  // nPreop = nuits préopératoires du rapport (défaut 1)
-  const nPreop = rap?.nuitsPreoperatoires ?? 1
-  // nPostop = nuits postopératoires du rapport
-  const nPostop = rap?.nuitsClinique ?? 0
-  // Pour le champ "nuits clinique" du devis (total pour séjour clinique), on prend nGestClin si défini par le gestionnaire, sinon le total rapport
-  const nClinForHosp = nGestClin ?? (nuitsClinRap > 0 ? nPostop : null)
-
-  const dureeHosp =
-    nPreop > 0 && nPostop > 0
-      ? `${nPreop} nuit${nPreop > 1 ? 's' : ''} préopératoire${nPreop > 1 ? 's' : ''} et ${nPostop} nuit${nPostop > 1 ? 's' : ''} postopératoire${nPostop > 1 ? 's' : ''} en clinique`
-      : nPreop > 0
-        ? `${nPreop} nuit${nPreop > 1 ? 's' : ''} préopératoire${nPreop > 1 ? 's' : ''} en clinique`
-        : nClinForHosp != null && nClinForHosp > 0
-          ? `${nClinForHosp} nuit${nClinForHosp > 1 ? 's' : ''} en clinique`
-          : '—'
-
-  const cliniqueRetenue = sej.cliniqueNom.trim() || '—'
-
-  const postHospLabel =
-    nGestHotel != null
-      ? `${nGestHotel} nuit${nGestHotel > 1 ? 's' : ''} à l'hôtel en Tunisie`
-      : convNightsLegacy > 0
-        ? `${convNightsLegacy} nuit${convNightsLegacy > 1 ? 's' : ''} de convalescence à l'hôtel`
-        : (convStr || '—')
-
-  const hotelSejour = sej.hotelNom.trim() || '—'
-
-  // nClinTot = total nuits clinique (pré-op + post-op) pour calcul durée séjour
-  const nClinTot = nGestClin ?? nuitsClinRap
-  const nHotelTot = nGestHotel != null ? nGestHotel : convNightsLegacy
-  const totalNights = Math.max(0, nClinTot) + Math.max(0, nHotelTot)
-
-  // Priorité : jours = nuits clinique + nuits hôtel (ex. 3 + 4 = 7 jours)
-  const hasNuitsSaisies = nGestClin != null || nGestHotel != null || totalNights > 0
-  const joursFromNuits = hasNuitsSaisies && totalNights >= 0 ? totalNights : NaN
-
-  const dureeFromDevis = sej.dureeSejourTotale.trim() !== '' ? Number(sej.dureeSejourTotale) : NaN
-  const dureeFromRapport = rap?.dureeSejourTunisie != null && rap.dureeSejourTunisie > 0 ? rap.dureeSejourTunisie : NaN
-  const dureeJours = Number.isFinite(joursFromNuits)
-    ? joursFromNuits
-    : Number.isFinite(dureeFromDevis) && dureeFromDevis > 0
-      ? dureeFromDevis
-      : Number.isFinite(dureeFromRapport)
-        ? dureeFromRapport
-        : NaN
-
-  const dureeTotale =
-    Number.isFinite(dureeJours)
-      ? `${dureeJours} jour${dureeJours > 1 ? 's' : ''}`
-      : '—'
-  const sejourLine =
-    Number.isFinite(dureeJours) && totalNights > 0
-      ? `Séjour ${dureeJours} jour${dureeJours > 1 ? 's' : ''} (${totalNights} nuit${totalNights > 1 ? 's' : ''})`
-      : Number.isFinite(dureeJours)
-        ? `Séjour ${dureeJours} jour${dureeJours > 1 ? 's' : ''}`
-        : ''
-
-  const formPayload = (p.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
-  const fromRapport = devisSejourDefaultsFromRapport(rap, formPayload)
-  const nbAdultes = sej.nbAdultes.trim() !== '' ? sej.nbAdultes.trim() : fromRapport.nbAdultes
-  const nbEnfants = sej.nbEnfants.trim() !== '' ? sej.nbEnfants.trim() : fromRapport.nbEnfants
-
-  return { dureeHosp, cliniqueRetenue, postHospLabel, hotelSejour, dureeTotale, sejourLine, nbAdultes, nbEnfants }
+  return sejourPdfFromContext(letterCtx(p))
 }
 
-const SEJOUR_CONV_START = '<!-- DEVIS_SEJOUR_CONV -->'
-const SEJOUR_CONV_END = '<!-- /DEVIS_SEJOUR_CONV -->'
-
-type SejourPdfValues = ReturnType<typeof sejourPdfFromPatient>
-
-function buildSejourConvalescenceHtml(sv: SejourPdfValues): string {
-  return `${SEJOUR_CONV_START}
-${devisSectionHeading('Détails de votre séjour de convalescence :')}
-${devisFieldRow('Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)}
-${devisFieldRow('Hôtel de séjour sélectionné :', sv.hotelSejour)}
-${devisFieldRow("Nombre d'adultes :", sv.nbAdultes)}
-${devisFieldRow('Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)}
-${devisFieldRow('Type de chambre :', 'Single')}
-${devisFieldRow('Arrangement :', "Pension Complète (la pension n'inclut pas les dépenses personnelles tel que téléphone, boissons, les soins de beauté, les excursions…)")}
-${SEJOUR_CONV_END}`
-}
-
-/** Met à jour hôtel / nuits depuis le devis (même si le HTML a été sauvegardé avant). */
-function refreshConvalescenceInTopHtml(html: string, p: GestionnairePatientDetail): string {
-  const sv = sejourPdfFromPatient(p)
-  const fresh = buildSejourConvalescenceHtml(sv)
-  const blockRe = new RegExp(`${SEJOUR_CONV_START}[\\s\\S]*?${SEJOUR_CONV_END}`)
-  let out = blockRe.test(html) ? html.replace(blockRe, fresh) : html
-  out = out.replace(/<p>[^<]*Nbr Bébés[^<]*<\/p>\s*/gi, '')
-  if (!blockRe.test(html) && sv.hotelSejour !== '—') {
-    out = out.replace(
-      /(Hôtel de séjour sélectionné\s*:\s*<\/span>\s*<span[^>]*>)([^<]*)(<\/span>)/i,
-      `$1${sv.hotelSejour}$3`,
-    )
-  }
-  return out
-}
-
-/**
- * Rafraîchit la valeur d'un champ « Label : valeur » dans le HTML sauvegardé,
- * indépendamment des balises (robuste à la normalisation TipTap).
- * Recherche le <p> dont le texte commence par `label` et reconstruit la ligne.
- */
-function refreshDevisFieldByLabel(html: string, label: string, value: string): string {
-  if (typeof window === 'undefined') return html
-  if (value == null || value === '—') return html
-  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
-  const root = doc.getElementById('__root')
-  if (!root) return html
-  const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
-  const target = normalize(label)
-  let changed = false
-  for (const p of Array.from(root.querySelectorAll('p'))) {
-    if (normalize(p.textContent ?? '').startsWith(target)) {
-      const tmp = doc.createElement('div')
-      tmp.innerHTML = devisFieldRow(label, value)
-      const fresh = tmp.firstElementChild
-      if (fresh) {
-        p.replaceWith(fresh)
-        changed = true
-      }
-      break
-    }
-  }
-  return changed ? root.innerHTML : html
-}
-
-/** Synchronise clinique + hôtel + accompagnants (et conv.) depuis le devis actuel. */
 function refreshDossierFieldsInTopHtml(html: string, p: GestionnairePatientDetail): string {
-  const sv = sejourPdfFromPatient(p)
-  let out = refreshConvalescenceInTopHtml(html, p)
-  out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
-  out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
-  out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
-  out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
-  return out
+  return refreshDevisLetterTopHtml(html, letterCtx(p))
 }
 
-/* ─────────────────────────────────────────────────────────
-   GÉNÉRATION HTML PARTIE HAUTE
-   (date → récap → diagnostic → détails → examens → offre de prix inclut/exclut)
-───────────────────────────────────────────────────────── */
 function buildTopHtml(p: GestionnairePatientDetail): string {
-  const pay = (p.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
-  const rap = p.rapports?.[0]
-  const sv = sejourPdfFromPatient(p)
-
-  /* Infos patient */
-  const inter    = arr(pay.typeIntervention).join(', ') || '—'
-  const nom      = p.user.fullName
-  const age      = str(pay.dateNaissance) ? computeAge(str(pay.dateNaissance)) : ''
-  const mensStr  = [
-    str(pay.poids) ? `${str(pay.poids)} kg` : '',
-    str(pay.taille) ? `${str(pay.taille)} cm` : '',
-  ].filter(Boolean).join(' ')
-  const ageMens  = [age, mensStr].filter(Boolean).join(' — ') || '—'
-  const trait    = pay.traitementEnCours === true ? (str(pay.traitementDetails) || 'Oui') : 'Aucun'
-  const allerg   = arr(pay.allergies).join(', ') || 'Aucune'
-  const antecMed = [...arr(pay.antecedentsMedicaux), str(pay.autresMaladiesChroniques)].filter(Boolean).join(', ') || 'Aucun'
-  const antecCh  = pay.chirurgiesAnterieures === true ? (str(pay.chirurgiesDetails) || 'Oui') : 'Aucun'
-  const adresse  = [p.ville, p.pays].filter(Boolean).join(' — ') || '—'
-  const tel      = p.phone || '—'
-
-  /* Rapport / intervention */
-  const diagnostic = rap?.diagnostic?.trim() || '—'
-  const interRec   = (rap?.interventionsRecommandees ?? []).join(', ') || '—'
-  const anesthType = rap?.anesthesieGenerale === true ? 'Générale' : 'Locale / Sédation'
-
-  /* Examens — bilan sanguin complet avec paragraphe standard */
-  const examens       = rap?.examensDemandes ?? []
-  const hasBilan      = examens.some(e => e.toLowerCase().includes('bilan sanguin'))
-  const otherExamens  = examens.filter(e => !e.toLowerCase().includes('bilan sanguin'))
-
-  let examHtml = `<p><em>Les examens doivent avoir une validité maximum de 3 mois — À envoyer à J-10 de la date d'intervention</em></p>`
-  if (hasBilan) {
-    examHtml += `<p>Un bilan sanguin préopératoire complet doit être effectué, avant la date d'intervention, afin de s'assurer de la faisabilité de l'intervention qui comprend :</p>`
-    examHtml += `<ul>
-<li>Bilan biologique (groupe sanguin, NFS, plaquettes, TP, TCA, CRP)</li>
-<li>Bilan virologique HIV, Hépatite B et C.</li>
-<li>URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT</li>
-</ul>`
-  }
-  if (otherExamens.length > 0) {
-    examHtml += `<ul>${otherExamens.map(e => `<li>${e}</li>`).join('')}</ul>`
-  }
-  if (!hasBilan && otherExamens.length === 0) {
-    examHtml += `<ul><li>À compléter par le médecin</li></ul>`
-  }
-  examHtml += `<p>Prévoir une copie papier des rapports médicaux pour la constitution de votre dossier médical à l'entrée de la clinique.</p>`
-
-  const activeDevis =
-    p.devis?.find((d) => d.statut === 'brouillon') ??
-    p.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut)) ??
-    p.devis?.[0] ??
-    null
-  const ref  = formatDevisTitle(activeDevis, p.dossierNumber)
-  const date = `Tunis le ${todayFr()}`
-
-  return `
-<p style="text-align:right">${date}</p>
-<p></p>
-<p>Bonjour,</p>
-<p>Nous vous remercions de la confiance que vous nous avez accordée.</p>
-<p>Suite à votre demande de devis, nous avons le plaisir de vous faire parvenir ci-dessous notre meilleure offre pour l'organisation de votre séjour médical en Tunisie.</p>
-<p></p>
-<p style="text-align:center"><strong style="color:${DEVIS_ACCENT}">${ref}</strong></p>
-<p></p>
-
-${devisSectionHeading('Récapitulatif de votre demande :')}
-${devisFieldRow('Intervention souhaitée :', inter)}
-${devisFieldRow('Nom Prénom :', nom)}
-${devisFieldRow('Âge / Mensurations :', ageMens)}
-${devisFieldRow('Traitement en cours :', trait)}
-${devisFieldRow('Allergie :', allerg)}
-${devisFieldRow('Antécédents médicaux :', antecMed)}
-${devisFieldRow('Antécédents chirurgicaux :', antecCh)}
-${devisFieldRow('Adresse :', adresse)}
-${devisFieldRow('Tél. Mobile :', tel)}
-<p></p>
-
-${devisSectionHeading('Diagnostic du chirurgien : Dr CHENNOUFI Mehdi')}
-<p>${diagnostic.replace(/\n/g, '<br/>')}</p>
-<p></p>
-${devisHighlightBox('Durée TOTALE du séjour :', sv.dureeTotale)}
-
-${devisSeparator()}
-
-${devisSectionHeading("Détails de l'intervention :")}
-${devisFieldRow('Intervention proposée :', interRec)}
-${devisFieldRow("Type d'anesthésie :", anesthType)}
-${devisFieldRow("Durée d'Intervention :", '—')}
-${devisFieldRow("Durée d'Hospitalisation :", sv.dureeHosp)}
-${devisFieldRow('Clinique retenue :', sv.cliniqueRetenue)}
-${devisFieldRow("Durée d'arrêt de travail (depuis l'intervention) :", '15 jours en moyenne')}
-${devisFieldRow('Chirurgien traitant :', 'Dr. CHENNOUFI Mehdi')}
-<p></p>
-
-${buildSejourConvalescenceHtml(sv)}
-<p></p>
-
-${devisSectionHeading("À titre de traitement préventif, prenez 2 semaines avant l'intervention :")}
-<ul>
-<li>Tardyferon 80mg : 2 comprimés par jour pour traitement préventif de l'Anémie</li>
-<li>Arnica montana 9 CH à raison de 5 granulés (4 fois par jour)</li>
-<li>Arrêt de l'Aspégic / Anti-inflammatoire / Aspirine 10 jours avant la chirurgie.</li>
-</ul>
-<p></p>
-
-${devisSectionHeading('Examens médicaux nécessaires avant votre arrivée en Tunisie : (Validité Maximum 3 mois)')}
-${examHtml}
-<p></p>
-
-${devisSectionHeading('Offre de prix :')}
-<p>${devisLabel('Votre devis inclut :')}</p>
-<ul>
-<li>Assistance depuis votre arrivée à l'aéroport de Tunis-Carthage et jusqu'à votre départ,</li>
-<li>Transferts multiples aéroport/hôtel et hôtel/clinique,</li>
-<li>Consultation préopératoire à Tunis,</li>
-<li>Honoraires du chirurgien et de l'anesthésiste,</li>
-<li>Frais de la clinique et séjour (bloc opératoire, consommables, pharmacie, médication…),</li>
-<li>Les produits pharmaceutiques pour votre traitement postopératoire,</li>
-<li>Convalescence dans un hôtel,</li>
-<li>2 Séances de drainage lymphatique : massages par un kinésithérapeute,</li>
-<li>Consultation post opératoire en Tunisie avant votre départ,</li>
-<li>Suivi post-opératoire gratuit avec votre chirurgien ou son équipe pendant 6 mois.</li>
-</ul>
-<p></p>
-
-<p>${devisLabel('Notre forfait exclut :')}</p>
-<ul>
-<li>Les vols aller-retour,</li>
-<li>Les dépenses personnelles (extras à l'hôtel ou à la clinique tels que les boissons, téléphone, etc…),</li>
-<li>Les poches de sang en cas de besoin de transfusion,</li>
-<li>Le prolongement de votre séjour initial en cas de nécessité,</li>
-<li>Les bilans sanguins préopératoires.</li>
-</ul>
-`
+  return buildDevisLetterTopHtml(letterCtx(p))
 }
 
-/* ─────────────────────────────────────────────────────────
-   GÉNÉRATION HTML PARTIE BASSE
-   (total en lettres → modalités → validité → clôture)
-───────────────────────────────────────────────────────── */
 function buildBottomHtml(total: number, tndPerEur = DEFAULT_TND_PER_EUR): string {
-  const amountLine = buildDevisAmountSentence(total, tndPerEur)
-
-  return `
-<p>${amountLine}</p>
-<p></p>
-<p><strong>${devisLabel('Modalités de paiement :')}</strong></p>
-<p>Elle devra être réglée en dinars tunisiens et en espèces et ce au moment de votre admission à la clinique en Tunisie.</p>
-<p>Les cartes de crédit ne sont pas acceptées.</p>
-<p></p>
-<p><strong>${devisLabel("Validité de l'offre :")}</strong></p>
-<p>La présente offre de prix sera valable pour une durée de trois (3) mois à compter de ce jour et seulement en période hors saison pour les hôtels (hors juillet/août et décembre).</p>
-<p></p>
-<p>Nous espérons que notre offre de prix vous agréera et nous tenons à votre entière disposition pour vous conseiller au mieux pour réussir votre séjour.</p>
-`
+  return buildDevisLetterBottomHtml(total, tndPerEur)
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -602,10 +338,15 @@ export default function DevisEditorPage() {
 
   const editorTop = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, horizontalRule: {} }),
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        horizontalRule: {},
+        paragraph: false,
+      }),
+      DevisParagraph,
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      TextStyle,
+      DevisTextStyle,
       Color,
       Highlight.configure({ multicolor: true }),
     ],
@@ -615,10 +356,11 @@ export default function DevisEditorPage() {
   })
   const editorBot = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, paragraph: false }),
+      DevisParagraph,
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      TextStyle,
+      DevisTextStyle,
       Color,
       Highlight.configure({ multicolor: true }),
     ],
@@ -629,14 +371,14 @@ export default function DevisEditorPage() {
   editorTopRef.current = editorTop
   editorBotRef.current = editorBot
 
-  /* Initialiser le contenu quand disponible */
+  /* Appliquer le HTML chargé (examens rafraîchis inclus) dans l’éditeur */
   useEffect(() => {
-    if (editorTop && initialTopHtml && !editorTop.getText().trim()) {
+    if (editorTop && initialTopHtml) {
       editorTop.commands.setContent(initialTopHtml)
     }
   }, [editorTop, initialTopHtml])
   useEffect(() => {
-    if (editorBot && initialBottomHtml && !editorBot.getText().trim()) {
+    if (editorBot && initialBottomHtml) {
       editorBot.commands.setContent(initialBottomHtml)
     }
   }, [editorBot, initialBottomHtml])
@@ -670,13 +412,15 @@ export default function DevisEditorPage() {
     setSendError(null)
     setSentOk(false)
     try {
+      // 1) Rafraîchir le modèle (examens, fluo, titre…) puis sauvegarder CE contenu en base
+      //    → patient / médecin relisent le même modèle que le PDF chat
+      const fullHtml = await inlineHtmlImages(buildDevisFullHtml())
       const topHtml = editorTopRef.current?.getHTML() ?? ''
       const botHtml = editorBotRef.current?.getHTML() ?? ''
       await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
       setSaved(true)
 
-      // Même HTML que « Exporter PDF » → rendu Chromium côté serveur (rendu identique)
-      const fullHtml = await inlineHtmlImages(buildDevisFullHtml())
+      // 2) Envoi chat avec le même HTML Chromium
       await gestionnaireApi.sendDevis(id, { html: fullHtml })
       setSentOk(true)
       toast({
@@ -704,7 +448,7 @@ export default function DevisEditorPage() {
       ?? patient.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
       ?? null
     const total = (dv?.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-    editorTop?.commands.setContent(refreshConvalescenceInTopHtml(buildTopHtml(patient), patient))
+    editorTop?.commands.setContent(refreshDossierFieldsInTopHtml(buildTopHtml(patient), patient))
     editorBot?.commands.setContent(buildBottomHtml(total, tndPerEur))
     setSaved(false)
   }
@@ -727,60 +471,20 @@ export default function DevisEditorPage() {
   const operationTitle =
     interventionLabel || firstLigneLabel || 'Séjour médical personnalisé'
 
-  /* Construit le HTML complet du devis personnalisé (utilisé pour l'impression et le PDF blob) */
+  /* Construit le HTML complet (même moteur que patient / médecin / chat). */
   const buildDevisFullHtml = () => {
-    const topHtml = editorTopRef.current?.getHTML() ?? ''
-    let botHtml   = editorBotRef.current?.getHTML() ?? ''
-    botHtml = replaceDevisAmountPlaceholders(botHtml, total, tndPerEur)
-
-    const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
-    const sigUrl  = `${window.location.origin}/signature.jpg`
-
-    const tableHtml = lignes.length > 0
-      ? buildDevisOfferBlockHtml({
-          operationTitle,
-          sejourLine,
-          totalFormatted: fmtNum(total),
-        })
-      : ''
-
-    const pdfTitle = formatDevisListName(
-      patient?.dossierNumber ?? devisHeaderRef,
-      patient?.user.fullName,
-      dv?.version ?? 1,
-    )
-
-    return `<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8"/>
-  <title>${pdfTitle}</title>
-  <style>${buildDevisPrintStyles()}</style>
-</head>
-<body>
-  <table class="page-table">
-    <thead>
-      <tr><td>
-        <div class="doc-header">
-          ${buildDevisHeaderLogoHtml(logoUrl)}
-          ${buildDevisHeaderRightHtml(devisHeaderRef)}
-        </div>
-      </td></tr>
-    </thead>
-    <tfoot><tr><td></td></tr></tfoot>
-    <tbody>
-      <tr><td>
-        <div class="doc-body devis-top">${topHtml}</div>
-        <div class="devis-closing">
-          ${tableHtml}
-          <div class="doc-body devis-bot">${botHtml}</div>
-          ${buildDevisDocumentEndHtml(sigUrl)}
-        </div>
-      </td></tr>
-    </tbody>
-  </table>
-</body>
-</html>`
+    if (!patient || !dv) return ''
+    let topHtml = editorTopRef.current?.getHTML() ?? ''
+    topHtml = refreshDossierFieldsInTopHtml(topHtml, patient)
+    editorTopRef.current?.commands.setContent(topHtml, { emitUpdate: false })
+    const botHtml = editorBotRef.current?.getHTML() ?? ''
+    return buildGestionnaireDevisExportHtml({
+      devis: dv,
+      patient,
+      topHtml,
+      botHtml,
+      tndPerEur,
+    })
   }
 
   /* Export PDF — même moteur Chromium que l’envoi chat (fichier identique) */
@@ -830,7 +534,10 @@ export default function DevisEditorPage() {
     </div>
   )
 
-  const draftForLetter = pickDevis(patient)
+  const draftForLetter =
+    patient.devis?.find((d) => d.statut === 'brouillon')
+    ?? patient.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
+    ?? null
   const showStaleLetterHint = Boolean(draftForLetter?.customContent?.trim())
 
   return (
@@ -888,9 +595,9 @@ export default function DevisEditorPage() {
       {showStaleLetterHint && (
         <div className="no-print shrink-0 mx-4 sm:mx-6 mb-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900 leading-snug">
           <strong className="font-semibold">Contenu personnalisable.</strong>{' '}
-          La <strong>clinique</strong> et l'<strong>hôtel</strong> se synchronisent automatiquement depuis le devis à chaque
-          ouverture. Le reste du texte vient de votre dernière sauvegarde ici. Pour tout régénérer à partir du dossier actuel,
-          cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
+          La <strong>clinique</strong>, l&apos;<strong>hôtel</strong> et les <strong>durées en nuits</strong> se synchronisent
+          automatiquement depuis le devis à chaque ouverture. Le reste du texte vient de votre dernière sauvegarde ici.
+          Pour tout régénérer à partir du dossier actuel, cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
         </div>
       )}
 
@@ -916,17 +623,13 @@ export default function DevisEditorPage() {
             gap: 22,
           }}
         >
-          {/* ── En-tête allégé : logo + référence ── */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0, gap: 12 }}>
+          {/* ── En-tête allégé : logo uniquement (réf. dans le corps « Devis MC-… ») ── */}
+          <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-start', flexShrink: 0 }}>
             <div
               dangerouslySetInnerHTML={{
                 __html: buildDevisHeaderLogoHtml(DEVIS_LOGO_SRC),
               }}
             />
-            <div style={{ textAlign: 'right', fontSize: 11, color: DEVIS_CHARTE.gray, lineHeight: 1.35 }}>
-              <p style={{ fontWeight: 700, fontSize: 13, color: DEVIS_ACCENT, margin: 0, letterSpacing: '0.02em' }}>{devisHeaderRef}</p>
-              <p style={{ margin: '3px 0 0', color: DEVIS_CHARTE.gray, fontSize: 10 }}>{DEVIS_HEADER_SUBTITLE_SHORT}</p>
-            </div>
           </div>
 
           {/* ── Zone éditable HAUTE ── */}

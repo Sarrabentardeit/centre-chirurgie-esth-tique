@@ -21,8 +21,16 @@ export const MEDECIN_TRAITES = [
   'suivi_termine',
 ] as const
 
-/** Dossiers en attente d'action côté gestionnaire (devis). */
+/**
+ * Dossiers non traités côté gestionnaire :
+ * du nouveau patient jusqu'au devis non encore envoyé.
+ * Passent en « traités » dès que le devis est envoyé.
+ */
 export const GESTIONNAIRE_NON_TRAITES = [
+  'nouveau',
+  'formulaire_en_cours',
+  'formulaire_complete',
+  'en_analyse',
   'rapport_genere',
   'devis_preparation',
 ] as const

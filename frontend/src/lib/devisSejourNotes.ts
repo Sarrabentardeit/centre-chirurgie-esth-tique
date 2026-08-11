@@ -97,8 +97,8 @@ export function parseNuitsField(s: string): number | null {
 }
 
 /**
- * Séjour total en jours = nuits clinique + nuits hôtel (sans +1).
- * Ex. : 3 + 4 nuits → 7 jours.
+ * Séjour total en nuits = nuits clinique + nuits hôtel (sans +1).
+ * Ex. : 3 + 4 → 7 nuits.
  */
 export function joursSejourFromNuits(cliniqueNuits: string, hotelNuits: string): string {
   const c = parseNuitsField(cliniqueNuits)
@@ -196,9 +196,9 @@ export function devisSejourDefaultsFromRapport(
   } else {
     // Repli : séjour total - nuits clinique
     const clin = cliniqueNuits !== '' ? Number(cliniqueNuits) : NaN
-    const jours = dureeSejourTotale !== '' ? Number(dureeSejourTotale) : NaN
-    if (Number.isFinite(clin) && Number.isFinite(jours) && jours >= 0) {
-      hotelNuits = String(Math.max(0, jours - clin))
+    const totalNuits = dureeSejourTotale !== '' ? Number(dureeSejourTotale) : NaN
+    if (Number.isFinite(clin) && Number.isFinite(totalNuits) && totalNuits >= 0) {
+      hotelNuits = String(Math.max(0, totalNuits - clin))
     }
   }
 
@@ -230,12 +230,12 @@ export function formatDevisSejourNotesForDisplay(notes: string | null | undefine
   if (p.hotelNom || p.hotelNuits) {
     const bits = [
       p.hotelNom && `Hôtel : ${p.hotelNom}`,
-      p.hotelNuits && `Nuits à l'hôtel : ${p.hotelNuits}`,
+      p.hotelNuits && `Nuit de convalescence à l'hôtel : ${p.hotelNuits}`,
     ].filter(Boolean)
     if (bits.length) parts.push(bits.join('\n'))
   }
   if (p.dureeSejourTotale) {
-    parts.push(`Durée séjour total : ${p.dureeSejourTotale} jour(s)`)
+    parts.push(`Durée séjour total : ${p.dureeSejourTotale} nuit(s)`)
   }
   if (p.nbAdultes || p.nbEnfants) {
     const bits = [

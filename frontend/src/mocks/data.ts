@@ -180,7 +180,7 @@ export const MOCK_DEVIS: Devis[] = [
     total: 475000,
     statut: 'envoye',
     planningMedical: 'Intervention prévue sur 3h. Hospitalisation 2 nuits. Retour à domicile J+2.',
-    notesSejour: 'Séjour recommandé de 7 jours minimum. Hébergement à proximité de la clinique disponible.',
+    notesSejour: 'Séjour recommandé de 7 nuits minimum. Hébergement à proximité de la clinique disponible.',
     version: 1,
   },
 ]

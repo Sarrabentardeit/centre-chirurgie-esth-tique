@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
+import { dispatchFormulaireAck } from '../gestionnaire/gestionnaire.service.js'
 import type { FormulaireSubmitInput, UpdateProfilInput, RepondreDevisInput, RepondreRendezVousInput } from './patient.schema.js'
 
 const RDV_PATIENT_ACCEPTED_TAG = 'PATIENT_DECISION:ACCEPTE'
@@ -141,7 +142,10 @@ export async function upsertFormulaire(userId: string, input: FormulaireSubmitIn
     })
     const patientProfile = await prisma.patient.findUnique({
       where: { id: patient.id },
-      select: { dossierNumber: true, user: { select: { fullName: true } } },
+      select: {
+        dossierNumber: true,
+        user: { select: { id: true, fullName: true } },
+      },
     })
     if (patientProfile) {
       await notifyMedecinsFormulaire({
@@ -149,6 +153,11 @@ export async function upsertFormulaire(userId: string, input: FormulaireSubmitIn
         titre: 'Nouveau formulaire patient soumis',
         message: `${patientProfile.user.fullName} (${patientProfile.dossierNumber}) a soumis son formulaire médical.`,
         lienAction: '/medecin/patients',
+      })
+      void dispatchFormulaireAck({
+        patientId: patient.id,
+        patientUserId: patientProfile.user.id,
+        patientFullName: patientProfile.user.fullName,
       })
     }
   } else if (patient.status === 'nouveau') {

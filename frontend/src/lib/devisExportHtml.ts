@@ -3,40 +3,77 @@ import {
   DEVIS_LOGO_SRC,
   buildDevisDocumentEndHtml,
   buildDevisHeaderLogoHtml,
-  buildDevisHeaderRightHtml,
 } from '@/lib/devisBranding'
 import { buildDevisOfferBlockHtml, buildDevisPrintStyles } from '@/lib/devisCharte'
-import { parseSejourMeta } from '@/lib/devisSejourNotes'
+import {
+  buildDevisLetterBottomHtml,
+  buildDevisLetterTopHtml,
+  letterContextFromGestionnairePatient,
+  refreshDevisLetterTopHtml,
+  sejourPdfFromContext,
+  type DevisLetterContext,
+} from '@/lib/devisLetterHtml'
 import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { formatDevisListName, getDevisDisplayNumber } from '@/lib/utils'
 
-const CONTENT_BREAK = '|||EDITOR_BREAK|||'
+export const DEVIS_CONTENT_BREAK = '|||EDITOR_BREAK|||'
 
 function fmtNum(n: number): string {
   return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(n || 0))
 }
 
-function sejourLineFromDevis(d: Devis): string {
-  const sej = parseSejourMeta(d.notesSejour)
-  const nClin = Number.parseInt((sej.cliniqueNuits || '').trim(), 10)
-  const nHotel = Number.parseInt((sej.hotelNuits || '').trim(), 10)
-  const totalNights =
-    (Number.isFinite(nClin) ? Math.max(0, nClin) : 0) +
-    (Number.isFinite(nHotel) ? Math.max(0, nHotel) : 0)
-  if (totalNights <= 0) return ''
-  const jours = totalNights
-  return `Séjour ${jours} jour${jours > 1 ? 's' : ''} (${totalNights} nuit${totalNights > 1 ? 's' : ''})`
+/**
+ * Découpe + rafraîchit le customContent (même règles que le PDF).
+ * À sauvegarder en base pour que patient / médecin voient le bon modèle.
+ */
+export function refreshDevisCustomContentParts(input: {
+  customContent?: string | null
+  devis: Devis
+  letterContext: DevisLetterContext
+  tndPerEur?: number
+}): { topHtml: string; botHtml: string; contentToSave: string } {
+  const tndPerEur = input.tndPerEur ?? DEFAULT_TND_PER_EUR
+  const total = (input.devis.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+  const raw = input.customContent?.trim() ?? ''
+  let topHtml = ''
+  let botHtml = ''
+  if (raw.includes(DEVIS_CONTENT_BREAK)) {
+    const [t, b] = raw.split(DEVIS_CONTENT_BREAK)
+    topHtml = t ?? ''
+    botHtml = b ?? ''
+  } else if (raw) {
+    topHtml = raw
+  }
+
+  const ctx: DevisLetterContext = {
+    ...input.letterContext,
+    activeDevis: input.devis,
+  }
+  if (!topHtml.trim()) topHtml = buildDevisLetterTopHtml(ctx)
+  if (!botHtml.trim()) botHtml = buildDevisLetterBottomHtml(total, tndPerEur)
+  topHtml = refreshDevisLetterTopHtml(topHtml, ctx)
+  botHtml = replaceDevisAmountPlaceholders(botHtml, total, tndPerEur)
+  return {
+    topHtml,
+    botHtml,
+    contentToSave: `${topHtml}${DEVIS_CONTENT_BREAK}${botHtml}`,
+  }
 }
 
 /**
- * HTML PDF devis — même structure que l’export gestionnaire / envoi chat.
+ * HTML PDF devis — même structure / rafraîchissement que l’éditeur gestionnaire.
  */
 export function buildDevisExportHtml(input: {
   devis: Devis
   dossierNumber: string
   patientFullName: string
+  /** Rapport + formulaires si dispo (gestionnaire) ; sinon refresh partiel depuis notes devis. */
+  letterContext?: DevisLetterContext | null
   origin?: string
   tndPerEur?: number
+  /** HTML haut déjà saisi (éditeur) — sinon customContent du devis. */
+  topHtml?: string
+  botHtml?: string
 }): string {
   const { devis: d, dossierNumber, patientFullName } = input
   const origin = input.origin ?? (typeof window !== 'undefined' ? window.location.origin : '')
@@ -47,23 +84,46 @@ export function buildDevisExportHtml(input: {
   const headerRef = getDevisDisplayNumber(d, dossierNumber) || dossierNumber
   const pdfTitle = formatDevisListName(headerRef || dossierNumber, patientFullName, d.version)
 
-  const raw = d.customContent?.trim() ?? ''
-  let topHtml = ''
-  let botHtml = ''
-  if (raw) {
-    if (raw.includes(CONTENT_BREAK)) {
-      const [t, b] = raw.split(CONTENT_BREAK)
-      topHtml = t ?? ''
-      botHtml = b ?? ''
-    } else {
-      topHtml = raw
+  let topHtml = input.topHtml ?? ''
+  let botHtml = input.botHtml ?? ''
+  if (!input.topHtml && !input.botHtml) {
+    const raw = d.customContent?.trim() ?? ''
+    if (raw) {
+      if (raw.includes(DEVIS_CONTENT_BREAK)) {
+        const [t, b] = raw.split(DEVIS_CONTENT_BREAK)
+        topHtml = t ?? ''
+        botHtml = b ?? ''
+      } else {
+        topHtml = raw
+      }
     }
   }
+
+  const ctx: DevisLetterContext = input.letterContext ?? {
+    dossierNumber,
+    activeDevis: d,
+    devis: [d],
+    patient: { fullName: patientFullName },
+  }
+  // Toujours cibler le devis exporté
+  const ctxForRefresh: DevisLetterContext = {
+    ...ctx,
+    dossierNumber,
+    activeDevis: d,
+    patient: ctx.patient ?? { fullName: patientFullName },
+  }
+  if (!topHtml.trim()) {
+    topHtml = buildDevisLetterTopHtml(ctxForRefresh)
+  }
+  if (!botHtml.trim()) {
+    botHtml = buildDevisLetterBottomHtml(total, tndPerEur)
+  }
+  topHtml = refreshDevisLetterTopHtml(topHtml, ctxForRefresh)
   botHtml = replaceDevisAmountPlaceholders(botHtml, total, tndPerEur)
 
   const operationTitle =
     lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
-  const sejourLine = sejourLineFromDevis(d)
+  const sejourLine = sejourPdfFromContext(ctxForRefresh).sejourLine
   const tableHtml =
     lignes.length > 0
       ? buildDevisOfferBlockHtml({
@@ -89,7 +149,6 @@ export function buildDevisExportHtml(input: {
       <tr><td>
         <div class="doc-header">
           ${buildDevisHeaderLogoHtml(logoUrl)}
-          ${buildDevisHeaderRightHtml(headerRef)}
         </div>
       </td></tr>
     </thead>
@@ -107,4 +166,30 @@ export function buildDevisExportHtml(input: {
   </table>
 </body>
 </html>`
+}
+
+/** Contexte complet gestionnaire → export / envoi chat. */
+export function buildGestionnaireDevisExportHtml(input: {
+  devis: Devis
+  patient: {
+    dossierNumber: string
+    user: { fullName: string }
+    devis?: Devis[] | null
+    rapports?: DevisLetterContext['rapports']
+    formulaires?: DevisLetterContext['formulaires']
+  }
+  topHtml?: string
+  botHtml?: string
+  tndPerEur?: number
+}): string {
+  const letterContext = letterContextFromGestionnairePatient(input.patient, input.devis)
+  return buildDevisExportHtml({
+    devis: input.devis,
+    dossierNumber: input.patient.dossierNumber,
+    patientFullName: input.patient.user.fullName,
+    letterContext,
+    topHtml: input.topHtml,
+    botHtml: input.botHtml,
+    tndPerEur: input.tndPerEur,
+  })
 }

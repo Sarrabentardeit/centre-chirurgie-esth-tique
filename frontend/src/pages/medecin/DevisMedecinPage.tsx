@@ -5,19 +5,22 @@ import {
   Calendar, Eye, EyeOff, FileText,
 } from 'lucide-react'
 import { medecinApi, type DevisWithPatient, type DevisLigne } from '@/lib/api'
-import { formatDevisListName, formatDevisTitle, getDevisDisplayNumber, cn } from '@/lib/utils'
-import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
+import { formatDevisPdfFileName, formatDevisTitle, getDevisDisplayNumber, cn } from '@/lib/utils'
+import { DEVIS_OFFER_PREVIEW_CSS, buildDevisOfferBlockHtml } from '@/lib/devisCharte'
 import {
-  DEVIS_LOGO_SRC,
-  buildDevisDocumentEndHtml, buildDevisHeaderLogoHtml, buildDevisHeaderRightHtml, layoutDevisForPrint,
-} from '@/lib/devisBranding'
-import { DEVIS_OFFER_PREVIEW_CSS, buildDevisOfferBlockHtml, buildDevisPrintStyles } from '@/lib/devisCharte'
+  buildDevisExportHtml,
+  DEVIS_CONTENT_BREAK,
+  refreshDevisCustomContentParts,
+} from '@/lib/devisExportHtml'
+import { sejourPdfFromContext } from '@/lib/devisLetterHtml'
 import { parseSejourMeta } from '@/lib/devisSejourNotes'
+import { inlineHtmlImages } from '@/lib/pdf'
 import { StatusBadge } from '@/lib/statusUi'
 import { EmptyState } from '@/components/EmptyState'
 import { KpiStrip } from '@/components/PageHeader'
+import { toast } from '@/store/toastStore'
 
-const CONTENT_BREAK = '|||EDITOR_BREAK|||'
+const CONTENT_BREAK = DEVIS_CONTENT_BREAK
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 const fmtDate = (iso: string) =>
@@ -34,13 +37,22 @@ function initials(name: string) {
 }
 
 function sejourLineFromDevis(d: DevisWithPatient) {
-  const sej = parseSejourMeta(d.notesSejour)
-  const nC = parseInt(sej.cliniqueNuits) || 0
-  const nH = parseInt(sej.hotelNuits) || 0
-  const tot = nC + nH
-  if (!tot) return ''
-  const j = tot + 1
-  return `Séjour ${j} jour${j > 1 ? 's' : ''} (${tot} nuit${tot > 1 ? 's' : ''})`
+  return sejourPdfFromContext({
+    dossierNumber: d.patient.dossierNumber,
+    activeDevis: d,
+  }).sejourLine
+}
+
+function letterParts(dv: DevisWithPatient) {
+  return refreshDevisCustomContentParts({
+    customContent: dv.customContent,
+    devis: dv,
+    letterContext: {
+      dossierNumber: dv.patient.dossierNumber,
+      activeDevis: dv,
+      patient: { fullName: dv.patient.fullName },
+    },
+  })
 }
 
 /* ── Statut config ────────────────────────────────────────────────────────── */
@@ -56,67 +68,39 @@ function Badge({ statut }: { statut: string }) {
   return <StatusBadge kind="devis" value={statut} />
 }
 
-/* ── PDF Builder ──────────────────────────────────────────────────────────── */
-function exportPdf(dv: DevisWithPatient) {
-  const raw = dv.customContent ?? ''
-  let topHtml = '', botHtml = ''
-  if (raw.includes(CONTENT_BREAK)) {
-    const [t, b] = raw.split(CONTENT_BREAK)
-    topHtml = t ?? ''; botHtml = b ?? ''
-  } else { topHtml = raw }
-  botHtml = replaceDevisAmountPlaceholders(botHtml, dv.total, DEFAULT_TND_PER_EUR)
-
-  const lignes = (dv.lignes ?? []) as DevisLigne[]
-  const opTitle = lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
-  const sejourLine = sejourLineFromDevis(dv)
-  const ref = getDevisDisplayNumber(dv, dv.patient.dossierNumber) || dv.patient.dossierNumber
-  const pdfTitle = formatDevisListName(dv.patient.dossierNumber, dv.patient.fullName, dv.version)
-
-  const tableHtml = lignes.length > 0
-    ? buildDevisOfferBlockHtml({
-        operationTitle: opTitle,
-        sejourLine,
-        totalFormatted: fmtNum(dv.total),
-      })
-    : ''
-
-  const popup = window.open('', '_blank', 'width=1050,height=960')
-  if (!popup) { window.alert('Autorisez les popups pour exporter en PDF.'); return }
-
-  const logoUrl = `${window.location.origin}${DEVIS_LOGO_SRC}`
-  const sigUrl  = `${window.location.origin}/signature.jpg`
-  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"/>
-<title>${pdfTitle}</title><style>${buildDevisPrintStyles()}</style></head>
-<body><table class="page-table">
-  <thead><tr><td><div class="doc-header">
-    ${buildDevisHeaderLogoHtml(logoUrl)}
-    ${buildDevisHeaderRightHtml(ref)}
-  </div></td></tr></thead>
-  <tfoot><tr><td></td></tr></tfoot>
-  <tbody><tr><td>
-    <div class="doc-body devis-top">${topHtml}</div>
-    <div class="devis-closing">
-      ${tableHtml}
-      <div class="doc-body devis-bot">${botHtml}</div>
-      ${buildDevisDocumentEndHtml(sigUrl)}
-    </div>
-  </td></tr></tbody>
-</table></body></html>`
-
-  popup.document.open(); popup.document.write(html); popup.document.close(); popup.focus()
-  const waitAndPrint = () => {
-    const imgs = Array.from(popup.document.images)
-    const printNow = () => { layoutDevisForPrint(popup.document); popup.print(); popup.close() }
-    if (!imgs.length) { printNow(); return }
-    let loaded = 0
-    const done = () => { if (++loaded >= imgs.length) printNow() }
-    imgs.forEach((img) => {
-      if (img.complete) done()
-      else { img.addEventListener('load', done, { once: true }); img.addEventListener('error', done, { once: true }) }
+/* ── PDF — même moteur Chromium que gestionnaire / patient / chat ─────────── */
+async function exportPdf(dv: DevisWithPatient) {
+  try {
+    const { topHtml, botHtml } = letterParts(dv)
+    const html = await inlineHtmlImages(
+      buildDevisExportHtml({
+        devis: dv,
+        dossierNumber: dv.patient.dossierNumber,
+        patientFullName: dv.patient.fullName,
+        topHtml,
+        botHtml,
+      }),
+    )
+    const blob = await medecinApi.renderDevisPdf(html)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = formatDevisPdfFileName(
+      getDevisDisplayNumber(dv, dv.patient.dossierNumber) || dv.patient.dossierNumber,
+      dv.patient.fullName,
+      dv.version,
+    )
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast({
+      title: 'Export PDF impossible',
+      description: e instanceof Error ? e.message : undefined,
+      variant: 'error',
     })
-    setTimeout(() => { if (loaded < imgs.length) printNow() }, 2000)
   }
-  setTimeout(waitAndPrint, 200)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -230,13 +214,9 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
   const sejourLine = sejourLineFromDevis(dv)
 
   const raw = dv.customContent ?? ''
-  let topHtml = '', botHtml = ''
-  if (raw.includes(CONTENT_BREAK)) {
-    const [t, b] = raw.split(CONTENT_BREAK)
-    topHtml = (t ?? '').trim(); botHtml = (b ?? '').trim()
-  } else {
-    topHtml = raw.trim()
-  }
+  let botHtml = ''
+  if (raw.includes(CONTENT_BREAK)) botHtml = (raw.split(CONTENT_BREAK)[1] ?? '').trim()
+  const { topHtml } = letterParts(dv)
   const hasContent = !!raw.trim()
   const cfg = STATUT[dv.statut as Statut]
 
@@ -256,7 +236,7 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
     { label: 'Nuits clinique', value: sej.cliniqueNuits },
     { label: 'Hôtel', value: sej.hotelNom },
     { label: 'Nuits hôtel', value: sej.hotelNuits },
-    { label: 'Durée totale', value: sej.dureeSejourTotale ? `${sej.dureeSejourTotale} jours` : '' },
+    { label: 'Durée totale', value: sej.dureeSejourTotale ? `${sej.dureeSejourTotale} nuit(s)` : '' },
     {
       label: 'Accompagnants',
       value: [
@@ -299,7 +279,7 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => exportPdf(dv)}
+                onClick={() => void exportPdf(dv)}
                 className="inline-flex items-center gap-1.5 h-9 min-h-9 px-3 rounded-lg bg-[#81572d] text-white text-xs font-semibold hover:bg-[#6d4926] transition-colors"
               >
                 <Printer className="h-3.5 w-3.5" />
@@ -413,7 +393,7 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
                     <p className="text-[11px] font-medium text-muted-foreground">Aperçu du devis PDF</p>
                     <button
                       type="button"
-                      onClick={() => exportPdf(dv)}
+                      onClick={() => void exportPdf(dv)}
                       className="text-[11px] font-semibold text-[#81572d] hover:underline inline-flex items-center gap-1"
                     >
                       <Printer className="h-3 w-3" />
@@ -422,9 +402,13 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
                   </div>
                   <div className="p-3 sm:p-4">
                     <div className="rounded-lg bg-white border border-black/5 px-4 py-5 sm:px-6 sm:py-6 space-y-4 text-[13px] leading-[1.7] text-[#282727]
-                      [&_.devis-heading]:my-2.5 [&_.devis-heading]:border-l-4 [&_.devis-heading]:border-[#81572d]
-                      [&_.devis-heading]:bg-[#fdeada] [&_.devis-heading]:px-3 [&_.devis-heading]:py-2 [&_.devis-heading]:text-[#81572d]
-                      [&_p]:my-0 [&_p]:mb-2 [&_ul]:my-0 [&_ul]:mb-2 [&_ul]:pl-5 [&_li]:mb-1">
+                      [&_.devis-heading]:my-2.5 [&_.devis-heading]:border-0 [&_.devis-heading]:bg-transparent
+                      [&_.devis-heading]:px-0 [&_.devis-heading]:py-0 [&_.devis-heading]:text-[#81572d] [&_.devis-heading]:font-bold
+                      [&_p]:my-0 [&_p]:mb-2
+                      [&_ol]:my-2 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:marker:text-[#282727]
+                      [&_ul]:my-0 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5
+                      [&_li]:mb-1.5
+                      [&_mark]:rounded-sm [&_mark]:px-0.5">
                       {topHtml && <div dangerouslySetInnerHTML={{ __html: topHtml }} />}
                       {lignes.length > 0 && (
                         <div
@@ -453,7 +437,7 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
                   </p>
                   <button
                     type="button"
-                    onClick={() => exportPdf(dv)}
+                    onClick={() => void exportPdf(dv)}
                     className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[#81572d] text-white text-xs font-semibold"
                   >
                     <Printer className="h-3.5 w-3.5" />
@@ -483,7 +467,7 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
             </button>
             <button
               type="button"
-              onClick={() => exportPdf(dv)}
+              onClick={() => void exportPdf(dv)}
               className="flex-1 sm:flex-none h-11 sm:h-10 px-4 rounded-lg bg-[#81572d] text-white text-sm font-semibold hover:bg-[#6d4926] transition-colors inline-flex items-center justify-center gap-2"
             >
               <Printer className="h-4 w-4" />

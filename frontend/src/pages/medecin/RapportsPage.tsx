@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState, useMemo } from 'react'
+﻿import { useCallback, useEffect, useState, useMemo, type ElementType, type ReactNode } from 'react'
 import {
   Search, CheckCircle2, Clock, X, AlertTriangle, Heart, Scissors,
   Save, RefreshCw, AlertCircle, DollarSign, StickyNote, ExternalLink,
-  ClipboardPlus, Sparkles, ChevronDown, ChevronUp,
+  ClipboardPlus, Sparkles, ArrowLeft,
   Phone, Mail, MapPin, Activity, Calendar,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -21,7 +21,7 @@ import { medecinApi } from '@/lib/api'
 import type { PatientListItem } from '@/lib/api'
 import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface Rapport {
   id: string
@@ -35,6 +35,8 @@ interface Rapport {
   nuitsHotel?: number | null
   vetementContention?: boolean | null
   anesthesieGenerale?: boolean | null
+  drainage?: boolean | null
+  nbSeancesDrainage?: number | null
   dureeSejourTunisie?: number | null
   nbAdultesSejour?: number | null
   nbEnfantsSejour?: number | null
@@ -115,34 +117,48 @@ function CompletionRing({ pct }: { pct: number }) {
   )
 }
 
-// ─── Section collapsible ──────────────────────────────────────────────────────
+// â”€â”€â”€ Section collapsible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function Section({ icon: Icon, title, subtitle, color, open, onToggle, children }: {
-  icon: React.ElementType; title: string; subtitle?: string
-  color: string; open: boolean; onToggle: () => void; children: React.ReactNode
+function FormBlock({ icon: Icon, title, hint, required, children }: {
+  icon: ElementType
+  title: string
+  hint?: string
+  required?: boolean
+  children: ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-border overflow-hidden">
-      <button
-        type="button"
-        onClick={onToggle}
-        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${open ? 'bg-muted/30' : 'hover:bg-muted/20'}`}
-      >
-        <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
+    <section className="rounded-2xl border border-border bg-white p-4 sm:p-5 space-y-4">
+      <header className="flex items-start gap-3">
+        <div className="h-9 w-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
           <Icon className="h-4 w-4" />
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold leading-tight">{title}</p>
-          {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{subtitle}</p>}
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+            {title}
+            {required && (
+              <span className="text-[10px] font-bold uppercase tracking-wide text-destructive">Obligatoire</span>
+            )}
+          </h2>
+          {hint && <p className="text-[12px] text-muted-foreground mt-0.5">{hint}</p>}
         </div>
-        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-      </button>
-      {open && <div className="px-4 pb-4 pt-3 border-t border-border/60 space-y-2">{children}</div>}
-    </div>
+      </header>
+      {children}
+    </section>
   )
 }
 
-// ─── Page principale ──────────────────────────────────────────────────────────
+function FieldLabel({ children, required }: { children: ReactNode; required?: boolean }) {
+  return (
+    <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">
+      {children}
+      {required && <span className="text-destructive ml-0.5">*</span>}
+    </label>
+  )
+}
+
+type ListBucket = 'all' | 'a_analyser' | 'rediges' | 'forfait'
+
+// â”€â”€â”€ Page principale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function RapportsPage() {
   const navigate = useNavigate()
@@ -152,6 +168,7 @@ export default function RapportsPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
   const [search, setSearch]     = useState('')
+  const [listBucket, setListBucket] = useState<ListBucket>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
@@ -171,21 +188,18 @@ export default function RapportsPage() {
   const [nbAdultesSejour, setNbAdultesSejour] = useState('')
   const [nbEnfantsSejour, setNbEnfantsSejour] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
+  const [drainage, setDrainage] = useState<boolean | null>(null)
+  const [nbSeancesDrainage, setNbSeancesDrainage] = useState('')
   const [notes, setNotes]                 = useState('')
   const [saving, setSaving]               = useState(false)
   const [saved, setSaved]                 = useState(false)
   const [saveError, setSaveError]         = useState<string | null>(null)
 
-  // Sections ouvertes
-  const [openSections, setOpenSections] = useState({
-    diagnostic: true,
-    examens: true,
-    interventions: true,
-    forfait: true,
-    clinique: true,
-    notes: false,
-  })
-  const toggleSection = (k: keyof typeof openSections) => setOpenSections((s) => ({ ...s, [k]: !s[k] }))
+  const closeEditor = () => {
+    setDrawerOpen(false)
+    setSelectedId(null)
+    setSaveError(null)
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -222,7 +236,8 @@ export default function RapportsPage() {
     setSelectedId(patientId)
     setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
     setNuitsPreoperatoires('1'); setNuitsClinique(''); setNuitsHotel(''); setVetementContention(null)
-    setDureeSejourTunisie(''); setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false); setNotes('')
+    setDureeSejourTunisie(''); setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false)
+    setDrainage(null); setNbSeancesDrainage(''); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
     try {
@@ -254,6 +269,8 @@ export default function RapportsPage() {
         setNbAdultesSejour(r.nbAdultesSejour != null ? String(r.nbAdultesSejour) : '')
         setNbEnfantsSejour(r.nbEnfantsSejour != null ? String(r.nbEnfantsSejour) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
+        setDrainage(r.drainage ?? null)
+        setNbSeancesDrainage(r.nbSeancesDrainage != null ? String(r.nbSeancesDrainage) : '')
         setNotes(r.notes ?? '')
         setPatients((prev) => prev.map((p) => p.id === patientId ? { ...p, rapport: r } : p))
         if (r.nbAdultesSejour == null && r.nbEnfantsSejour == null) {
@@ -282,11 +299,15 @@ export default function RapportsPage() {
       return
     }
     if (nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '') {
-      setSaveError('Nuits préopératoires, postopératoires et hôtel sont obligatoires.')
+      setSaveError('Nuit préparatoire en clinique, nuits postopératoires et nuit de convalescence à l\'hôtel sont obligatoires.')
       return
     }
     if (vetementContention === null) {
       setSaveError('Indiquez si un vêtement de contention est prescrit.')
+      return
+    }
+    if (drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1)) {
+      setSaveError('Indiquez le nombre de séances de drainage.')
       return
     }
     const nPre = Number(nuitsPreoperatoires)
@@ -311,12 +332,15 @@ export default function RapportsPage() {
         nuitsClinique: nPost,
         nuitsHotel: nHotel,
         vetementContention,
-        dureeSejourTunisie: dureeSejourTunisie === '' ? totalTunisie : Number(dureeSejourTunisie),
+        dureeSejourTunisie: totalTunisie,
         nbAdultesSejour: nbAdultesSejour === '' ? undefined : Number(nbAdultesSejour),
         nbEnfantsSejour: nbEnfantsSejour === '' ? undefined : Number(nbEnfantsSejour),
         anesthesieGenerale,
+        drainage: drainage ?? undefined,
+        nbSeancesDrainage: drainage === true ? Number(nbSeancesDrainage) : null,
         notes: notes || undefined,
       })
+      setDureeSejourTunisie(String(totalTunisie))
       setSaved(true)
       toast({ title: 'Rapport enregistré', description: 'Le diagnostic a été sauvegardé.', variant: 'success' })
       setTimeout(() => setSaved(false), 3000)
@@ -334,10 +358,12 @@ export default function RapportsPage() {
               nuitsClinique: nPost,
               nuitsHotel: nHotel,
               vetementContention,
-              dureeSejourTunisie: dureeSejourTunisie === '' ? totalTunisie : Number(dureeSejourTunisie),
+              dureeSejourTunisie: totalTunisie,
               nbAdultesSejour: nbAdultesSejour === '' ? null : Number(nbAdultesSejour),
               nbEnfantsSejour: nbEnfantsSejour === '' ? null : Number(nbEnfantsSejour),
               anesthesieGenerale,
+              drainage,
+              nbSeancesDrainage: drainage === true ? Number(nbSeancesDrainage) : null,
               notes,
               createdAt: new Date().toISOString(),
             },
@@ -350,139 +376,408 @@ export default function RapportsPage() {
     }
   }
 
+  const stats = useMemo(() => ({
+    aAnalyser:   patients.filter((p) => !patientHasRapport(p) && (p.status === 'formulaire_complete' || p.status === 'en_analyse')).length,
+    total:       patients.filter((p) => patientHasRapport(p)).length,
+    avecForfait: patients.filter((p) => p.rapport?.forfaitPropose).length,
+  }), [patients])
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return patients
+    let list = patients
+    if (listBucket === 'a_analyser') {
+      list = list.filter((p) => !patientHasRapport(p) && (p.status === 'formulaire_complete' || p.status === 'en_analyse'))
+    } else if (listBucket === 'rediges') {
+      list = list.filter((p) => patientHasRapport(p))
+    } else if (listBucket === 'forfait') {
+      list = list.filter((p) => !!p.rapport?.forfaitPropose)
+    }
+    if (!search.trim()) return list
     const q = search.toLowerCase()
-    return patients.filter((p) =>
+    return list.filter((p) =>
       p.user.fullName.toLowerCase().includes(q) ||
       p.dossierNumber.toLowerCase().includes(q) ||
       p.rapport?.diagnostic?.toLowerCase().includes(q)
     )
-  }, [patients, search])
+  }, [patients, search, listBucket])
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
   const examensCount = examensDemandes.length + (examensAutreChecked ? 1 : 0)
   const pct = completionScore(diagnostic, examensDemandes, examensAutreChecked, interventions, forfait, valeur, notes, nuitsClinique)
+  const sejourCliniqueTotal = (Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0)
+  const sejourTunisieAuto = sejourCliniqueTotal + (Number(nuitsHotel) || 0)
 
-  const stats = {
-    aAnalyser:   patients.filter((p) => !patientHasRapport(p) && (p.status === 'formulaire_complete' || p.status === 'en_analyse')).length,
-    total:       patients.filter((p) => patientHasRapport(p)).length,
-    avecForfait: patients.filter((p) => p.rapport?.forfaitPropose).length,
-  }
-
-  // ── Tableau ──────────────────────────────────────────────────────────────────
-
-  function TableRow({ p }: { p: PatientWithRapport }) {
-    const isSelected    = p.id === selectedId
-    const hasRapport    = patientHasRapport(p)
-    const needsAnalysis = !hasRapport && (p.status === 'formulaire_complete' || p.status === 'en_analyse')
-    const rowPct = p.rapport
-      ? completionScore(
-          p.rapport.diagnostic ?? '',
-          p.rapport.examensDemandes ?? [],
-          false,
-          (p.rapport.interventionsRecommandees ?? []).join('\n'),
-          p.rapport.forfaitPropose?.toString() ?? '',
-          p.rapport.valeurMedicale ?? '',
-          p.rapport.notes ?? '',
-          p.rapport.nuitsClinique?.toString() ?? '',
-        )
-      : hasRapport ? 50 : 0
-
-    return (
-      <tr
-        onClick={() => void handleSelect(p.id)}
-        className={`cursor-pointer transition-colors border-b border-border/50 last:border-0
-          ${isSelected ? 'bg-brand-50' : 'hover:bg-muted/40'}`}
-      >
-        {/* Patient */}
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="relative shrink-0">
-              <Avatar className="h-9 w-9">
-                <AvatarFallback className={`text-xs font-bold ${
-                  needsAnalysis ? 'bg-amber-100 text-amber-700' :
-                  hasRapport    ? 'bg-emerald-100 text-emerald-700' :
-                                  'bg-brand-100 text-brand-700'
-                }`}>
-                  {getInitials(p.user.fullName)}
-                </AvatarFallback>
-              </Avatar>
-              {needsAnalysis && !hasRapport && (
-                <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 border-2 border-white animate-pulse" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
-              <p className="text-[11px] font-mono text-brand-600 whitespace-nowrap">{p.dossierNumber}</p>
-            </div>
-          </div>
-        </td>
-
-        {/* Statut */}
-        <td className="px-3 py-3 hidden sm:table-cell">
-          <StatusBadge kind="dossier" value={p.status} />
-        </td>
-
-        {/* Completion */}
-        <td className="px-3 py-3 hidden md:table-cell">
-          {hasRapport ? (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden max-w-[80px]">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    rowPct === 100 ? 'bg-emerald-500' : rowPct >= 60 ? 'bg-indigo-500' : 'bg-amber-400'
-                  }`}
-                  style={{ width: `${rowPct}%` }}
-                />
-              </div>
-              <span className="text-[11px] text-muted-foreground font-medium">{rowPct}%</span>
-            </div>
-          ) : (
-            <span className="text-[11px] text-muted-foreground italic">—</span>
-          )}
-        </td>
-
-        {/* Forfait */}
-        <td className="px-3 py-3 hidden lg:table-cell">
-          {p.rapport?.forfaitPropose ? (
-            <span className="text-sm font-semibold text-brand-700">
-              {p.rapport.forfaitPropose.toLocaleString('fr-TN')} TND
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">—</span>
-          )}
-        </td>
-
-        {/* Dernière modif */}
-        <td className="px-3 py-3 hidden lg:table-cell">
-          <span className="text-[11px] text-muted-foreground">{formatRelative(p.updatedAt)}</span>
-        </td>
-
-        {/* Action */}
-        <td className="px-3 py-3 text-right">
-          <Button
-            size="sm"
-            variant={isSelected ? 'brand' : hasRapport ? 'outline' : 'ghost'}
-            className={`h-7 text-xs gap-1 ${!hasRapport && !isSelected ? 'text-amber-600 border border-amber-200 bg-amber-50 hover:bg-amber-100' : ''}`}
-            onClick={(e) => { e.stopPropagation(); void handleSelect(p.id) }}
-          >
-            {hasRapport ? 'À modifier' : 'À rédiger'}
-          </Button>
-        </td>
-      </tr>
+  function rowCompletion(p: PatientWithRapport) {
+    if (!p.rapport) return patientHasRapport(p) ? 50 : 0
+    return completionScore(
+      p.rapport.diagnostic ?? '',
+      p.rapport.examensDemandes ?? [],
+      false,
+      (p.rapport.interventionsRecommandees ?? []).join('\n'),
+      p.rapport.forfaitPropose?.toString() ?? '',
+      p.rapport.valeurMedicale ?? '',
+      p.rapport.notes ?? '',
+      p.rapport.nuitsClinique?.toString() ?? '',
     )
   }
 
-  return (
-    <div className="max-w-7xl mx-auto space-y-4 sm:space-y-5">
+  /* ── Vue éditeur plein écran (pas de panneau latéral) ── */
+  if (drawerOpen && selected) {
+    return (
+      <div className="max-w-6xl mx-auto space-y-4 sm:space-y-5 pb-24 lg:pb-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3 min-w-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 p-0 shrink-0"
+              onClick={closeEditor}
+              aria-label="Retour à la liste"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Rapport médical</p>
+              <h1 className="font-display text-2xl sm:text-[1.65rem] font-semibold text-brand-950 tracking-tight leading-tight truncate">
+                {selected.user.fullName}
+              </h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-mono text-brand-700 bg-brand-50 border border-brand-200 px-2 py-0.5 rounded-md">
+                  {selected.dossierNumber}
+                </span>
+                <StatusBadge kind="dossier" value={selected.status} />
+                {saved ? (
+                  <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Enregistré
+                  </span>
+                ) : !selected.rapport ? (
+                  <span className="text-xs text-amber-700 font-medium flex items-center gap-1">
+                    <AlertTriangle className="h-3.5 w-3.5" /> Brouillon
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
 
+          <div className="flex items-center gap-2 shrink-0 sm:pt-1">
+            <div className="hidden sm:flex items-center gap-2 mr-1">
+              <CompletionRing pct={pct} />
+              <span className="text-xs text-muted-foreground tabular-nums">{pct}%</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={() => navigate(`/medecin/patients/${selected.id}`)}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Dossier</span>
+            </Button>
+            <Button
+              variant="brand"
+              size="sm"
+              className="h-9 gap-2 font-semibold"
+              onClick={() => void handleSave()}
+              disabled={!diagnostic.trim() || saving}
+            >
+              {saved
+                ? <><CheckCircle2 className="h-4 w-4" /> OK</>
+                : <><Save className="h-4 w-4" /> {saving ? '…' : selected.rapport ? 'Mettre à jour' : 'Enregistrer'}</>}
+            </Button>
+          </div>
+        </div>
+
+        {/* Bandeau patient */}
+        <div className="rounded-2xl border border-border bg-white px-4 py-3 sm:px-5 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
+          <div className="flex items-center gap-3 min-w-0">
+            <Avatar className="h-11 w-11 shrink-0">
+              <AvatarFallback className="bg-teal-100 text-teal-800 text-sm font-bold">
+                {getInitials(selected.user.fullName)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 text-[12px] text-muted-foreground space-y-0.5">
+              {selected.user.email && (
+                <p className="flex items-center gap-1.5 truncate"><Mail className="h-3 w-3 shrink-0" />{selected.user.email}</p>
+              )}
+              {selected.phone && (
+                <p className="flex items-center gap-1.5"><Phone className="h-3 w-3 shrink-0" />{selected.phone}</p>
+              )}
+              {(selected.ville || selected.pays) && (
+                <p className="flex items-center gap-1.5"><MapPin className="h-3 w-3 shrink-0" />{[selected.ville, selected.pays].filter(Boolean).join(', ')}</p>
+              )}
+            </div>
+          </div>
+          <div className="flex-1 min-w-0 sm:max-w-xs sm:ml-auto">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <Activity className="h-3 w-3" /> Complétion
+              </span>
+              <span className="text-[11px] font-bold tabular-nums text-slate-700">{pct}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : pct >= 60 ? 'bg-teal-500' : 'bg-amber-400'}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {selected.rapport && (
+              <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                Dernière version · {formatDate(selected.rapport.createdAt)}
+                {user?.name ? ` · Dr. ${user.name}` : ''}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {saveError && (
+          <div className="flex items-start gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" /> {saveError}
+          </div>
+        )}
+
+        {/* Formulaire 2 colonnes */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-7 space-y-4">
+            <FormBlock icon={Heart} title="Diagnostic" required hint="Évaluation clinique principale">
+              <Textarea
+                rows={5}
+                placeholder="Diagnostic, observations morphologiques, points cliniques…"
+                value={diagnostic}
+                onChange={(e) => setDiagnostic(e.target.value)}
+                className="resize-none text-sm leading-relaxed"
+                autoFocus
+              />
+            </FormBlock>
+
+            <FormBlock
+              icon={ClipboardPlus}
+              title="Examens complémentaires"
+              hint={examensCount > 0 ? `${examensCount} sélectionné(s)` : 'Cochez les examens demandés'}
+            >
+              <div className="space-y-2">
+                {EXAMEN_OPTIONS.map((opt) => {
+                  const checked = examensDemandes.includes(opt)
+                  return (
+                    <label
+                      key={opt}
+                      className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 cursor-pointer transition-colors ${
+                        checked ? 'border-teal-300 bg-teal-50/50' : 'border-border hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                        checked={checked}
+                        onChange={(e) => {
+                          setExamensDemandes((prev) =>
+                            e.target.checked ? [...prev, opt] : prev.filter((x) => x !== opt)
+                          )
+                        }}
+                      />
+                      <span className="text-sm text-slate-800 leading-relaxed whitespace-pre-line">{opt}</span>
+                    </label>
+                  )
+                })}
+                <label
+                  className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 cursor-pointer transition-colors ${
+                    examensAutreChecked ? 'border-teal-300 bg-teal-50/50' : 'border-border hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                    checked={examensAutreChecked}
+                    onChange={(e) => {
+                      setExamensAutreChecked(e.target.checked)
+                      if (!e.target.checked) setExamensAutreText('')
+                    }}
+                  />
+                  <span className="text-sm text-slate-800">Autre</span>
+                </label>
+                {examensAutreChecked && (
+                  <Input
+                    value={examensAutreText}
+                    onChange={(e) => setExamensAutreText(e.target.value)}
+                    placeholder="Préciser l'examen…"
+                  />
+                )}
+              </div>
+            </FormBlock>
+
+            <FormBlock icon={Scissors} title="Interventions recommandées" hint="Une intervention par ligne">
+              <Textarea
+                rows={5}
+                placeholder={'Rhinoplastie\nBlépharoplastie\nLifting cervico-facial…'}
+                value={interventions}
+                onChange={(e) => setInterventions(e.target.value)}
+                className="resize-none text-sm leading-relaxed font-mono"
+              />
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1 -mt-2">
+                <Sparkles className="h-3 w-3" /> Une ligne = une intervention
+              </p>
+            </FormBlock>
+
+            <FormBlock icon={StickyNote} title="Notes complémentaires" hint="Optionnel — contre-indications, remarques">
+              <Textarea
+                rows={3}
+                placeholder="Observations, recommandations pré/post-op…"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="resize-none text-sm leading-relaxed"
+              />
+            </FormBlock>
+          </div>
+
+          <div className="lg:col-span-5 space-y-4">
+            <FormBlock icon={DollarSign} title="Forfait & valorisation" required hint="Montant repris dans le devis">
+              <div>
+                <FieldLabel required>Forfait proposé (TND)</FieldLabel>
+                <div className="relative max-w-[220px]">
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    value={forfait}
+                    onChange={(e) => setForfait(e.target.value)}
+                    className="h-11 text-lg font-bold pr-12"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">TND</span>
+                </div>
+              </div>
+              <div>
+                <FieldLabel>Valorisation médicale</FieldLabel>
+                <Textarea
+                  rows={3}
+                  placeholder="Description technique des actes…"
+                  value={valeur}
+                  onChange={(e) => setValeur(e.target.value)}
+                  className="resize-none text-sm"
+                />
+              </div>
+            </FormBlock>
+
+            <FormBlock
+              icon={Calendar}
+              title="Plan de séjour"
+              hint={`Clinique ${sejourCliniqueTotal} · Hôtel ${nuitsHotel || '—'} · Total ${sejourTunisieAuto} nuits`}
+            >
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Clinique</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <FieldLabel required>Nuit préparatoire</FieldLabel>
+                      <Input type="number" min={0} max={30} value={nuitsPreoperatoires} onChange={(e) => setNuitsPreoperatoires(e.target.value)} className="h-10" />
+                    </div>
+                    <div>
+                      <FieldLabel required>Nuits postop.</FieldLabel>
+                      <Input type="number" min={0} max={60} placeholder="Ex. 2" value={nuitsClinique} onChange={(e) => setNuitsClinique(e.target.value)} className="h-10" />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    Total clinique : <strong>{sejourCliniqueTotal}</strong> nuit(s)
+                  </p>
+                </div>
+
+                <div className="border-t border-border pt-3">
+                  <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Hôtel</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <FieldLabel required>Nuits convalescence</FieldLabel>
+                      <Input type="number" min={0} max={60} placeholder="Ex. 4" value={nuitsHotel} onChange={(e) => setNuitsHotel(e.target.value)} className="h-10" />
+                    </div>
+                    <div>
+                      <FieldLabel>Total Tunisie</FieldLabel>
+                      <Input type="number" readOnly value={String(sejourTunisieAuto)} className="h-10 bg-slate-50 font-semibold" title="Calculé automatiquement : clinique + hôtel" />
+                      <p className="text-[10px] text-muted-foreground mt-1">Auto : clinique + hôtel</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-border pt-3">
+                  <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Accompagnants</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <FieldLabel>Adultes</FieldLabel>
+                      <Input type="number" min={1} max={20} placeholder="1" value={nbAdultesSejour} onChange={(e) => setNbAdultesSejour(e.target.value)} className="h-10" />
+                    </div>
+                    <div>
+                      <FieldLabel>Enfants (2–12 ans)</FieldLabel>
+                      <Input type="number" min={0} max={20} placeholder="0" value={nbEnfantsSejour} onChange={(e) => setNbEnfantsSejour(e.target.value)} className="h-10" />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">Depuis le formulaire patient.</p>
+                </div>
+
+                <div className="border-t border-border pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <FieldLabel required>Vêtement de contention</FieldLabel>
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" className="flex-1" variant={vetementContention === true ? 'brand' : 'outline'} onClick={() => setVetementContention(true)}>Oui</Button>
+                      <Button type="button" size="sm" className="flex-1" variant={vetementContention === false ? 'brand' : 'outline'} onClick={() => setVetementContention(false)}>Non</Button>
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>Anesthésie générale</FieldLabel>
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" className="flex-1" variant={anesthesieGenerale ? 'brand' : 'outline'} onClick={() => setAnesthesieGenerale(true)}>Oui</Button>
+                      <Button type="button" size="sm" className="flex-1" variant={!anesthesieGenerale ? 'brand' : 'outline'} onClick={() => setAnesthesieGenerale(false)}>Non</Button>
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>Drainage</FieldLabel>
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" className="flex-1" variant={drainage === true ? 'brand' : 'outline'} onClick={() => setDrainage(true)}>Oui</Button>
+                      <Button type="button" size="sm" className="flex-1" variant={drainage === false ? 'brand' : 'outline'} onClick={() => { setDrainage(false); setNbSeancesDrainage('') }}>Non</Button>
+                    </div>
+                  </div>
+                  {drainage === true && (
+                    <div>
+                      <FieldLabel required>Nombre de séances</FieldLabel>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={60}
+                        placeholder="Ex. 5"
+                        value={nbSeancesDrainage}
+                        onChange={(e) => setNbSeancesDrainage(e.target.value)}
+                        className="h-10"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </FormBlock>
+          </div>
+        </div>
+
+        {/* Barre d’actions mobile sticky */}
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white/95 backdrop-blur px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:hidden flex items-center gap-2">
+          <Button variant="outline" className="h-11 flex-1" onClick={closeEditor}>Retour</Button>
+          <Button
+            variant="brand"
+            className="h-11 flex-[1.4] gap-2 font-semibold"
+            onClick={() => void handleSave()}
+            disabled={!diagnostic.trim() || saving}
+          >
+            <Save className="h-4 w-4" />
+            {saving ? '…' : 'Enregistrer'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  /* ── Liste ── */
+  return (
+    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-5 pb-2">
       <PageHeader
         title="Rapports médicaux"
         description={
           loading
             ? 'Chargement…'
-            : `${patients.length} patient(s) · ${stats.total} rapport(s) · ${stats.avecForfait} avec forfait`
+            : `${patients.length} dossier${patients.length > 1 ? 's' : ''} · ${stats.aAnalyser} à analyser`
         }
         actions={
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="gap-2">
@@ -494,9 +789,30 @@ export default function RapportsPage() {
 
       <KpiStrip
         items={[
-          { key: 'a', label: 'À analyser', value: loading ? '—' : stats.aAnalyser, tone: 'amber' },
-          { key: 'r', label: 'Rédigés', value: loading ? '—' : stats.total, tone: 'teal' },
-          { key: 'f', label: 'Avec forfait', value: loading ? '—' : stats.avecForfait, tone: 'emerald' },
+          {
+            key: 'a',
+            label: 'À analyser',
+            value: loading ? '—' : stats.aAnalyser,
+            tone: 'amber',
+            active: listBucket === 'a_analyser',
+            onClick: () => setListBucket((b) => (b === 'a_analyser' ? 'all' : 'a_analyser')),
+          },
+          {
+            key: 'r',
+            label: 'Rédigés',
+            value: loading ? '—' : stats.total,
+            tone: 'teal',
+            active: listBucket === 'rediges',
+            onClick: () => setListBucket((b) => (b === 'rediges' ? 'all' : 'rediges')),
+          },
+          {
+            key: 'f',
+            label: 'Avec forfait',
+            value: loading ? '—' : stats.avecForfait,
+            tone: 'emerald',
+            active: listBucket === 'forfait',
+            onClick: () => setListBucket((b) => (b === 'forfait' ? 'all' : 'forfait')),
+          },
         ]}
       />
 
@@ -507,623 +823,125 @@ export default function RapportsPage() {
         </div>
       )}
 
-      {/* ── Layout : tableau + drawer ── */}
-      <div className={`flex flex-col lg:flex-row gap-5 transition-all duration-300 ${drawerOpen ? 'lg:items-start' : ''}`}>
-
-        {/* ── TABLEAU ── */}
-        <div className={`flex-1 min-w-0 rounded-2xl border border-border bg-card shadow-sm overflow-hidden transition-all duration-300 ${drawerOpen ? 'hidden lg:block' : ''}`}>
-
-          {/* Barre recherche */}
-          <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Rechercher un patient..."
-                className="pl-8 h-8 text-sm bg-background"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button className="absolute right-2.5 top-1/2 -translate-y-1/2" onClick={() => setSearch('')}>
-                  <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+      <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="px-3 sm:px-4 py-3 border-b border-border bg-white space-y-2.5">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Rechercher par nom, n° dossier, diagnostic…"
+              className="pl-10 pr-9 h-10 text-sm bg-muted/30 border-border rounded-xl"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setSearch('')}>
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              {loading ? '…' : `${filtered.length} résultat${filtered.length > 1 ? 's' : ''}`}
+              {listBucket !== 'all' && (
+                <button type="button" className="ml-2 text-brand-700 font-medium hover:underline" onClick={() => setListBucket('all')}>
+                  Tout afficher
                 </button>
               )}
-            </div>
-            <span className="text-xs text-muted-foreground hidden sm:block">
-              {filtered.length} résultat{filtered.length > 1 ? 's' : ''}
             </span>
+            <span className="hidden sm:inline">{patients.length} éligibles</span>
           </div>
+        </div>
 
-          {/* Liste mobile (cards) */}
-          <div className="sm:hidden divide-y divide-border">
-            {loading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-3 py-3">
-                  <Skeleton className="h-9 w-9 rounded-full shrink-0" />
-                  <div className="flex-1 space-y-1.5">
-                    <Skeleton className="h-3.5 w-36" />
-                    <Skeleton className="h-2.5 w-24" />
-                  </div>
-                  <Skeleton className="h-7 w-16 rounded-md" />
+        <div className="divide-y divide-border/70">
+          {loading ? (
+            Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 sm:px-4 py-3.5">
+                <Skeleton className="h-11 w-11 rounded-full shrink-0" />
+                <div className="flex-1 space-y-2 min-w-0">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-28" />
                 </div>
-              ))
-            ) : filtered.length === 0 ? (
-              <EmptyState
-                icon={ClipboardPlus}
-                title="Aucun patient trouvé"
-                description="Aucun dossier à analyser pour le moment."
-                actionLabel="Voir les patients"
-                onAction={() => navigate('/medecin/patients')}
-                className="py-12"
-              />
-            ) : (
-              filtered.map((p) => {
-                const hasRapport = patientHasRapport(p)
-                const needsAnalysis = !hasRapport && (p.status === 'formulaire_complete' || p.status === 'en_analyse')
-                const isSelected = selected?.id === p.id
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => void handleSelect(p.id)}
-                    className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
-                      isSelected ? 'bg-brand-50' : 'active:bg-muted/50'
-                    }`}
-                  >
-                    <Avatar className="h-9 w-9 shrink-0">
+                <Skeleton className="h-8 w-20 rounded-lg" />
+              </div>
+            ))
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={ClipboardPlus}
+              title="Aucun dossier dans ce filtre"
+              description={search ? 'Essayez un autre terme de recherche.' : 'Aucun dossier à analyser pour le moment.'}
+              actionLabel={listBucket !== 'all' ? 'Voir tous' : 'Voir les patients'}
+              onAction={() => (listBucket !== 'all' ? setListBucket('all') : navigate('/medecin/patients'))}
+              className="py-14"
+            />
+          ) : (
+            filtered.map((p) => {
+              const hasRapport = patientHasRapport(p)
+              const needsAnalysis = !hasRapport && (p.status === 'formulaire_complete' || p.status === 'en_analyse')
+              const rowPct = rowCompletion(p)
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => void handleSelect(p.id)}
+                  className="w-full flex items-center gap-3 px-3 sm:px-4 py-3.5 text-left transition-colors hover:bg-slate-50/90"
+                >
+                  <div className="relative shrink-0">
+                    <Avatar className="h-11 w-11">
                       <AvatarFallback className={`text-xs font-bold ${
-                        needsAnalysis ? 'bg-amber-100 text-amber-700' :
-                        hasRapport ? 'bg-emerald-100 text-emerald-700' : 'bg-brand-100 text-brand-700'
+                        needsAnalysis ? 'bg-amber-100 text-amber-800' :
+                        hasRapport ? 'bg-teal-100 text-teal-800' : 'bg-brand-100 text-brand-800'
                       }`}>
                         {getInitials(p.user.fullName)}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
-                      <p className="text-[10px] font-mono text-brand-600 whitespace-nowrap">{p.dossierNumber}</p>
-                    </div>
-                    <span className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
-                      hasRapport
-                        ? 'border-border text-foreground bg-background'
-                        : 'text-amber-700 border-amber-200 bg-amber-50'
-                    }`}>
-                      {hasRapport ? 'À modifier' : 'À rédiger'}
-                    </span>
-                  </button>
-                )
-              })
-            )}
-          </div>
-
-          {/* Table desktop */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/10">
-                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Patient</th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Statut</th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">Complétion</th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">Forfait</th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">Activité</th>
-                  <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <tr key={i} className="border-b border-border/50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <Skeleton className="h-9 w-9 rounded-full shrink-0" />
-                          <div className="space-y-1.5">
-                            <Skeleton className="h-3.5 w-32" />
-                            <Skeleton className="h-2.5 w-20" />
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3"><Skeleton className="h-5 w-20 rounded-full" /></td>
-                      <td className="px-3 py-3 hidden md:table-cell"><Skeleton className="h-2 w-20 rounded-full" /></td>
-                      <td className="px-3 py-3 hidden lg:table-cell"><Skeleton className="h-3.5 w-16" /></td>
-                      <td className="px-3 py-3 hidden lg:table-cell"><Skeleton className="h-3 w-24" /></td>
-                      <td className="px-3 py-3 text-right"><Skeleton className="h-7 w-16 rounded-md ml-auto" /></td>
-                    </tr>
-                  ))
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-14 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        <ClipboardPlus className="h-10 w-10 text-muted-foreground/30" />
-                        <p className="text-sm text-muted-foreground">Aucun patient trouvé</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((p) => <TableRow key={p.id} p={p} />)
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Footer tableau */}
-          {!loading && patients.length > 0 && (
-            <div className="px-3 sm:px-4 py-2.5 border-t border-border/60 bg-muted/10 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted-foreground">{patients.length} patient(s) éligibles</p>
-              <div className="flex items-center gap-3 text-[10px] sm:text-[11px] text-muted-foreground flex-wrap">
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400 inline-block" /> À rédiger</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> À modifier</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-indigo-500 inline-block" /> En cours</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── DRAWER / ÉDITEUR ── */}
-        {drawerOpen && selected && (
-          <div
-            className="fixed inset-0 z-[60] flex flex-col bg-card lg:static lg:z-auto lg:w-[480px] xl:w-[520px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border lg:shadow-lg lg:overflow-hidden lg:sticky lg:top-20"
-            style={{ maxHeight: undefined }}
-          >
-            <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-[calc(100vh-140px)] overflow-hidden">
-
-            {/* En-tête patient */}
-            <div className="border-b border-border shrink-0" style={{ background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 60%, #1a4a3a 100%)' }}>
-              <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Avatar className="h-12 w-12 shrink-0 ring-2 ring-white/20">
-                    <AvatarFallback className="bg-white/15 text-white font-bold text-sm">
-                      {getInitials(selected.user.fullName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <p className="font-bold text-white text-base leading-tight truncate">{selected.user.fullName}</p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <span className="text-[11px] font-mono bg-white/10 text-white/80 px-2 py-0.5 rounded border border-white/20 whitespace-nowrap">
-                        {selected.dossierNumber}
-                      </span>
-                      <StatusBadge kind="dossier" value={selected.status} />
-                    </div>
+                    {needsAnalysis && (
+                      <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 border-2 border-white" />
+                    )}
                   </div>
-                </div>
-                <button
-                  onClick={() => setDrawerOpen(false)}
-                  className="text-white/50 hover:text-white mt-0.5 shrink-0 transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
 
-              {/* Infos compactes */}
-              <div className="px-4 sm:px-5 pb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
-                {selected.user.email && (
-                  <span className="flex items-center gap-1 text-[11px] text-white/60 min-w-0">
-                    <Mail className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{selected.user.email}</span>
-                  </span>
-                )}
-                {selected.phone && (
-                  <span className="flex items-center gap-1 text-[11px] text-white/60">
-                    <Phone className="h-3 w-3 shrink-0" />{selected.phone}
-                  </span>
-                )}
-                {(selected.ville || selected.pays) && (
-                  <span className="flex items-center gap-1 text-[11px] text-white/60">
-                    <MapPin className="h-3 w-3 shrink-0" />{[selected.ville, selected.pays].filter(Boolean).join(', ')}
-                  </span>
-                )}
-              </div>
-
-              {/* Barre de complétion */}
-              <div className="px-5 pb-4">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] text-white/60 flex items-center gap-1">
-                    <Activity className="h-3 w-3" /> Complétion du rapport
-                  </span>
-                  <span className={`text-[11px] font-bold ${pct === 100 ? 'text-emerald-400' : pct >= 60 ? 'text-indigo-300' : 'text-amber-300'}`}>
-                    {pct}%
-                  </span>
-                </div>
-                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      pct === 100 ? 'bg-emerald-400' : pct >= 60 ? 'bg-indigo-400' : 'bg-amber-400'
-                    }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Formulaire scrollable */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-
-              {saveError && (
-                <div className="flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4 shrink-0" /> {saveError}
-                </div>
-              )}
-
-              {/* Diagnostic */}
-              <Section
-                icon={Heart} title="Diagnostic" color="bg-rose-100 text-rose-600"
-                subtitle={diagnostic ? diagnostic.slice(0, 60) + (diagnostic.length > 60 ? '…' : '') : undefined}
-                open={openSections.diagnostic} onToggle={() => toggleSection('diagnostic')}
-              >
-                <Textarea
-                  rows={5}
-                  placeholder="Évaluation clinique, diagnostic principal, observations morphologiques..."
-                  value={diagnostic}
-                  onChange={(e) => setDiagnostic(e.target.value)}
-                  className="resize-none text-sm leading-relaxed"
-                  autoFocus
-                />
-                <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <span className="text-destructive">*</span> Champ obligatoire pour sauvegarder
-                </p>
-              </Section>
-
-              {/* Examens demandés */}
-              <Section
-                icon={ClipboardPlus}
-                title="Examen complémentaire"
-                color="bg-sky-100 text-sky-700"
-                subtitle={examensCount > 0 ? `${examensCount} examen(s) sélectionné(s)` : undefined}
-                open={openSections.examens}
-                onToggle={() => toggleSection('examens')}
-              >
-                <div className="space-y-2.5">
-                  {EXAMEN_OPTIONS.map((opt) => {
-                    const checked = examensDemandes.includes(opt)
-                    return (
-                      <label
-                        key={opt}
-                        className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
-                          checked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
-                          checked={checked}
-                          onChange={(e) => {
-                            setExamensDemandes((prev) =>
-                              e.target.checked ? [...prev, opt] : prev.filter((x) => x !== opt)
-                            )
-                          }}
-                        />
-                        <span className="text-sm text-foreground leading-relaxed whitespace-pre-line">{opt}</span>
-                      </label>
-                    )
-                  })}
-                  <label
-                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
-                      examensAutreChecked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
-                      checked={examensAutreChecked}
-                      onChange={(e) => {
-                        setExamensAutreChecked(e.target.checked)
-                        if (!e.target.checked) setExamensAutreText('')
-                      }}
-                    />
-                    <span className="text-sm text-foreground leading-relaxed">Autre</span>
-                  </label>
-                  {examensAutreChecked && (
-                    <Input
-                      value={examensAutreText}
-                      onChange={(e) => setExamensAutreText(e.target.value)}
-                      placeholder="Préciser l'examen complémentaire..."
-                    />
-                  )}
-                </div>
-              </Section>
-
-              {/* Interventions */}
-              <Section
-                icon={Scissors} title="Interventions recommandées" color="bg-purple-100 text-purple-600"
-                subtitle={interventions ? interventions.split('\n').filter(Boolean).join(' · ').slice(0, 60) : undefined}
-                open={openSections.interventions} onToggle={() => toggleSection('interventions')}
-              >
-                <Textarea
-                  rows={5}
-                  placeholder="Rhinoplastie&#10;Blépharoplastie&#10;Lifting cervico-facial&#10;Liposuccion abdominale..."
-                  value={interventions}
-                  onChange={(e) => setInterventions(e.target.value)}
-                  className="resize-none text-sm leading-relaxed font-mono"
-                />
-                <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <Sparkles className="h-3 w-3" /> Une intervention par ligne
-                </p>
-              </Section>
-
-              {/* Forfait */}
-              <Section
-                icon={DollarSign} title="Forfait & Valorisation" color="bg-brand-100 text-brand-600"
-                subtitle={forfait ? `${Number(forfait).toLocaleString('fr-TN')} TND` : undefined}
-                open={openSections.forfait} onToggle={() => toggleSection('forfait')}
-              >
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Forfait proposé (TND)</label>
-                    <div className="flex items-center gap-3 mt-1.5">
-                      <div className="relative">
-                        <Input
-                          type="number" min={0} placeholder="0"
-                          value={forfait} onChange={(e) => setForfait(e.target.value)}
-                          className="w-[140px] text-lg font-bold h-11 pr-14"
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">TND</span>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{p.user.fullName}</p>
+                      <span className="hidden md:inline-flex shrink-0">
+                        <StatusBadge kind="dossier" value={p.status} />
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-[11px] font-mono text-brand-700">{p.dossierNumber}</p>
+                      <span className="text-[11px] text-muted-foreground">· {formatRelative(p.updatedAt)}</span>
+                    </div>
+                    <div className="flex items-center gap-3 pt-0.5">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1 max-w-[140px]">
+                        <div className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              rowPct === 100 ? 'bg-emerald-500' : rowPct >= 60 ? 'bg-teal-500' : rowPct > 0 ? 'bg-amber-400' : 'bg-slate-200'
+                            }`}
+                            style={{ width: `${rowPct}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] tabular-nums text-muted-foreground w-7">{rowPct}%</span>
                       </div>
-                      {forfait && Number(forfait) > 0 && (
-                        <span className="text-base font-bold text-brand-700 bg-brand-50 border border-brand-200 px-3 py-1.5 rounded-lg">
-                          {Number(forfait).toLocaleString('fr-TN')} TND
+                      {p.rapport?.forfaitPropose != null && (
+                        <span className="text-[11px] font-semibold text-brand-800 tabular-nums">
+                          {p.rapport.forfaitPropose.toLocaleString('fr-TN')} TND
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-1.5">Sera pré-rempli dans le devis du gestionnaire.</p>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Valorisation médicale</label>
-                    <Textarea
-                      rows={3}
-                      placeholder="Description technique des actes pour justification médicale..."
-                      value={valeur}
-                      onChange={(e) => setValeur(e.target.value)}
-                      className="resize-none text-sm mt-1.5"
-                    />
-                  </div>
-                </div>
-              </Section>
-
-              {/* Séjour clinique */}
-              <Section
-                icon={Calendar}
-                title="Séjour clinique & anesthésie"
-                color="bg-cyan-100 text-cyan-600"
-                subtitle={
-                  `Clinique: ${(Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0)} · Hôtel: ${nuitsHotel || '—'} · Tunisie: ${
-                    dureeSejourTunisie || (Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0) + (Number(nuitsHotel) || 0) || '—'
-                  } · ${anesthesieGenerale ? 'AG oui' : 'AG non'}`
-                }
-                open={openSections.clinique}
-                onToggle={() => toggleSection('clinique')}
-              >
-                <div className="space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                        Nuits préopératoires *
-                      </label>
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={30}
-                          value={nuitsPreoperatoires}
-                          onChange={(e) => setNuitsPreoperatoires(e.target.value)}
-                          className="w-[120px] h-10"
-                        />
-                        <span className="text-xs text-muted-foreground">défaut 1</span>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                        Nuits postopératoires *
-                      </label>
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={60}
-                          placeholder="Ex: 2"
-                          value={nuitsClinique}
-                          onChange={(e) => setNuitsClinique(e.target.value)}
-                          className="w-[120px] h-10"
-                        />
-                        <span className="text-xs text-muted-foreground">nuit(s)</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Séjour clinique = préop + postop ={' '}
-                    <strong>{(Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0)}</strong> nuit(s)
-                  </p>
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                      Nuits hôtel *
-                    </label>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={60}
-                        placeholder="Ex: 4"
-                        value={nuitsHotel}
-                        onChange={(e) => setNuitsHotel(e.target.value)}
-                        className="w-[120px] h-10"
-                      />
-                      <span className="text-xs text-muted-foreground">nuit(s)</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                      Séjour total Tunisie (auto)
-                    </label>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={90}
-                        readOnly
-                        value={
-                          dureeSejourTunisie ||
-                          String((Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0) + (Number(nuitsHotel) || 0))
-                        }
-                        className="w-[120px] h-10 bg-muted/40"
-                      />
-                      <span className="text-xs text-muted-foreground">= clinique + hôtel</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                      Vêtement de contention *
-                    </label>
-                    <div className="mt-1.5 flex gap-2">
-                      <Button type="button" size="sm" variant={vetementContention === true ? 'brand' : 'outline'} onClick={() => setVetementContention(true)}>Oui</Button>
-                      <Button type="button" size="sm" variant={vetementContention === false ? 'brand' : 'outline'} onClick={() => setVetementContention(false)}>Non</Button>
-                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                        Nombre d&apos;adultes (séjour)
-                      </label>
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <Input
-                          type="number"
-                          min={1}
-                          max={20}
-                          placeholder="Ex: 1"
-                          value={nbAdultesSejour}
-                          onChange={(e) => setNbAdultesSejour(e.target.value)}
-                          className="w-full h-10"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                        Nbr enfants (2–12 ans)
-                      </label>
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={20}
-                          placeholder="Ex: 0"
-                          value={nbEnfantsSejour}
-                          onChange={(e) => setNbEnfantsSejour(e.target.value)}
-                          className="w-full h-10"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Prérempli depuis le formulaire patient — repris automatiquement dans le devis.
-                  </p>
-
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
-                      Anesthésie générale
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setAnesthesieGenerale(true)}
-                        className={`h-9 px-4 rounded-lg border text-sm font-medium transition-colors ${
-                          anesthesieGenerale === true
-                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        Oui
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAnesthesieGenerale(false)}
-                        className={`h-9 px-4 rounded-lg border text-sm font-medium transition-colors ${
-                          anesthesieGenerale === false
-                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        Non
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </Section>
-
-              {/* Notes */}
-              <Section
-                icon={StickyNote} title="Notes complémentaires" color="bg-slate-100 text-slate-600"
-                subtitle={notes ? notes.slice(0, 60) : 'Observations, contre-indications...'}
-                open={openSections.notes} onToggle={() => toggleSection('notes')}
-              >
-                <Textarea
-                  rows={4}
-                  placeholder="Observations cliniques, contre-indications, recommandations pré/post-opératoires, remarques..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="resize-none text-sm leading-relaxed"
-                />
-              </Section>
-            </div>
-
-            {/* Footer actions */}
-            <div className="px-4 py-3.5 border-t border-border bg-muted/10 shrink-0 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-3.5">
-              {saveError && null}
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  {saved ? (
-                    <span className="flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Rapport sauvegardé
-                    </span>
-                  ) : selected.rapport ? (
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Clock className="h-3.5 w-3.5 shrink-0" />
-                      {formatDate(selected.rapport.createdAt)} · Dr. {user?.name}
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      Non sauvegardé
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    variant="ghost" size="sm"
-                    className="h-8 text-xs gap-1.5 text-muted-foreground"
-                    onClick={() => navigate(`/medecin/patients/${selected.id}`)}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Dossier</span>
-                  </Button>
-                  <Button
-                    variant="brand" size="sm" className="h-8 gap-2"
-                    onClick={() => void handleSave()}
-                    disabled={!diagnostic.trim() || saving}
-                  >
-                    {saved
-                      ? <><CheckCircle2 className="h-4 w-4" /> OK</>
-                      : <><Save className="h-4 w-4" /> {saving ? 'Enreg...' : selected.rapport ? 'Mettre à jour' : 'Créer'}</>
-                    }
-                  </Button>
-                </div>
-              </div>
-
-              {/* Complétion mini */}
-              <div className="mt-2.5 flex items-center gap-2">
-                <CompletionRing pct={pct} />
-                <div className="flex-1">
-                  <div className="h-1 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : pct >= 60 ? 'bg-indigo-500' : 'bg-amber-400'}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {pct === 100 ? 'Rapport complet ✓' : `${Math.max(0, 7 - Math.round((pct / 100) * 7))} champ(s) restant(s)`}
-                  </p>
-                </div>
-              </div>
-            </div>
-            </div>
-          </div>
-        )}
+                  <span className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
+                    needsAnalysis
+                      ? 'text-amber-800 border-amber-200 bg-amber-50'
+                      : 'text-slate-700 border-slate-200 bg-white'
+                  }`}>
+                    {hasRapport ? 'Modifier' : 'Rédiger'}
+                  </span>
+                </button>
+              )
+            })
+          )}
+        </div>
       </div>
     </div>
   )

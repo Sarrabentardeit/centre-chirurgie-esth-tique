@@ -11,10 +11,20 @@ export const rapportSchema = z.object({
   nuitsHotel:               z.number({ error: 'Le nombre de nuits hôtel est obligatoire.' }).int().min(0).max(60),
   vetementContention:       z.boolean({ error: 'Veuillez indiquer si un vêtement de contention est prescrit.' }),
   anesthesieGenerale:       z.boolean().optional(),
+  drainage:                 z.boolean().optional(),
+  nbSeancesDrainage:        z.number().int().min(1).max(60).optional().nullable(),
   dureeSejourTunisie:       z.number().int().min(0).max(90).optional(),
   nbAdultesSejour:          z.number().int().min(1).max(20).optional(),
   nbEnfantsSejour:          z.number().int().min(0).max(20).optional(),
   notes:                    z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.drainage === true && (data.nbSeancesDrainage == null || data.nbSeancesDrainage < 1)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['nbSeancesDrainage'],
+      message: 'Indiquez le nombre de séances de drainage.',
+    })
+  }
 })
 export type RapportInput = z.infer<typeof rapportSchema>
 

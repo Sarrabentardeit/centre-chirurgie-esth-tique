@@ -203,6 +203,10 @@ model Rapport {
   /** Vêtement de contention prescrit (obligatoire). */
   vetementContention       Boolean? @map("vetement_contention")
   anesthesieGenerale       Boolean? @map("anesthesie_generale")
+  /** Drainage prescrit. */
+  drainage                 Boolean? @map("drainage")
+  /** Nombre de séances de drainage (si drainage = oui). */
+  nbSeancesDrainage        Int?     @map("nb_seances_drainage")
   /** Durée globale du séjour en Tunisie (jours). */
   dureeSejourTunisie       Int?     @map("duree_sejour_tunisie")
   /** Adultes séjour (patient + accompagnants) — repris sur le devis. */

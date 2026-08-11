@@ -41,7 +41,7 @@ const patientListInclude = {
   devis: { orderBy: { dateCreation: 'desc' as const }, take: 1 },
 } as const
 
-type TemplateKey = 'formulaireAck' | 'devisSent' | 'refus'
+type TemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention'
 type TemplateChannel = 'chat' | 'notification' | 'both'
 
 type TemplateRecord = {
@@ -53,6 +53,8 @@ type TemplateRecord = {
   updatedAt: string
   updatedBy: string
 }
+
+export const TEMPLATE_KEYS: TemplateKey[] = ['formulaireAck', 'devisSent', 'refus', 'abstention']
 
 const DEFAULT_TEMPLATES: Record<TemplateKey, Omit<TemplateRecord, 'updatedAt' | 'updatedBy'>> = {
   formulaireAck: {
@@ -73,6 +75,24 @@ const DEFAULT_TEMPLATES: Record<TemplateKey, Omit<TemplateRecord, 'updatedAt' | 
     key: 'refus',
     title: 'Dossier non retenu',
     content: 'Bonjour {prenom} {nom}, une mise à jour a été faite sur votre dossier. {reason}',
+    channel: 'chat',
+    active: true,
+  },
+  abstention: {
+    key: 'abstention',
+    title: 'Décision d’abstention',
+    content: `Chère Madame,
+Merci encore pour votre intérêt et la confiance que vous témoignez envers le cabinet du Dr CHENNOUFI.
+Après un examen attentif de vos photos et de votre dossier médical, nous sommes au regret de vous informer que le Dr CHENNOUFI a pris la décision de ne pas intervenir dans votre cas.
+Cette décision relève d’une démarche éthique et professionnelle, guidée par son exigence de sécurité, de résultats cohérents et d’adéquation avec sa pratique chirurgicale.
+Nous vous remercions de votre compréhension et vous souhaitons le meilleur dans la poursuite de votre démarche.
+Je vous souhaite une excellente journée.
+Bien cordialement,
+Houda Chennoufi
+Conciergerie & coordination patients
+Cabinet du Dr Mehdi Chennoufi
+Chirurgie Esthétique, Plastique et Réparatrice
+SCULPTURE, SMOOTH & SMILE`,
     channel: 'chat',
     active: true,
   },
@@ -303,25 +323,16 @@ async function getTemplateMap() {
   const logs = await prisma.auditLog.findMany({
     where: { entity: 'communication_template' },
     orderBy: { createdAt: 'desc' },
-    take: 100,
+    take: 200,
   })
 
-  const map: Record<TemplateKey, TemplateRecord> = {
-    formulaireAck: {
-      ...DEFAULT_TEMPLATES.formulaireAck,
+  const map = {} as Record<TemplateKey, TemplateRecord>
+  for (const key of TEMPLATE_KEYS) {
+    map[key] = {
+      ...DEFAULT_TEMPLATES[key],
       updatedAt: new Date(0).toISOString(),
       updatedBy: 'Système',
-    },
-    devisSent: {
-      ...DEFAULT_TEMPLATES.devisSent,
-      updatedAt: new Date(0).toISOString(),
-      updatedBy: 'Système',
-    },
-    refus: {
-      ...DEFAULT_TEMPLATES.refus,
-      updatedAt: new Date(0).toISOString(),
-      updatedBy: 'Système',
-    },
+    }
   }
 
   for (const l of logs) {
@@ -341,6 +352,44 @@ async function getTemplateMap() {
   }
 
   return map
+}
+
+/** Accusé de réception formulaire — applique le template Communication. */
+export async function dispatchFormulaireAck(input: {
+  patientId: string
+  patientUserId: string
+  patientFullName: string
+}) {
+  const templates = await getTemplateMap()
+  const template = templates.formulaireAck
+  if (!template.active) return
+
+  let gestionnaireId: string | undefined
+  if (template.channel === 'chat' || template.channel === 'both') {
+    const g = await prisma.user.findFirst({
+      where: { role: 'gestionnaire' },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    })
+    gestionnaireId = g?.id
+  }
+
+  const effective: TemplateRecord =
+    (template.channel === 'chat' || template.channel === 'both') && !gestionnaireId
+      ? { ...template, channel: 'notification' }
+      : template
+
+  if (effective.channel === 'chat' && !gestionnaireId) return
+
+  await dispatchTemplateMessage({
+    template: effective,
+    patientId: input.patientId,
+    patientUserId: input.patientUserId,
+    patientFullName: input.patientFullName,
+    gestionnaireId: gestionnaireId ?? input.patientUserId,
+    notifTitle: 'Formulaire bien reçu',
+    notifLink: '/patient/dossier',
+  })
 }
 
 async function dispatchTemplateMessage(input: {
@@ -1102,10 +1151,13 @@ export async function deletePlanningSejour(gestionnaireId: string, patientId: st
 
 export async function getCommunicationTemplates() {
   const map = await getTemplateMap()
-  return { templates: Object.values(map) }
+  return { templates: TEMPLATE_KEYS.map((key) => map[key]) }
 }
 
 export async function updateCommunicationTemplate(userId: string, key: TemplateKey, input: UpdateTemplateInput) {
+  if (!TEMPLATE_KEYS.includes(key)) {
+    throw new AppError(400, 'INVALID_TEMPLATE', 'Template inconnu.')
+  }
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } })
   await prisma.auditLog.create({
     data: {

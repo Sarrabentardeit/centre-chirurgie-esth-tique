@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 const ligneDevisSchema = z.object({
   description: z.string().min(1),
-  quantite: z.number().int().positive(),
+  quantite: z.number().int().nonnegative(),
   prixUnitaire: z.number().nonnegative(),
   total: z.number().nonnegative(),
 })
@@ -48,7 +48,7 @@ export const planningSejourSchema = z.object({
 
 export type PlanningSejourInput = z.infer<typeof planningSejourSchema>
 
-const templateKeySchema = z.enum(['formulaireAck', 'devisSent', 'refus'])
+const templateKeySchema = z.enum(['formulaireAck', 'devisSent', 'refus', 'abstention'])
 
 export const updateTemplateSchema = z.object({
   key: templateKeySchema.optional(),

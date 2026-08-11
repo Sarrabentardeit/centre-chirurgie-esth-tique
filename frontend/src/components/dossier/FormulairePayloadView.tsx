@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { CheckCircle2, Clock, ExternalLink, FileText, ImageOff } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatIsoDateFrLong } from '@/lib/utils'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 
 function PhotoThumb({ url, fileName }: { url: string; fileName: string }) {
@@ -77,6 +77,17 @@ function asString(value: unknown): string | null {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map((v) => String(v).trim()).filter(Boolean)
+}
+
+/** Date souhaitée : ISO → « 22 avril 2026 », sinon texte déjà lisible (ex. Octobre 2026). */
+function formatDateSouhaitee(value: unknown): string | null {
+  const raw = asString(value)
+  if (!raw) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const formatted = formatIsoDateFrLong(raw.slice(0, 10))
+    return formatted === '—' ? raw : formatted
+  }
+  return raw
 }
 
 export function resolveFormulaireFileUrl(value: string): string {
@@ -169,7 +180,6 @@ export function FormulairePayloadView({
           <CardHeader><CardTitle className="text-sm">Données personnelles</CardTitle></CardHeader>
           <CardContent>
             <InfoRow label="Date de naissance" value={asString(p.dateNaissance)} />
-            <InfoRow label="Nationalité" value={asString(p.nationalite)} />
             <InfoRow label="Poids" value={asString(p.poids) ? `${String(p.poids)} kg` : null} />
             <InfoRow label="Taille" value={asString(p.taille) ? `${String(p.taille)} cm` : null} />
             <InfoRow label="Groupe sanguin" value={asString(p.groupeSanguin)} />
@@ -181,7 +191,6 @@ export function FormulairePayloadView({
                   : null
               }
             />
-            <InfoRow label="Période souhaitée" value={asString(p.periodeSouhaitee)} />
             <InfoRow
               label="Accompagnant (séjour)"
               value={
@@ -238,9 +247,14 @@ export function FormulairePayloadView({
           <CardHeader><CardTitle className="text-sm">Demande du patient</CardTitle></CardHeader>
           <CardContent>
             <InfoRow label="Interventions souhaitées" value={asStringArray(p.typeIntervention).join(', ') || null} />
-            <InfoRow label="Description demande" value={asString(p.descriptionDemande)} />
-            <InfoRow label="Attentes" value={asString(p.attentes)} />
-            <InfoRow label="Date souhaitée" value={asString(p.dateSouhaitee)} />
+            <InfoRow
+              label="Description et attentes"
+              value={asString(p.descriptionDemande) ?? asString(p.attentes)}
+            />
+            <InfoRow
+              label="Date souhaitée"
+              value={formatDateSouhaitee(p.dateSouhaitee) ?? formatDateSouhaitee(p.periodeSouhaitee)}
+            />
           </CardContent>
         </Card>
 

@@ -631,6 +631,8 @@ export interface PatientListItem {
     nuitsHotel?: number | null
     vetementContention?: boolean | null
     anesthesieGenerale?: boolean | null
+    drainage?: boolean | null
+    nbSeancesDrainage?: number | null
     dureeSejourTunisie?: number | null
     nbAdultesSejour?: number | null
     nbEnfantsSejour?: number | null
@@ -754,6 +756,8 @@ export const medecinApi = {
         nuitsHotel?: number | null
         vetementContention?: boolean | null
         anesthesieGenerale?: boolean | null
+        drainage?: boolean | null
+        nbSeancesDrainage?: number | null
         dureeSejourTunisie?: number | null
         nbAdultesSejour?: number | null
         nbEnfantsSejour?: number | null
@@ -791,6 +795,8 @@ export const medecinApi = {
     nuitsHotel: number
     vetementContention: boolean
     anesthesieGenerale?: boolean
+    drainage?: boolean
+    nbSeancesDrainage?: number | null
     dureeSejourTunisie?: number
     nbAdultesSejour?: number
     nbEnfantsSejour?: number
@@ -896,6 +902,44 @@ export const medecinApi = {
 
   getAllDevis: () =>
     request<{ ok: true; devis: DevisWithPatient[] }>('/medecin/devis'),
+
+  /** Même moteur Chromium que gestionnaire / patient / envoi chat. */
+  renderDevisPdf: async (html: string): Promise<Blob> => {
+    const { access } = getTokens()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (access) headers['Authorization'] = `Bearer ${access}`
+
+    const res = await fetch(`${BASE_URL}/medecin/devis/render-pdf`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ html }),
+    })
+
+    if (res.status === 401) {
+      const newToken = await tryRefreshToken()
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`
+        const retry = await fetch(`${BASE_URL}/medecin/devis/render-pdf`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ html }),
+        })
+        if (!retry.ok) {
+          const err = await retry.json().catch(() => ({})) as { message?: string; code?: string }
+          throw new ApiRequestError(retry.status, err.code ?? 'PDF_ERROR', err.message ?? 'Export PDF impossible.')
+        }
+        return retry.blob()
+      }
+      forceSessionExpired()
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { message?: string; code?: string }
+      throw new ApiRequestError(res.status, err.code ?? 'PDF_ERROR', err.message ?? 'Export PDF impossible.')
+    }
+    return res.blob()
+  },
 }
 
 // ─── Gestionnaire API ─────────────────────────────────────────────────────────
@@ -936,6 +980,8 @@ export interface GestionnaireRapportRow {
   nuitsHotel?: number | null
   vetementContention?: boolean | null
   anesthesieGenerale?: boolean | null
+  drainage?: boolean | null
+  nbSeancesDrainage?: number | null
   dureeSejourTunisie?: number | null
   nbAdultesSejour?: number | null
   nbEnfantsSejour?: number | null
@@ -1021,8 +1067,10 @@ export interface GestionnairePlanningSejourDetail {
   updatedAt: string
 }
 
+export type CommunicationTemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention'
+
 export interface GestionnaireTemplate {
-  key: 'formulaireAck' | 'devisSent' | 'refus'
+  key: CommunicationTemplateKey
   title: string
   content: string
   channel: 'chat' | 'notification' | 'both'
@@ -1271,7 +1319,7 @@ export const gestionnaireApi = {
     request<{ ok: true; templates: GestionnaireTemplate[] }>('/gestionnaire/communication/templates'),
 
   updateCommunicationTemplate: (
-    key: 'formulaireAck' | 'devisSent' | 'refus',
+    key: CommunicationTemplateKey,
     body: { content: string; channel: 'chat' | 'notification' | 'both'; active: boolean }
   ) =>
     request<{ ok: true }>(`/gestionnaire/communication/templates/${key}`, {
@@ -1279,7 +1327,7 @@ export const gestionnaireApi = {
       body: JSON.stringify(body),
     }),
 
-  resetCommunicationTemplate: (key: 'formulaireAck' | 'devisSent' | 'refus') =>
+  resetCommunicationTemplate: (key: CommunicationTemplateKey) =>
     request<{ ok: true }>(`/gestionnaire/communication/templates/${key}/reset`, { method: 'POST' }),
 
   resetAllCommunicationTemplates: () =>

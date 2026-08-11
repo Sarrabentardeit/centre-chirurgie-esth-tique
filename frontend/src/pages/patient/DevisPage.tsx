@@ -14,6 +14,7 @@ import {
   formatCurrency,
   formatDevisPdfFileName,
   formatDevisListName,
+  getDevisDisplayNumber,
   cn,
 } from '@/lib/utils'
 import { parseSejourMeta } from '@/lib/devisSejourNotes'
@@ -169,10 +170,15 @@ export default function DevisPage() {
       const fullName =
         patientIdentity.fullName ||
         [patientIdentity.prenom, patientIdentity.nom].filter(Boolean).join(' ')
+      const dossierRef =
+        getDevisDisplayNumber(d, patientIdentity.dossierNumber) ||
+        patientIdentity.dossierNumber ||
+        d.numeroDevis ||
+        ''
       const html = await inlineHtmlImages(
         buildDevisExportHtml({
           devis: d,
-          dossierNumber: patientIdentity.dossierNumber || d.numeroDevis || '',
+          dossierNumber: dossierRef,
           patientFullName: fullName,
         }),
       )
@@ -180,11 +186,7 @@ export default function DevisPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = formatDevisPdfFileName(
-        patientIdentity.dossierNumber || d.numeroDevis,
-        fullName,
-        d.version,
-      )
+      a.download = formatDevisPdfFileName(dossierRef, fullName, d.version)
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -337,7 +339,7 @@ export default function DevisPage() {
           sej.cliniqueNuits && { label: 'Nuits clinique', value: sej.cliniqueNuits },
           sej.hotelNom && { label: 'Hôtel', value: sej.hotelNom },
           sej.hotelNuits && { label: 'Nuits hôtel', value: sej.hotelNuits },
-          sej.dureeSejourTotale && { label: 'Séjour', value: `${sej.dureeSejourTotale} jour(s)` },
+          sej.dureeSejourTotale && { label: 'Séjour', value: `${sej.dureeSejourTotale} nuit(s)` },
           sej.nbAdultes !== '' && { label: 'Adultes', value: sej.nbAdultes },
           sej.nbEnfants !== '' && { label: 'Enfants', value: sej.nbEnfants },
         ].filter(Boolean) as Array<{ label: string; value: string }>

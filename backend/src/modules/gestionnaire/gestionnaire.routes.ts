@@ -295,7 +295,7 @@ gestionnaireRouter.put(
   validate(updateTemplateSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const key = pid(req.params.key) as 'formulaireAck' | 'devisSent' | 'refus'
+      const key = pid(req.params.key) as Parameters<typeof gestionnaireService.updateCommunicationTemplate>[1]
       const result = await gestionnaireService.updateCommunicationTemplate(req.auth!.sub, key, req.body)
       res.json(result)
     } catch (e) {
@@ -306,7 +306,7 @@ gestionnaireRouter.put(
 
 gestionnaireRouter.post('/communication/templates/:key/reset', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const key = pid(req.params.key) as 'formulaireAck' | 'devisSent' | 'refus'
+    const key = pid(req.params.key) as Parameters<typeof gestionnaireService.resetCommunicationTemplate>[1]
     const result = await gestionnaireService.resetCommunicationTemplate(req.auth!.sub, key)
     res.json(result)
   } catch (e) {
@@ -316,11 +316,11 @@ gestionnaireRouter.post('/communication/templates/:key/reset', async (req: Reque
 
 gestionnaireRouter.post('/communication/templates/reset-all', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await Promise.all([
-      gestionnaireService.resetCommunicationTemplate(req.auth!.sub, 'formulaireAck'),
-      gestionnaireService.resetCommunicationTemplate(req.auth!.sub, 'devisSent'),
-      gestionnaireService.resetCommunicationTemplate(req.auth!.sub, 'refus'),
-    ])
+    await Promise.all(
+      gestionnaireService.TEMPLATE_KEYS.map((key) =>
+        gestionnaireService.resetCommunicationTemplate(req.auth!.sub, key),
+      ),
+    )
     res.json({ ok: true })
   } catch (e) {
     next(e)

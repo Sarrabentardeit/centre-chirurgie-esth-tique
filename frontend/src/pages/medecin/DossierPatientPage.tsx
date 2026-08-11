@@ -37,6 +37,8 @@ interface Rapport {
   nuitsHotel?: number | null
   vetementContention?: boolean | null
   anesthesieGenerale?: boolean | null
+  drainage?: boolean | null
+  nbSeancesDrainage?: number | null
   dureeSejourTunisie?: number | null
   notes: string | null
   createdAt: string
@@ -129,6 +131,8 @@ export default function DossierPatientPage() {
   const [vetementContention, setVetementContention] = useState<boolean | null>(null)
   const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
+  const [drainage, setDrainage] = useState<boolean | null>(null)
+  const [nbSeancesDrainage, setNbSeancesDrainage] = useState('')
   const [notes, setNotes]               = useState('')
   const [saving, setSaving]             = useState(false)
   const [saved, setSaved]               = useState(false)
@@ -169,6 +173,8 @@ export default function DossierPatientPage() {
         setVetementContention(r.vetementContention ?? null)
         setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
+        setDrainage(r.drainage ?? null)
+        setNbSeancesDrainage(r.nbSeancesDrainage != null ? String(r.nbSeancesDrainage) : '')
         setNotes(r.notes ?? '')
       } else {
         setExamensDemandes([])
@@ -177,6 +183,8 @@ export default function DossierPatientPage() {
         setNuitsPreoperatoires('1')
         setDureeSejourTunisie('')
         setAnesthesieGenerale(false)
+        setDrainage(null)
+        setNbSeancesDrainage('')
       }
       setNewStatus(res.patient.status)
     } catch (e) {
@@ -204,10 +212,13 @@ export default function DossierPatientPage() {
     // Validation des champs obligatoires
     const missing: string[] = []
     if (!forfait || Number(forfait) <= 0) missing.push('Forfait médical')
-    if (nuitsPreoperatoires === '') missing.push('Nuits préopératoires')
+    if (nuitsPreoperatoires === '') missing.push('Nuit préparatoire en clinique')
     if (nuitsClinique === '') missing.push('Nuits postopératoires')
-    if (nuitsHotel === '') missing.push('Nuits hôtel')
+    if (nuitsHotel === '') missing.push('Nuit de convalescence à l\'hôtel')
     if (vetementContention === null) missing.push('Vêtement de contention')
+    if (drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1)) {
+      missing.push('Nombre de séances de drainage')
+    }
     if (missing.length > 0) {
       setRapportError(`Champs obligatoires manquants : ${missing.join(', ')}.`)
       return
@@ -230,8 +241,13 @@ export default function DossierPatientPage() {
         nuitsClinique: Number(nuitsClinique),
         nuitsHotel: Number(nuitsHotel),
         vetementContention: vetementContention!,
-        dureeSejourTunisie: dureeSejourTunisie === '' ? undefined : Number(dureeSejourTunisie),
+        dureeSejourTunisie:
+          (Number(nuitsPreoperatoires) || 0)
+          + (Number(nuitsClinique) || 0)
+          + (Number(nuitsHotel) || 0),
         anesthesieGenerale,
+        drainage: drainage ?? undefined,
+        nbSeancesDrainage: drainage === true ? Number(nbSeancesDrainage) : null,
         notes: notes || undefined,
       })
       setSaved(true)
@@ -483,13 +499,14 @@ export default function DossierPatientPage() {
                   variant="brand"
                   size="sm"
                   className="gap-1.5"
-                  disabled={saving || !forfait || Number(forfait) <= 0 || nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '' || vetementContention === null}
+                  disabled={saving || !forfait || Number(forfait) <= 0 || nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '' || vetementContention === null || (drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1))}
                   title={
                     !forfait || Number(forfait) <= 0 ? 'Forfait médical requis'
-                    : nuitsPreoperatoires === '' ? 'Nuits préopératoires requises'
+                    : nuitsPreoperatoires === '' ? 'Nuit préparatoire en clinique requise'
                     : nuitsClinique === '' ? 'Nuits postopératoires requises'
-                    : nuitsHotel === '' ? 'Nuits hôtel requis'
+                    : nuitsHotel === '' ? 'Nuit de convalescence à l\'hôtel requise'
                     : vetementContention === null ? 'Vêtement de contention requis'
+                    : drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1) ? 'Nombre de séances de drainage requis'
                     : undefined
                   }
                   onClick={handleSaveRapport}
@@ -594,54 +611,81 @@ export default function DossierPatientPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Nuits préopératoires
-                    <span className="text-destructive font-bold">*</span>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={30}
-                    value={nuitsPreoperatoires}
-                    onChange={(e) => setNuitsPreoperatoires(e.target.value)}
-                    placeholder="Ex: 1"
-                    className={nuitsPreoperatoires === '' ? 'border-amber-300 focus:border-amber-500' : ''}
-                  />
-                  <p className="text-[11px] text-muted-foreground">Avant l'opération</p>
+              <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3 sm:p-4">
+                <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">Détails du séjour</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      Nuit préparatoire en clinique
+                      <span className="text-destructive font-bold">*</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={30}
+                      value={nuitsPreoperatoires}
+                      onChange={(e) => setNuitsPreoperatoires(e.target.value)}
+                      placeholder="Ex: 1"
+                      className={nuitsPreoperatoires === '' ? 'border-amber-300 focus:border-amber-500' : ''}
+                    />
+                    <p className="text-[11px] text-muted-foreground">Avant l'opération</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      Nuits postopératoires
+                      <span className="text-destructive font-bold">*</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={nuitsClinique}
+                      onChange={(e) => setNuitsClinique(e.target.value)}
+                      placeholder="Ex: 2"
+                      className={nuitsClinique === '' ? 'border-amber-300 focus:border-amber-500' : ''}
+                    />
+                    <p className="text-[11px] text-muted-foreground">Après l'opération</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      Nuit de convalescence à l&apos;hôtel
+                      <span className="text-destructive font-bold">*</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={nuitsHotel}
+                      onChange={(e) => setNuitsHotel(e.target.value)}
+                      placeholder="Ex: 4"
+                      className={nuitsHotel === '' ? 'border-amber-300 focus:border-amber-500' : ''}
+                    />
+                    <p className="text-[11px] text-muted-foreground">Après la clinique</p>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Nuits postopératoires
-                    <span className="text-destructive font-bold">*</span>
+                <div className="space-y-2 max-w-xs">
+                  <Label className="flex items-center gap-2">
+                    Nombre de séjour global (Tunisie)
+                    <span className="text-[10px] font-medium bg-brand-50 text-brand-600 border border-brand-200 rounded-full px-2 py-0.5">
+                      Auto
+                    </span>
                   </Label>
                   <Input
                     type="number"
                     min={0}
-                    max={60}
-                    value={nuitsClinique}
-                    onChange={(e) => setNuitsClinique(e.target.value)}
-                    placeholder="Ex: 2"
-                    className={nuitsClinique === '' ? 'border-amber-300 focus:border-amber-500' : ''}
+                    max={90}
+                    value={
+                      (Number(nuitsPreoperatoires) || 0)
+                      + (Number(nuitsClinique) || 0)
+                      + (Number(nuitsHotel) || 0)
+                    }
+                    readOnly
+                    tabIndex={-1}
+                    placeholder="Calculé automatiquement"
+                    className="bg-muted/50 cursor-default select-none font-semibold text-brand-700"
+                    title="Auto : préop + postop + hôtel"
                   />
-                  <p className="text-[11px] text-muted-foreground">Après l'opération</p>
-                </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Nuits hôtel
-                    <span className="text-destructive font-bold">*</span>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={60}
-                    value={nuitsHotel}
-                    onChange={(e) => setNuitsHotel(e.target.value)}
-                    placeholder="Ex: 4"
-                    className={nuitsHotel === '' ? 'border-amber-300 focus:border-amber-500' : ''}
-                  />
-                  <p className="text-[11px] text-muted-foreground">Convalescence hôtel</p>
+                  <p className="text-[11px] text-muted-foreground">Auto : préop + postop + hôtel</p>
                 </div>
               </div>
 
@@ -694,25 +738,44 @@ export default function DossierPatientPage() {
                     </Button>
                   </div>
                 </div>
-              </div>
-
-              <div className="space-y-2 max-w-xs">
-                <Label className="flex items-center gap-2">
-                  Nombre de séjour global (Tunisie)
-                  <span className="text-[10px] font-medium bg-brand-50 text-brand-600 border border-brand-200 rounded-full px-2 py-0.5">
-                    Auto
-                  </span>
-                </Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={90}
-                  value={dureeSejourTunisie}
-                  readOnly
-                  tabIndex={-1}
-                  placeholder="Calculé automatiquement"
-                  className="bg-muted/50 cursor-default select-none font-semibold text-brand-700"
-                />
+                <div className="space-y-2">
+                  <Label>Drainage</Label>
+                  <div className="flex items-center gap-2 p-2 rounded-lg border border-transparent">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={drainage === true ? 'brand' : 'outline'}
+                      onClick={() => setDrainage(true)}
+                    >
+                      Oui
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={drainage === false ? 'brand' : 'outline'}
+                      onClick={() => { setDrainage(false); setNbSeancesDrainage('') }}
+                    >
+                      Non
+                    </Button>
+                  </div>
+                </div>
+                {drainage === true && (
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      Nombre de séances
+                      <span className="text-destructive font-bold">*</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={60}
+                      placeholder="Ex: 5"
+                      value={nbSeancesDrainage}
+                      onChange={(e) => setNbSeancesDrainage(e.target.value)}
+                      className={!nbSeancesDrainage || Number(nbSeancesDrainage) < 1 ? 'border-amber-300 focus:border-amber-500' : ''}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

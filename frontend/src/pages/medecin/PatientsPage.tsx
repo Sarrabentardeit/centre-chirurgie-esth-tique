@@ -564,7 +564,9 @@ export default function PatientsPage() {
         ) : (
           <div className="divide-y divide-border/50">
             {patients.map((p, idx) => {
-              const isUrgent   = p.status === 'formulaire_complete' || (isGestionnaire && (p.status === 'rapport_genere' || p.status === 'devis_preparation'))
+              const isUrgent = isGestionnaire
+                ? ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse', 'rapport_genere', 'devis_preparation'].includes(p.status)
+                : p.status === 'formulaire_complete' || p.status === 'en_analyse'
               const isAbstention = p.status === 'abstention'
               const avatarCls  = AVATAR_COLOR[p.status] ?? 'bg-brand-100 text-brand-700'
               const srcKey = (p.sourceContact ?? '').toLowerCase()

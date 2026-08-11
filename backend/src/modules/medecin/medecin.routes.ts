@@ -3,9 +3,11 @@ import type { Request, Response, NextFunction } from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import multer from 'multer'
+import { z } from 'zod'
 import { validate } from '../../middleware/validate.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { AppError } from '../../middleware/errorHandler.js'
+import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 import {
   rapportSchema,
   createAgendaEventSchema,
@@ -16,6 +18,10 @@ import {
 import * as medecinService from './medecin.service.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { googleCalendarCallbackRouter } from '../google-calendar/google-calendar.routes.js'
+
+const renderDevisPdfSchema = z.object({
+  html: z.string().min(1),
+})
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
@@ -109,6 +115,22 @@ medecinRouter.get('/devis', async (req: Request, res: Response, next: NextFuncti
     res.json({ ok: true, ...result })
   } catch (e) { next(e) }
 })
+
+/** Même moteur Chromium que gestionnaire / patient / envoi chat. */
+medecinRouter.post(
+  '/devis/render-pdf',
+  validate(renderDevisPdfSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const pdf = await renderHtmlToPdf(req.body.html as string)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', 'attachment; filename="devis.pdf"')
+      res.send(pdf)
+    } catch (e) {
+      next(e)
+    }
+  },
+)
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 medecinRouter.get('/dashboard', async (req: Request, res: Response, next: NextFunction) => {

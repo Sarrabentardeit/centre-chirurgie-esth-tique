@@ -214,18 +214,25 @@ export function buildDevisPrintStyles(): string {
 
     /* Rythme vertical régulier */
     p  { margin: 0 0 8px; }
-    ul, ol { padding-left: 18px; margin: 0 0 10px; }
-    li {
+    ul, ol { padding-left: 20px; margin: 0 0 10px; }
+    ol { list-style-type: decimal; }
+    ol > li {
+      margin: 0 0 10px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    ul > li {
       margin: 0 0 5px;
       break-inside: avoid;
       page-break-inside: avoid;
     }
+    ol ul { list-style-type: disc; margin-top: 6px; margin-bottom: 0; }
     .devis-heading {
       margin: 14px 0 8px;
-      padding: 7px 12px;
-      background: ${C.cream};
-      border-left: 4px solid ${C.bronze};
-      font-size: 12.5px;
+      padding: 0;
+      background: transparent;
+      border: none;
+      font-size: 13px;
       font-weight: 700;
       color: ${C.bronze};
       break-after: avoid;
@@ -234,6 +241,25 @@ export function buildDevisPrintStyles(): string {
       page-break-inside: avoid;
     }
     .devis-heading strong { color: ${C.bronze}; font-weight: 700; }
+    .devis-ref-title {
+      text-align: center !important;
+      margin: 12px 0 10px;
+      font-size: 18px !important;
+      font-weight: 700 !important;
+      color: ${C.bronze} !important;
+      letter-spacing: 0.02em;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .devis-ref-title strong,
+    .devis-ref-title span {
+      color: ${C.bronze} !important;
+      font-size: 18px !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.02em;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
     .devis-highlight {
       margin: 10px 0;
       padding: 8px 12px;
@@ -249,7 +275,7 @@ export function buildDevisPrintStyles(): string {
     em { font-style: italic; color: ${C.gray}; }
     u  { text-decoration: none; border-bottom: 1px solid ${C.rose}; }
     mark {
-      background: ${C.cream};
+      /* Ne pas écraser le fluo inline (saumon planning) */
       padding: 0 1px;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
@@ -284,8 +310,16 @@ export function buildDevisPrintStyles(): string {
     .doc-header .header-sub  { margin-top: 3px; color: ${C.gray}; font-size: 10px; }
 
     .doc-body p { margin: 0 0 8px; }
-    .doc-body ul, .doc-body ol { padding-left: 18px; margin: 0 0 10px; }
-    .doc-body li { margin: 0 0 5px; }
+    .doc-body ul, .doc-body ol { padding-left: 20px; margin: 0 0 10px; }
+    .doc-body ol { list-style-type: decimal; }
+    .doc-body ol > li { margin: 0 0 10px; }
+    .doc-body ul > li { margin: 0 0 5px; }
+    .doc-body ol ul { list-style-type: disc; margin-top: 6px; }
+    .doc-body strong,
+    .doc-body span[style*='color'] {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
     .doc-body hr, .section-hr {
       border: none;
       border-top: 1px solid ${C.rose};

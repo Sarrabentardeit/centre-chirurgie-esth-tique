@@ -14,7 +14,7 @@ import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { toast } from '@/store/toastStore'
-import { formatCurrency, formatDate, formatDateTime, formatDevisListName, type CurrencyUnit } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, type CurrencyUnit } from '@/lib/utils'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
@@ -42,6 +42,12 @@ import {
 } from '@/lib/devisSejourNotes'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import {
+  buildGestionnaireDevisExportHtml,
+  refreshDevisCustomContentParts,
+} from '@/lib/devisExportHtml'
+import { letterContextFromGestionnairePatient } from '@/lib/devisLetterHtml'
+import { inlineHtmlImages } from '@/lib/pdf'
 
 /* ══════════════════════════════════════════════════
    TYPES & HELPERS
@@ -69,19 +75,115 @@ function normalizeTndDinars(n: number): number {
   return Math.round(Number(n.toFixed(2)))
 }
 
-/** P.U. de la 1re ligne = forfait proposé par le médecin (rapport), si disponible. */
-function buildDefaultLignes(honorairesChirCliniquePu?: number): LigneDevisForm[] {
+/** Accompagnants = adultes accompagnants + enfants (sans la patiente). */
+function totalAccompagnantsQty(
+  nbAdultes: string,
+  nbEnfants: string,
+  formPayload?: Record<string, unknown> | null,
+): number {
+  const accFlag = formPayload?.accompagnant
+  if (accFlag === false || accFlag === 'Non' || accFlag === 'non') return 0
+  if (accFlag === true || accFlag === 'Oui' || accFlag === 'oui') {
+    const a = Number(formPayload?.nbAdultesAccompagnement)
+    const e = Number(formPayload?.nbEnfantsAccompagnement)
+    const adultesAcc = Number.isFinite(a) && a >= 0 ? Math.floor(a) : 0
+    const enfants = Number.isFinite(e) && e >= 0 ? Math.floor(e) : 0
+    return adultesAcc + enfants
+  }
+  // Rapport / infos séjour : nbAdultes inclut la patiente
+  const adults = Number(nbAdultes)
+  const enfants = Number(nbEnfants)
+  const a = Number.isFinite(adults) ? Math.floor(adults) : 0
+  const e = Number.isFinite(enfants) ? Math.floor(enfants) : 0
+  if (a <= 0 && e <= 0) return 0
+  return Math.max(0, a + e - (a >= 1 ? 1 : 0))
+}
+
+const LIGNE_SUPP_CLINIQUE_ACCOMP = 'Supp Clinique accompagnateur'
+const LIGNE_SUPP_HOTEL_ACCOMP = 'Supp Hôtel Accompagnateur'
+const LIGNE_HOTEL_NUITEES = 'Hôtel (nbr de nuitées)'
+const LIGNE_DRAINAGE = 'Drainage (nbr de séances)'
+
+function isLigneDesc(desc: string, target: string) {
+  return desc.trim().toLowerCase() === target.trim().toLowerCase()
+}
+
+/** Qté drainage depuis le rapport médecin (0 si drainage non prescrit). */
+function drainageQtyFromRapport(rap?: {
+  drainage?: boolean | null
+  nbSeancesDrainage?: number | null
+} | null): number | null {
+  if (!rap) return null
+  if (rap.drainage === false) return 0
+  if (rap.nbSeancesDrainage != null && Number.isFinite(Number(rap.nbSeancesDrainage))) {
+    return Math.max(0, Math.floor(Number(rap.nbSeancesDrainage)))
+  }
+  return null
+}
+
+/** Applique les qté rapport/formulaire sur les lignes concernées (modifiable ensuite). */
+function applyRapportQtysToLignes(
+  lignes: LigneDevisForm[],
+  opts: {
+    qteAccompagnants: number
+    qteHotelNuits: number | null
+    qteDrainage: number | null
+  },
+): LigneDevisForm[] {
+  return lignes.map((l) => {
+    const desc = l.description.trim()
+    if (isLigneDesc(desc, LIGNE_SUPP_CLINIQUE_ACCOMP) || isLigneDesc(desc, LIGNE_SUPP_HOTEL_ACCOMP)) {
+      return { ...l, quantite: Math.max(0, opts.qteAccompagnants) }
+    }
+    if (isLigneDesc(desc, LIGNE_HOTEL_NUITEES) && opts.qteHotelNuits != null) {
+      return { ...l, quantite: Math.max(0, opts.qteHotelNuits) }
+    }
+    if (isLigneDesc(desc, LIGNE_DRAINAGE) && opts.qteDrainage != null) {
+      return { ...l, quantite: Math.max(0, opts.qteDrainage) }
+    }
+    return l
+  })
+}
+
+/** P.U. 1re ligne = forfait médecin ; Qté hôtel / supp / drainage = rapport + formulaire. */
+function buildDefaultLignes(opts?: {
+  honorairesChirCliniquePu?: number
+  qteSuppCliniqueAccomp?: number
+  qteHotelNuits?: number
+  qteDrainage?: number
+}): LigneDevisForm[] {
   const pu0 =
-    typeof honorairesChirCliniquePu === 'number' &&
-    Number.isFinite(honorairesChirCliniquePu) &&
-    honorairesChirCliniquePu > 0
-      ? normalizeTndDinars(honorairesChirCliniquePu)
+    typeof opts?.honorairesChirCliniquePu === 'number' &&
+    Number.isFinite(opts.honorairesChirCliniquePu) &&
+    opts.honorairesChirCliniquePu > 0
+      ? normalizeTndDinars(opts.honorairesChirCliniquePu)
       : 0
-  return PRESTATIONS_PAR_DEFAUT.map((description, i) => ({
-    description,
-    quantite: 1,
-    prixUnitaire: i === 0 ? pu0 : 0,
-  }))
+  const qteSupp =
+    typeof opts?.qteSuppCliniqueAccomp === 'number' && Number.isFinite(opts.qteSuppCliniqueAccomp)
+      ? Math.max(0, Math.floor(opts.qteSuppCliniqueAccomp))
+      : 1
+  const qteHotel =
+    typeof opts?.qteHotelNuits === 'number' && Number.isFinite(opts.qteHotelNuits)
+      ? Math.max(0, Math.floor(opts.qteHotelNuits))
+      : 1
+  const qteDrainage =
+    typeof opts?.qteDrainage === 'number' && Number.isFinite(opts.qteDrainage)
+      ? Math.max(0, Math.floor(opts.qteDrainage))
+      : 1
+
+  return PRESTATIONS_PAR_DEFAUT.map((description, i) => {
+    let quantite = 1
+    if (description === LIGNE_SUPP_CLINIQUE_ACCOMP || description === LIGNE_SUPP_HOTEL_ACCOMP) {
+      quantite = qteSupp
+    }
+    if (description === LIGNE_HOTEL_NUITEES) quantite = qteHotel
+    if (description === LIGNE_DRAINAGE) quantite = qteDrainage
+    return {
+      description,
+      quantite,
+      prixUnitaire: i === 0 ? pu0 : 0,
+    }
+  })
 }
 
 const STATUTS_DEVIS = [
@@ -89,8 +191,8 @@ const STATUTS_DEVIS = [
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
 ]
 
-/** Message d’abstention prérempli (modifiable avant envoi chat). */
-const ABSTENTION_MESSAGE_TEMPLATE = `Chère Madame,
+/** Repli si l’API Communication est indisponible. */
+const ABSTENTION_MESSAGE_FALLBACK = `Chère Madame,
 Merci encore pour votre intérêt et la confiance que vous témoignez envers le cabinet du Dr CHENNOUFI.
 Après un examen attentif de vos photos et de votre dossier médical, nous sommes au regret de vous informer que le Dr CHENNOUFI a pris la décision de ne pas intervenir dans votre cas.
 Cette décision relève d’une démarche éthique et professionnelle, guidée par son exigence de sécurité, de résultats cohérents et d’adéquation avec sa pratique chirurgicale.
@@ -102,6 +204,16 @@ Conciergerie & coordination patients
 Cabinet du Dr Mehdi Chennoufi
 Chirurgie Esthétique, Plastique et Réparatrice
 SCULPTURE, SMOOTH & SMILE`
+
+function applyTemplateVars(content: string, fullName: string) {
+  const parts = fullName.trim().split(/\s+/)
+  const prenom = parts[0] ?? ''
+  const nom = parts.slice(1).join(' ')
+  return content
+    .split('{prenom}').join(prenom)
+    .split('{nom}').join(nom)
+    .split('{reason}').join('')
+}
 
 /** Aligné sur `assertPatientReadyForDevis` (backend). */
 const DEVIS_READY_STATUSES = [
@@ -195,10 +307,10 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
           </div>
         </div>
       )}
-      {(r.nuitsClinique != null || r.nuitsPreoperatoires != null || r.nuitsHotel != null || r.vetementContention != null || r.anesthesieGenerale != null || r.dureeSejourTunisie != null || r.nbAdultesSejour != null) && (
+      {(r.nuitsClinique != null || r.nuitsPreoperatoires != null || r.nuitsHotel != null || r.vetementContention != null || r.anesthesieGenerale != null || r.drainage != null || r.dureeSejourTunisie != null || r.nbAdultesSejour != null) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
-            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits préopératoires</p>
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuit préparatoire en clinique</p>
             <p className="text-sm font-semibold text-cyan-900">
               {r.nuitsPreoperatoires != null ? `${r.nuitsPreoperatoires} nuit(s)` : 'Non précisé'}
             </p>
@@ -210,7 +322,7 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
             </p>
           </div>
           <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 px-3 py-2.5">
-            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuits hôtel</p>
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700 mb-1">Nuit de convalescence à l&apos;hôtel</p>
             <p className="text-sm font-semibold text-cyan-900">
               {r.nuitsHotel != null ? `${r.nuitsHotel} nuit(s)` : 'Non précisé'}
             </p>
@@ -227,11 +339,21 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
               {r.vetementContention == null ? 'Non précisé' : r.vetementContention ? 'Oui' : 'Non'}
             </p>
           </div>
+          <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-semibold text-indigo-700 mb-1">Drainage</p>
+            <p className="text-sm font-semibold text-indigo-900">
+              {r.drainage == null
+                ? 'Non précisé'
+                : r.drainage
+                  ? `Oui${r.nbSeancesDrainage != null ? ` · ${r.nbSeancesDrainage} séance(s)` : ''}`
+                  : 'Non'}
+            </p>
+          </div>
           {r.dureeSejourTunisie != null && (
             <div className="rounded-lg border border-teal-100 bg-teal-50/70 px-3 py-2.5">
               <p className="text-[11px] uppercase tracking-wide font-semibold text-teal-700 mb-1">Séjour global Tunisie</p>
               <p className="text-sm font-semibold text-teal-900">
-                {r.dureeSejourTunisie} jour(s)
+                {r.dureeSejourTunisie} nuit(s)
               </p>
             </div>
           )}
@@ -307,6 +429,9 @@ interface DevisModalProps {
   onCustomize: () => void
   currency: CurrencyUnit
   tauxEur: TndEurRateResponse | null
+  formError?: string | null
+  cliniqueNomInvalid?: boolean
+  hotelNomInvalid?: boolean
 }
 
 function DevisModal({
@@ -322,6 +447,9 @@ function DevisModal({
   notesSejour, setNotesSejour,
   sent, savedDraft, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
   tauxEur,
+  formError = null,
+  cliniqueNomInvalid = false,
+  hotelNomInvalid = false,
 }: DevisModalProps) {
   const tndPerEur = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
   const euroLabel = formatEuroApprox(total, tndPerEur)
@@ -387,8 +515,11 @@ function DevisModal({
                         <label className="text-[10px] text-slate-400 sm:hidden mb-0.5 block">Qté</label>
                         <Input
                           className="h-10 sm:h-8 text-sm text-center border-slate-200"
-                          type="number" min={1} value={ligne.quantite}
-                          onChange={(e) => updateLigne(i, 'quantite', parseInt(e.target.value, 10) || 1)}
+                          type="number" min={0} value={ligne.quantite}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10)
+                            updateLigne(i, 'quantite', Number.isFinite(n) ? Math.max(0, n) : 0)
+                          }}
                         />
                       </div>
                       <div className="sm:col-span-2">
@@ -457,10 +588,15 @@ function DevisModal({
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Informations séjour</p>
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+                <div className={cn(
+                  'rounded-xl border bg-slate-50/50 p-4 space-y-3',
+                  cliniqueNomInvalid ? 'border-red-300' : 'border-slate-200',
+                )}>
                   <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">🏥 Séjour clinique</p>
                   <div>
-                    <label className="text-xs font-semibold text-slate-500 block mb-1">Nom de la clinique</label>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">
+                      Nom de la clinique <span className="text-destructive">*</span>
+                    </label>
                     <Select
                       value={cliniqueChoice || undefined}
                       onValueChange={(v) => {
@@ -468,7 +604,10 @@ function DevisModal({
                         if (v !== 'autre') setCliniqueAutre('')
                       }}
                     >
-                      <SelectTrigger className="h-9 text-sm border-slate-200 bg-white">
+                      <SelectTrigger className={cn(
+                        'h-9 text-sm bg-white',
+                        cliniqueNomInvalid ? 'border-red-400' : 'border-slate-200',
+                      )}>
                         <SelectValue placeholder="Choisir une clinique" />
                       </SelectTrigger>
                       <SelectContent>
@@ -479,11 +618,17 @@ function DevisModal({
                     </Select>
                     {cliniqueChoice === 'autre' && (
                       <Input
-                        className="h-9 text-sm border-slate-200 bg-white mt-2"
+                        className={cn(
+                          'h-9 text-sm bg-white mt-2',
+                          cliniqueNomInvalid ? 'border-red-400' : 'border-slate-200',
+                        )}
                         placeholder="Nom de la clinique"
                         value={cliniqueAutre}
                         onChange={(e) => setCliniqueAutre(e.target.value)}
                       />
+                    )}
+                    {cliniqueNomInvalid && (
+                      <p className="text-[11px] text-destructive mt-1">Clinique obligatoire</p>
                     )}
                   </div>
                   <div>
@@ -500,10 +645,15 @@ function DevisModal({
                     <p className="text-[11px] text-slate-400 mt-1">Nuits en clinique</p>
                   </div>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+                <div className={cn(
+                  'rounded-xl border bg-slate-50/50 p-4 space-y-3',
+                  hotelNomInvalid ? 'border-red-300' : 'border-slate-200',
+                )}>
                   <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">🏨 Hôtel</p>
                   <div>
-                    <label className="text-xs font-semibold text-slate-500 block mb-1">Nom de l&apos;hôtel</label>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">
+                      Nom de l&apos;hôtel <span className="text-destructive">*</span>
+                    </label>
                     <Select
                       value={hotelChoice || undefined}
                       onValueChange={(v) => {
@@ -511,7 +661,10 @@ function DevisModal({
                         if (v !== 'autre') setHotelAutre('')
                       }}
                     >
-                      <SelectTrigger className="h-9 text-sm border-slate-200 bg-white">
+                      <SelectTrigger className={cn(
+                        'h-9 text-sm bg-white',
+                        hotelNomInvalid ? 'border-red-400' : 'border-slate-200',
+                      )}>
                         <SelectValue placeholder="Choisir un hôtel" />
                       </SelectTrigger>
                       <SelectContent>
@@ -522,11 +675,17 @@ function DevisModal({
                     </Select>
                     {hotelChoice === 'autre' && (
                       <Input
-                        className="h-9 text-sm border-slate-200 bg-white mt-2"
+                        className={cn(
+                          'h-9 text-sm bg-white mt-2',
+                          hotelNomInvalid ? 'border-red-400' : 'border-slate-200',
+                        )}
                         placeholder="Nom de l'hôtel"
                         value={hotelAutre}
                         onChange={(e) => setHotelAutre(e.target.value)}
                       />
+                    )}
+                    {hotelNomInvalid && (
+                      <p className="text-[11px] text-destructive mt-1">Hôtel obligatoire</p>
                     )}
                   </div>
                   <div>
@@ -540,13 +699,13 @@ function DevisModal({
                       value={hotelNuits}
                       onChange={(e) => setHotelNuits(e.target.value)}
                     />
-                    <p className="text-[11px] text-slate-400 mt-1">Nuits à l&apos;hôtel</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Nuit de convalescence à l&apos;hôtel</p>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1.5">Séjour total (jours)</label>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1.5">Séjour total (nuits)</label>
                   <Input
                     className="h-9 text-sm border-slate-200 bg-slate-50 text-slate-800 font-semibold"
                     type="number"
@@ -599,7 +758,14 @@ function DevisModal({
         </div>
 
         {/* Footer avec actions */}
-        <div className="shrink-0 border-t border-slate-200 px-4 sm:px-6 py-4 flex flex-col sm:flex-row gap-2.5 bg-slate-50/60">
+        <div className="shrink-0 border-t border-slate-200 px-4 sm:px-6 py-4 flex flex-col gap-2.5 bg-slate-50/60">
+          {formError && (
+            <p className="text-xs text-destructive flex items-center gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              {formError}
+            </p>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2.5">
           <Button
             variant="brand"
             className="flex-1 h-10 gap-2 font-semibold"
@@ -642,6 +808,7 @@ function DevisModal({
           <Button variant="ghost" className="sm:w-auto h-10 text-slate-500" onClick={onClose}>
             Annuler
           </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -662,6 +829,9 @@ export default function DevisGestionnairePage() {
   const [listLoading, setListLoading]     = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [pageError, setPageError]         = useState<string | null>(null)
+  const [modalError, setModalError]       = useState<string | null>(null)
+  const [cliniqueNomInvalid, setCliniqueNomInvalid] = useState(false)
+  const [hotelNomInvalid, setHotelNomInvalid] = useState(false)
   const [search, setSearch]               = useState('')
   const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'accepte' | 'refuse'>('all')
   const [view, setView]                   = useState<PageView>('list')
@@ -694,12 +864,12 @@ export default function DevisGestionnairePage() {
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [abstentionMsgOpen, setAbstentionMsgOpen] = useState(false)
-  const [abstentionMsg, setAbstentionMsg] = useState(ABSTENTION_MESSAGE_TEMPLATE)
+  const [abstentionMsg, setAbstentionMsg] = useState(ABSTENTION_MESSAGE_FALLBACK)
   const [abstentionMsgSending, setAbstentionMsgSending] = useState(false)
   const [consultVersionsOpen, setConsultVersionsOpen] = useState(false)
   const [abstentionMsgError, setAbstentionMsgError] = useState<string | null>(null)
 
-  // Séjour total (jours) = nuits clinique + nuits hôtel
+  // Séjour total (nuits) = nuits clinique + nuits hôtel
   useEffect(() => {
     setDureeSejourTotale(joursSejourFromNuits(cliniqueNuits, hotelNuits))
   }, [cliniqueNuits, hotelNuits])
@@ -827,16 +997,29 @@ export default function DevisGestionnairePage() {
       return
     }
     const formPayload = (patientDetail?.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
-    const rap = patientDetail?.rapports?.[0]
+    const rap = patientDetail?.rapports?.[0] ?? rapportsList[0]
     const fromRapport = devisSejourDefaultsFromRapport(rap, formPayload)
+    const qteAccomp = totalAccompagnantsQty(
+      fromRapport.nbAdultes,
+      fromRapport.nbEnfants,
+      formPayload,
+    )
+    const qteHotelRaw = Number(fromRapport.hotelNuits)
+    const qteHotel = Number.isFinite(qteHotelRaw) ? Math.max(0, Math.floor(qteHotelRaw)) : null
+    const qteDrainage = drainageQtyFromRapport(rap)
 
     if (editing && existingDevis) {
+      const baseLignes = existingDevis.lignes.map((l) => ({
+        description: l.description,
+        quantite: l.quantite,
+        prixUnitaire: normalizeTndDinars(l.prixUnitaire),
+      }))
       setLignes(
-        existingDevis.lignes.map((l) => ({
-          description: l.description,
-          quantite: l.quantite,
-          prixUnitaire: normalizeTndDinars(l.prixUnitaire),
-        }))
+        applyRapportQtysToLignes(baseLignes, {
+          qteAccompagnants: qteAccomp,
+          qteHotelNuits: qteHotel,
+          qteDrainage,
+        }),
       )
       const p = parseSejourMeta(existingDevis.notesSejour ?? existingDevis.planningMedical ?? '')
       const clinique = resolveCliniqueFromNom(p.cliniqueNom)
@@ -846,17 +1029,25 @@ export default function DevisGestionnairePage() {
       setCliniqueNuits(p.cliniqueNuits !== '' ? p.cliniqueNuits : fromRapport.cliniqueNuits)
       setHotelChoice(hotel.choice)
       setHotelAutre(hotel.autre)
-      setHotelNuits(p.hotelNuits !== '' ? p.hotelNuits : fromRapport.hotelNuits)
-      setNbAdultes(p.nbAdultes !== '' ? p.nbAdultes : fromRapport.nbAdultes)
-      setNbEnfants(p.nbEnfants !== '' ? p.nbEnfants : fromRapport.nbEnfants)
+      // Priorité rapport / formulaire (comme hôtel & accompagnants)
+      setHotelNuits(fromRapport.hotelNuits !== '' ? fromRapport.hotelNuits : p.hotelNuits)
+      setNbAdultes(fromRapport.nbAdultes !== '' ? fromRapport.nbAdultes : p.nbAdultes)
+      setNbEnfants(fromRapport.nbEnfants !== '' ? fromRapport.nbEnfants : p.nbEnfants)
       setDureeSejourTotale(p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale)
       setNotesSejour(p.noteSejour)
       setIsEditingExisting(true)
     } else {
-      const fp = rapportsList[0]?.forfaitPropose
+      const fp = rap?.forfaitPropose ?? rapportsList[0]?.forfaitPropose
       const honoraires =
         typeof fp === 'number' && Number.isFinite(fp) && fp > 0 ? fp : undefined
-      setLignes(buildDefaultLignes(honoraires))
+      setLignes(
+        buildDefaultLignes({
+          honorairesChirCliniquePu: honoraires,
+          qteSuppCliniqueAccomp: qteAccomp,
+          qteHotelNuits: qteHotel ?? undefined,
+          qteDrainage: qteDrainage ?? undefined,
+        }),
+      )
       setCliniqueChoice(''); setCliniqueAutre('')
       setCliniqueNuits(fromRapport.cliniqueNuits)
       setHotelChoice(''); setHotelAutre('')
@@ -868,18 +1059,24 @@ export default function DevisGestionnairePage() {
       setIsEditingExisting(false)
     }
     setSent(false); setSavedDraft(false)
+    setModalError(null)
+    setCliniqueNomInvalid(false)
+    setHotelNomInvalid(false)
     setShowModal(true)
   }
 
   const buildPayload = () => {
     const ls = lignes
       .filter((l) => l.description.trim().length > 0)
-      .map((l) => ({
-        description: l.description.trim(),
-        quantite: Math.max(1, Math.round(l.quantite)),
-        prixUnitaire: l.prixUnitaire,
-        total: Math.max(1, Math.round(l.quantite)) * l.prixUnitaire,
-      }))
+      .map((l) => {
+        const quantite = Math.max(0, Math.round(l.quantite))
+        return {
+          description: l.description.trim(),
+          quantite,
+          prixUnitaire: l.prixUnitaire,
+          total: quantite * l.prixUnitaire,
+        }
+      })
     return {
       dateValidite: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       lignes: ls, total: ls.reduce((s, x) => s + x.total, 0),
@@ -899,25 +1096,43 @@ export default function DevisGestionnairePage() {
     }
   }
 
+  const validateSejourNoms = (): boolean => {
+    const cliniqueOk = cliniqueNomFromChoice(cliniqueChoice, cliniqueAutre).trim().length > 0
+    const hotelOk = hotelNomFromChoice(hotelChoice, hotelAutre).trim().length > 0
+    setCliniqueNomInvalid(!cliniqueOk)
+    setHotelNomInvalid(!hotelOk)
+    if (!cliniqueOk || !hotelOk) {
+      const missing = [
+        !cliniqueOk ? 'nom de la clinique' : null,
+        !hotelOk ? "nom de l'hôtel" : null,
+      ].filter(Boolean)
+      setModalError(`Champ(s) obligatoire(s) : ${missing.join(' et ')}.`)
+      return false
+    }
+    setModalError(null)
+    return true
+  }
+
   const handleSaveDraft = async () => {
     if (!selectedPatient) return
     const status = patientRow?.status ?? patientDetail?.status
     if (!status || !canPatientHaveDevis(status)) {
-      setPageError(
+      setModalError(
         'Impossible d’enregistrer : le rapport médical du médecin doit d’abord être généré.',
       )
       return
     }
+    if (!validateSejourNoms()) return
     if (buildPayload().lignes.length === 0) {
-      setPageError('Ajoutez au moins une prestation avec une désignation.')
+      setModalError('Ajoutez au moins une prestation avec une désignation.')
       return
     }
-    setActionLoading(true); setPageError(null)
+    setActionLoading(true); setModalError(null); setPageError(null)
     try {
       await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
       setSavedDraft(true); setTimeout(() => setSavedDraft(false), 2000)
       await loadPatientDetail(selectedPatient); await loadPatients()
-    } catch (e) { setPageError(apiErrorMessage(e)) }
+    } catch (e) { setModalError(apiErrorMessage(e)) }
     finally { setActionLoading(false) }
   }
 
@@ -925,26 +1140,68 @@ export default function DevisGestionnairePage() {
     if (!selectedPatient) return
     const status = patientRow?.status ?? patientDetail?.status
     if (!status || !canPatientHaveDevis(status)) {
-      setPageError(
+      setModalError(
         'Impossible d’envoyer : le rapport médical du médecin doit d’abord être généré.',
       )
       return
     }
+    if (!validateSejourNoms()) return
     if (buildPayload().lignes.length === 0) {
-      setPageError('Ajoutez au moins une prestation avec une désignation.')
+      setModalError('Ajoutez au moins une prestation avec une désignation.')
       return
     }
-    setActionLoading(true); setPageError(null)
+    setActionLoading(true); setModalError(null); setPageError(null)
     try {
       const payload = buildPayload()
       const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, payload)
-      await gestionnaireApi.sendDevis(r.devis.id)
-      // Le PDF personnalisé est joint depuis la page Personnalisation (même rendu que « Exporter PDF »)
-      toast({ title: 'Devis envoyé', description: 'Le patient a reçu le devis dans son espace.', variant: 'success' })
+      // PDF chat = même HTML rafraîchi que l’éditeur / espace patient / médecin
+      const detail = patientDetail?.id === selectedPatient
+        ? patientDetail
+        : (await gestionnaireApi.getPatient(selectedPatient)).patient
+      const devisForPdf: Devis = {
+        ...r.devis,
+        lignes: payload.lignes,
+        total: payload.total,
+        notesSejour: payload.notesSejour,
+        currency: payload.currency,
+        dateValidite: payload.dateValidite,
+        planningMedical: payload.planningMedical,
+        customContent:
+          r.devis.customContent
+          ?? detail.devis?.find((d) => d.id === r.devis.id)?.customContent
+          ?? null,
+      }
+      const patientForPdf = {
+        ...detail,
+        devis: detail.devis?.some((d) => d.id === r.devis.id)
+          ? detail.devis.map((d) => (d.id === r.devis.id ? devisForPdf : d))
+          : [...(detail.devis ?? []), devisForPdf],
+      }
+      const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
+      const letterCtx = letterContextFromGestionnairePatient(patientForPdf, devisForPdf)
+      const { topHtml, botHtml, contentToSave } = refreshDevisCustomContentParts({
+        customContent: devisForPdf.customContent,
+        devis: devisForPdf,
+        letterContext: letterCtx,
+        tndPerEur: rate,
+      })
+      // Persister le modèle rafraîchi (sinon patient/médecin gardent l’ancienne lettre TipTap)
+      await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
+      const fullHtml = await inlineHtmlImages(
+        buildGestionnaireDevisExportHtml({
+          devis: { ...devisForPdf, customContent: contentToSave },
+          patient: patientForPdf,
+          topHtml,
+          botHtml,
+          tndPerEur: rate,
+        }),
+      )
+      await gestionnaireApi.sendDevis(r.devis.id, { html: fullHtml })
+      toast({ title: 'Devis envoyé', description: 'Le patient a reçu le devis (PDF joint au chat).', variant: 'success' })
       setSent(true); setTimeout(() => { setSent(false); setShowModal(false) }, 2000)
       setIsEditingExisting(false)
       await loadPatientDetail(selectedPatient); await loadPatients()
-    } catch (e) { setPageError(apiErrorMessage(e)) }
+    } catch (e) { setModalError(apiErrorMessage(e)) }
     finally { setActionLoading(false) }
   }
 
@@ -961,14 +1218,15 @@ export default function DevisGestionnairePage() {
 
   const handleCustomize = async () => {
     if (!selectedPatient) return
-    setActionLoading(true); setPageError(null)
+    if (!validateSejourNoms()) return
+    setActionLoading(true); setModalError(null); setPageError(null)
     try {
       // Sauvegarder d'abord le brouillon pour s'assurer que le devisId existe
       await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
       setShowModal(false)
       navigate(`/gestionnaire/devis/${selectedPatient}/personnaliser`)
     } catch (e) {
-      setPageError(e instanceof Error ? e.message : 'Erreur.')
+      setModalError(e instanceof Error ? e.message : 'Erreur.')
     } finally {
       setActionLoading(false)
     }
@@ -1034,9 +1292,20 @@ export default function DevisGestionnairePage() {
   }
 
   const openAbstentionMessage = () => {
-    setAbstentionMsg(ABSTENTION_MESSAGE_TEMPLATE)
     setAbstentionMsgError(null)
     setAbstentionMsgOpen(true)
+    const fullName = patientRow?.user.fullName ?? patientDetail?.user.fullName ?? ''
+    setAbstentionMsg(applyTemplateVars(ABSTENTION_MESSAGE_FALLBACK, fullName))
+    void gestionnaireApi
+      .getCommunicationTemplates()
+      .then((res) => {
+        const tpl = res.templates.find((t) => t.key === 'abstention')
+        if (!tpl?.active || !tpl.content.trim()) return
+        setAbstentionMsg(applyTemplateVars(tpl.content, fullName))
+      })
+      .catch(() => {
+        // Repli déjà appliqué
+      })
   }
 
   const sendAbstentionMessage = async () => {
@@ -1698,11 +1967,15 @@ export default function DevisGestionnairePage() {
           removeLigne={(i) => setLignes((p) => p.filter((_, idx) => idx !== i))}
           updateLigne={(i, f, v) => setLignes((p) => p.map((l, idx) => (idx === i ? { ...l, [f]: v } : l)))}
           total={total}
-          cliniqueChoice={cliniqueChoice} setCliniqueChoice={setCliniqueChoice}
-          cliniqueAutre={cliniqueAutre} setCliniqueAutre={setCliniqueAutre}
+          cliniqueChoice={cliniqueChoice}
+          setCliniqueChoice={(v) => { setCliniqueChoice(v); setCliniqueNomInvalid(false); setModalError(null) }}
+          cliniqueAutre={cliniqueAutre}
+          setCliniqueAutre={(v) => { setCliniqueAutre(v); setCliniqueNomInvalid(false); setModalError(null) }}
           cliniqueNuits={cliniqueNuits} setCliniqueNuits={setCliniqueNuits}
-          hotelChoice={hotelChoice} setHotelChoice={setHotelChoice}
-          hotelAutre={hotelAutre} setHotelAutre={setHotelAutre}
+          hotelChoice={hotelChoice}
+          setHotelChoice={(v) => { setHotelChoice(v); setHotelNomInvalid(false); setModalError(null) }}
+          hotelAutre={hotelAutre}
+          setHotelAutre={(v) => { setHotelAutre(v); setHotelNomInvalid(false); setModalError(null) }}
           hotelNuits={hotelNuits} setHotelNuits={setHotelNuits}
           nbAdultes={nbAdultes} setNbAdultes={setNbAdultes}
           nbEnfants={nbEnfants} setNbEnfants={setNbEnfants}
@@ -1713,9 +1986,12 @@ export default function DevisGestionnairePage() {
           onSaveDraft={() => void handleSaveDraft()}
           onDelete={() => handleDeleteDevis()}
           canDelete={!!existingDevis && existingDevis.statut !== 'accepte'}
-          onCustomize={handleCustomize}
+          onCustomize={() => void handleCustomize()}
           currency={currency}
           tauxEur={tauxEur}
+          formError={modalError}
+          cliniqueNomInvalid={cliniqueNomInvalid}
+          hotelNomInvalid={hotelNomInvalid}
         />
       )}
 
@@ -1823,7 +2099,7 @@ export default function DevisGestionnairePage() {
               <div className="min-w-0">
                 <p className="text-sm font-bold text-slate-900">Envoyer un message</p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {patientRow?.user.fullName ?? 'Patiente'} — modèle de réponse, à adapter si besoin
+                  {patientRow?.user.fullName ?? 'Patiente'} — modèle Communication, à adapter si besoin
                 </p>
               </div>
               <button

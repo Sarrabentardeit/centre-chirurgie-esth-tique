@@ -70,7 +70,7 @@ function exportPdf(dv: DevisWithPatient) {
   const opTitle = lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
   const sejourLine = sejourLineFromDevis(dv)
   const ref = getDevisDisplayNumber(dv, dv.patient.dossierNumber) || dv.patient.dossierNumber
-  const pdfTitle = formatDevisListName(dv.patient.dossierNumber, dv.patient.user.fullName, dv.version)
+  const pdfTitle = formatDevisListName(dv.patient.dossierNumber, dv.patient.fullName, dv.version)
 
   const tableHtml = lignes.length > 0
     ? buildDevisOfferBlockHtml({

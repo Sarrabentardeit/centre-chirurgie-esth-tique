@@ -287,3 +287,24 @@ export async function sendDevisReadyEmail(input: {
     ctaLabel: 'Consulter mon devis →',
   })
 }
+
+/** Email patient — nouveau message chat (ex. décision / abstention). */
+export async function sendPatientChatMessageEmail(input: {
+  to: string
+  patientFullName: string
+  /** Si true : formulation « décision » (dossier en abstention). */
+  aboutDecision?: boolean
+}): Promise<void> {
+  const message = input.aboutDecision
+    ? 'Vous avez reçu un message du cabinet concernant une décision relative à votre dossier. Merci de consulter votre espace patient pour en prendre connaissance.'
+    : 'Vous avez reçu un nouveau message du cabinet. Merci de consulter votre espace patient pour en prendre connaissance.'
+
+  await sendPatientEmail({
+    to: input.to,
+    patientName: input.patientFullName,
+    titre: input.aboutDecision ? 'Message concernant votre dossier' : 'Nouveau message du cabinet',
+    message,
+    lienAction: '/patient/chat',
+    ctaLabel: 'Ouvrir le chat →',
+  })
+}

@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
+import { sendPatientChatMessageEmail } from '../../lib/mailer.js'
 import type { UserRole } from '../auth/auth.types.js'
 import type { MarkReadInput, SendMessageInput } from './chat.schema.js'
 
@@ -80,6 +81,9 @@ async function notifyStaffNewPatientMessage(input: {
 
 async function notifyPatientNewStaffMessage(input: {
   patientUserId: string
+  patientEmail?: string | null
+  patientFullName: string
+  patientStatus?: string | null
   senderRole: UserRole
   preview: string
 }) {
@@ -95,6 +99,19 @@ async function notifyPatientNewStaffMessage(input: {
       lienAction: '/patient/chat',
     },
   })
+
+  const email = input.patientEmail?.trim()
+  if (email) {
+    void sendPatientChatMessageEmail({
+      to: email,
+      patientFullName: input.patientFullName,
+      aboutDecision: input.patientStatus === 'abstention',
+    })
+  } else {
+    console.warn('[chat] Pas d’email patient — notification email message ignorée', {
+      patientUserId: input.patientUserId,
+    })
+  }
 }
 
 export async function searchChatPatients(search?: string) {
@@ -232,7 +249,7 @@ export async function sendMessage(
 
   const patient = await prisma.patient.findUnique({
     where: { id: patientId },
-    include: { user: { select: { id: true, fullName: true } } },
+    include: { user: { select: { id: true, fullName: true, email: true } } },
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
@@ -278,6 +295,9 @@ export async function sendMessage(
     })
     void notifyPatientNewStaffMessage({
       patientUserId: patient.user.id,
+      patientEmail: patient.user.email,
+      patientFullName: patient.user.fullName,
+      patientStatus: patient.status,
       senderRole: role,
       preview,
     })

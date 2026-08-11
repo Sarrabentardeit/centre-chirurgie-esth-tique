@@ -1006,7 +1006,7 @@ export default function DevisGestionnairePage() {
         // Retire le dossier de la file devis (historique conservé, réouverture possible)
         await gestionnaireApi.updatePatientStatus(pendingDelete.patientId, 'abstention')
         if (selectedPatient === pendingDelete.patientId) goBackToList()
-        toast.success('Dossier retiré de la liste des devis.')
+        toast({ title: 'Dossier retiré de la liste des devis.', variant: 'success' })
       }
       await loadPatients()
       setPendingDelete(null)
@@ -1051,7 +1051,7 @@ export default function DevisGestionnairePage() {
     try {
       await chatApi.sendMessage({ patientId: selectedPatient, contenu })
       setAbstentionMsgOpen(false)
-      toast.success('Message envoyé à la patiente.')
+      toast({ title: 'Message envoyé à la patiente.', variant: 'success' })
     } catch (e) {
       setAbstentionMsgError(e instanceof Error ? e.message : 'Envoi impossible.')
     } finally {

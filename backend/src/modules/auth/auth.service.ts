@@ -78,7 +78,7 @@ async function createSession(
   meta: { userAgent?: string; ip?: string }
 ): Promise<void> {
   const expiresAt = new Date()
-  expiresAt.setDate(expiresAt.getDate() + 30)
+  expiresAt.setDate(expiresAt.getDate() + 90)
 
   await prisma.session.create({
     data: {
@@ -227,7 +227,7 @@ export async function refresh(token: string) {
     where: { id: session.id },
     data: {
       refreshTokenHash: hashToken(newRefreshToken),
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
     },
   })
 

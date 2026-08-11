@@ -8,11 +8,11 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL est requis'),
 
   JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET doit faire au moins 32 caractères'),
-  /** Access token : 8h par défaut (journée de cabinet). Renouvelé via refresh. */
-  JWT_ACCESS_EXPIRES_IN: z.string().default('8h'),
+  /** Access token : 24h par défaut. Renouvelé via refresh. */
+  JWT_ACCESS_EXPIRES_IN: z.string().default('24h'),
 
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET doit faire au moins 32 caractères'),
-  JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
+  JWT_REFRESH_EXPIRES_IN: z.string().default('90d'),
 
   UPLOAD_DIR: z.string().default('uploads'),
   UPLOAD_MAX_FILE_SIZE_MB: z.coerce.number().default(10),

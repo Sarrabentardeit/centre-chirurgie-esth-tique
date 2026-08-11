@@ -1,5 +1,12 @@
 /** Lignes structurées dans `notesSejour` du devis (préfixes + texte libre). */
 
+import {
+  DEVIS_EXCLUT_PREFIX,
+  DEVIS_INCLUT_PREFIX,
+  parseExclutIdsFromNotes,
+  parseInclutIdsFromNotes,
+} from '@/lib/devisOfferInclus'
+
 const LEGACY_TYPE_SEJOUR_PREFIX = 'TYPE_SEJOUR:'
 export const SEJOUR_CLINIQUE_NOM_PREFIX = 'SEJOUR_CLINIQUE_NOM:'
 export const SEJOUR_CLINIQUE_NUITS_PREFIX = 'SEJOUR_CLINIQUE_NUITS:'
@@ -20,6 +27,8 @@ const META_PREFIXES = [
   SEJOUR_NB_ADULTES_PREFIX,
   SEJOUR_NB_ENFANTS_PREFIX,
   SEJOUR_DUREE_TOTALE_PREFIX,
+  DEVIS_INCLUT_PREFIX,
+  DEVIS_EXCLUT_PREFIX,
 ] as const
 
 function lineValue(lines: string[], prefix: string): string {
@@ -40,6 +49,9 @@ export interface ParsedSejourMeta {
   nbEnfants: string
   dureeSejourTotale: string
   noteSejour: string
+  /** null = non renseigné (défaut = tout coché à l’affichage). */
+  inclutIds: string[] | null
+  exclutIds: string[] | null
 }
 
 export const CLINIQUE_CHOIX = {
@@ -118,6 +130,8 @@ export function parseSejourMeta(notes: string | null | undefined): ParsedSejourM
     nbEnfants: lineValue(lines, SEJOUR_NB_ENFANTS_PREFIX),
     dureeSejourTotale: lineValue(lines, SEJOUR_DUREE_TOTALE_PREFIX),
     noteSejour: lines.filter((l) => !isMetaLine(l)).join('\n').trim(),
+    inclutIds: parseInclutIdsFromNotes(notes),
+    exclutIds: parseExclutIdsFromNotes(notes),
   }
 }
 
@@ -130,6 +144,8 @@ export function buildSejourNotes(i: ParsedSejourMeta): string {
     i.nbAdultes.trim() !== '' ? `${SEJOUR_NB_ADULTES_PREFIX}${i.nbAdultes.trim()}` : '',
     i.nbEnfants.trim() !== '' ? `${SEJOUR_NB_ENFANTS_PREFIX}${i.nbEnfants.trim()}` : '',
     i.dureeSejourTotale.trim() !== '' ? `${SEJOUR_DUREE_TOTALE_PREFIX}${i.dureeSejourTotale.trim()}` : '',
+    i.inclutIds != null ? `${DEVIS_INCLUT_PREFIX}${i.inclutIds.join(',')}` : '',
+    i.exclutIds != null ? `${DEVIS_EXCLUT_PREFIX}${i.exclutIds.join(',')}` : '',
     i.noteSejour.trim(),
   ].filter(Boolean).join('\n')
 }

@@ -11,6 +11,13 @@ import {
   devisSectionHeading,
   devisSeparator,
 } from '@/lib/devisCharte'
+import {
+  DEVIS_EXCLUT_ITEMS,
+  DEVIS_INCLUT_ITEMS,
+  labelsForIds,
+  resolveExclutIds,
+  resolveInclutIds,
+} from '@/lib/devisOfferInclus'
 import { devisSejourDefaultsFromRapport, parseSejourMeta } from '@/lib/devisSejourNotes'
 import { buildDevisAmountSentence, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { paraSalmonHi } from '@/lib/planningSejourBranding'

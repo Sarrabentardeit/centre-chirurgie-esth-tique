@@ -184,7 +184,6 @@ export default function RapportsPage() {
   const [nuitsClinique, setNuitsClinique] = useState('')
   const [nuitsHotel, setNuitsHotel]       = useState('')
   const [vetementContention, setVetementContention] = useState<boolean | null>(null)
-  const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
   const [nbAdultesSejour, setNbAdultesSejour] = useState('')
   const [nbEnfantsSejour, setNbEnfantsSejour] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
@@ -236,7 +235,7 @@ export default function RapportsPage() {
     setSelectedId(patientId)
     setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
     setNuitsPreoperatoires('1'); setNuitsClinique(''); setNuitsHotel(''); setVetementContention(null)
-    setDureeSejourTunisie(''); setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false)
+    setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false)
     setDrainage(null); setNbSeancesDrainage(''); setNotes('')
     setSaved(false); setSaveError(null)
     setDrawerOpen(true)
@@ -265,7 +264,6 @@ export default function RapportsPage() {
         setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
         setNuitsHotel(r.nuitsHotel != null ? String(r.nuitsHotel) : '')
         setVetementContention(r.vetementContention ?? null)
-        setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
         setNbAdultesSejour(r.nbAdultesSejour != null ? String(r.nbAdultesSejour) : '')
         setNbEnfantsSejour(r.nbEnfantsSejour != null ? String(r.nbEnfantsSejour) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
@@ -340,7 +338,6 @@ export default function RapportsPage() {
         nbSeancesDrainage: drainage === true ? Number(nbSeancesDrainage) : null,
         notes: notes || undefined,
       })
-      setDureeSejourTunisie(String(totalTunisie))
       setSaved(true)
       toast({ title: 'Rapport enregistré', description: 'Le diagnostic a été sauvegardé.', variant: 'success' })
       setTimeout(() => setSaved(false), 3000)

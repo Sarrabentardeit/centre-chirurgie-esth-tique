@@ -129,7 +129,6 @@ export default function DossierPatientPage() {
   const [nuitsClinique, setNuitsClinique] = useState('')
   const [nuitsHotel, setNuitsHotel]     = useState('')
   const [vetementContention, setVetementContention] = useState<boolean | null>(null)
-  const [dureeSejourTunisie, setDureeSejourTunisie] = useState('')
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [drainage, setDrainage] = useState<boolean | null>(null)
   const [nbSeancesDrainage, setNbSeancesDrainage] = useState('')
@@ -171,7 +170,6 @@ export default function DossierPatientPage() {
         setNuitsPreoperatoires(r.nuitsPreoperatoires != null ? String(r.nuitsPreoperatoires) : '1')
         setNuitsHotel(r.nuitsHotel != null ? String(r.nuitsHotel) : '')
         setVetementContention(r.vetementContention ?? null)
-        setDureeSejourTunisie(r.dureeSejourTunisie != null ? String(r.dureeSejourTunisie) : '')
         setAnesthesieGenerale(r.anesthesieGenerale ?? false)
         setDrainage(r.drainage ?? null)
         setNbSeancesDrainage(r.nbSeancesDrainage != null ? String(r.nbSeancesDrainage) : '')
@@ -181,7 +179,6 @@ export default function DossierPatientPage() {
         setExamensAutreChecked(false)
         setExamensAutreText('')
         setNuitsPreoperatoires('1')
-        setDureeSejourTunisie('')
         setAnesthesieGenerale(false)
         setDrainage(null)
         setNbSeancesDrainage('')
@@ -195,16 +192,6 @@ export default function DossierPatientPage() {
   }
 
   useEffect(() => { void load() }, [id])
-
-  // Calcul automatique du séjour global = pré-op + post-op + hôtel
-  useEffect(() => {
-    const pre  = parseInt(nuitsPreoperatoires) || 0
-    const post = parseInt(nuitsClinique) || 0
-    const hotel = parseInt(nuitsHotel) || 0
-    if (nuitsPreoperatoires !== '' || nuitsClinique !== '' || nuitsHotel !== '') {
-      setDureeSejourTunisie(String(pre + post + hotel))
-    }
-  }, [nuitsPreoperatoires, nuitsClinique, nuitsHotel])
 
   const handleSaveRapport = async () => {
     if (!id) return

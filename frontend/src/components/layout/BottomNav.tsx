@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar,
   Bell, Heart, ClipboardList, FileCheck,
@@ -44,6 +44,8 @@ const BOTTOM_NAV_ITEMS: Record<UserRole, BottomNavItem[]> = {
 export function BottomNav() {
   const { user } = useAuthStore()
   const chatUnread = useChatUnreadStore((s) => s.unread)
+  const location = useLocation()
+  const navigate = useNavigate()
 
   if (!user) return null
 
@@ -58,6 +60,15 @@ export function BottomNav() {
         <NavLink
           key={href}
           to={href}
+          onClick={(e) => {
+            if (location.pathname !== href && location.pathname.startsWith(`${href}/`)) {
+              e.preventDefault()
+              navigate(href)
+            } else if (location.pathname === href) {
+              e.preventDefault()
+              navigate(href, { replace: true, state: { navReset: Date.now() } })
+            }
+          }}
           className={({ isActive }) =>
             cn(
               'relative flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-2 text-[10px] font-medium leading-tight transition-colors',

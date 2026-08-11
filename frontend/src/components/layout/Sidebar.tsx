@@ -187,7 +187,21 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               <NavLink
                 key={item.href}
                 to={item.href}
-                onClick={onClose}
+                end={item.href === '/gestionnaire/devis' || item.href === '/medecin/devis'}
+                onClick={(e) => {
+                  onClose()
+                  // Si on est déjà sur la section (ex. dossier devis), forcer le retour à la racine
+                  if (
+                    location.pathname !== item.href &&
+                    location.pathname.startsWith(`${item.href}/`)
+                  ) {
+                    e.preventDefault()
+                    navigate(item.href)
+                  } else if (location.pathname === item.href) {
+                    e.preventDefault()
+                    navigate(item.href, { replace: true, state: { navReset: Date.now() } })
+                  }
+                }}
                 className={cn(
                   'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
                   isActive

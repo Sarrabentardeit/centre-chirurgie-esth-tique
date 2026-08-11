@@ -15,7 +15,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { toast } from '@/store/toastStore'
 import { formatCurrency, formatDate, formatDateTime, type CurrencyUnit } from '@/lib/utils'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
 import {
@@ -639,6 +639,7 @@ function DevisModal({
 export default function DevisGestionnairePage() {
   const { id: patientIdFromUrl } = useParams<{ id?: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const currency: CurrencyUnit = 'TND'
 
   /* State global */
@@ -727,16 +728,34 @@ export default function DevisGestionnairePage() {
     if (patientIdFromUrl) {
       setSelectedPatient(patientIdFromUrl)
       setView('detail')
+      return
     }
-  }, [patientIdFromUrl])
+    // Retour liste (sidebar / URL / Retour) — toujours resynchroniser
+    setView('list')
+    setSelectedPatient('')
+    setPatientDetail(null)
+    setShowModal(false)
+    setIsEditingExisting(false)
+    setSent(false)
+    setSavedDraft(false)
+    // location.key : reclic sidebar sur /devis alors qu’un dossier est ouvert
+  }, [patientIdFromUrl, location.key])
 
   const openDetail = (id: string) => {
-    setSelectedPatient(id); setView('detail')
-    setIsEditingExisting(false); setSent(false); setSavedDraft(false)
+    setSelectedPatient(id)
+    setView('detail')
+    setIsEditingExisting(false)
+    setSent(false)
+    setSavedDraft(false)
+    navigate(`/gestionnaire/devis/${id}`)
   }
 
   const goBackToList = () => {
-    setView('list'); setSelectedPatient(''); setPatientDetail(null); setShowModal(false)
+    setView('list')
+    setSelectedPatient('')
+    setPatientDetail(null)
+    setShowModal(false)
+    navigate('/gestionnaire/devis')
   }
 
   useEffect(() => {

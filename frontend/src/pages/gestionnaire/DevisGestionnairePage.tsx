@@ -15,7 +15,7 @@ import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { toast } from '@/store/toastStore'
-import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, type CurrencyUnit } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, STATUS_COLORS, STATUS_LABELS, type CurrencyUnit } from '@/lib/utils'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
@@ -29,6 +29,7 @@ import {
   type TndEurRateResponse,
   type PatientListItem,
 } from '@/lib/api'
+import type { DossierStatus } from '@/types'
 import { FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import {
@@ -63,6 +64,13 @@ import { inlineHtmlImages } from '@/lib/pdf'
 ══════════════════════════════════════════════════ */
 interface LigneDevisForm { description: string; quantite: number; prixUnitaire: number }
 type PageView = 'list' | 'detail'
+
+const DOSSIER_STATUSES: DossierStatus[] = [
+  'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
+  'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
+  'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
+  'abstention',
+]
 
 const PRESTATIONS_PAR_DEFAUT = [
   'Honoraires Chirurgiens et clinique (nbr de nuitées)',
@@ -266,23 +274,31 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50/80 transition-colors"
+        className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-slate-50/90 transition-colors"
       >
-        <span className="text-slate-400 shrink-0">{icon}</span>
-        <span className="text-sm font-semibold text-slate-800 flex-1 text-left">{title}</span>
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700 shrink-0">
+          {icon}
+        </span>
+        <span className="text-sm font-semibold text-slate-900 flex-1 text-left">{title}</span>
         {count !== undefined && (
-          <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2.5 py-0.5 mr-2">{count}</span>
+          <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-full px-2.5 py-0.5 mr-1">
+            {count}
+          </span>
         )}
         {open
           ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
           : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
       </button>
-      {open && <div className="border-t border-slate-100 px-5 py-5">{children}</div>}
-    </div>
+      {open && (
+        <div className="border-t border-slate-100 px-4 sm:px-5 py-5 bg-gradient-to-b from-white to-slate-50/40">
+          {children}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -999,6 +1015,9 @@ export default function DevisGestionnairePage() {
   const [abstentionMsgSending, setAbstentionMsgSending] = useState(false)
   const [consultVersionsOpen, setConsultVersionsOpen] = useState(false)
   const [abstentionMsgError, setAbstentionMsgError] = useState<string | null>(null)
+  const [dossierStatusDraft, setDossierStatusDraft] = useState('')
+  const [statusSaving, setStatusSaving] = useState(false)
+  const [statusError, setStatusError] = useState<string | null>(null)
 
   // Séjour total (nuits) = nuits clinique + nuits hôtel
   useEffect(() => {
@@ -1117,6 +1136,35 @@ export default function DevisGestionnairePage() {
     }
     return null
   }, [patients, selectedPatient, patientDetail])
+
+  useEffect(() => {
+    if (patientRow?.status) {
+      setDossierStatusDraft(patientRow.status)
+      setStatusError(null)
+    }
+  }, [patientRow?.status, selectedPatient])
+
+  const handleApplyDossierStatus = async () => {
+    if (!selectedPatient || !dossierStatusDraft) return
+    if (dossierStatusDraft === patientRow?.status) return
+    setStatusSaving(true)
+    setStatusError(null)
+    try {
+      await gestionnaireApi.updatePatientStatus(selectedPatient, dossierStatusDraft)
+      setPatients((prev) =>
+        prev.map((p) => (p.id === selectedPatient ? { ...p, status: dossierStatusDraft } : p)),
+      )
+      setPatientDetail((prev) =>
+        prev && prev.id === selectedPatient ? { ...prev, status: dossierStatusDraft } : prev,
+      )
+      toast({ title: 'Statut dossier mis à jour', variant: 'success' })
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : 'Impossible de mettre à jour le statut.')
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
   const total        = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
 
   const openModal = (editing = false) => {
@@ -1739,182 +1787,274 @@ export default function DevisGestionnairePage() {
 
     return (
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header dossier */}
-        <div className="shrink-0 bg-white border-b border-slate-200">
-          <div className="max-w-4xl mx-auto px-4 sm:px-8 py-4">
-            {/* Navigation */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-4 sm:px-8 py-5 sm:py-6 space-y-5 pb-14">
+
             <button
               onClick={goBackToList}
-              className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-700 transition-colors mb-4"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               Retour à la liste
             </button>
 
-            {isAbstention && (
-              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
-                Ce dossier est classé en <span className="font-semibold">abstention</span> et reste consultable.
-                Réouverture possible depuis Patients → Abstention.
-              </div>
-            )}
-
-              {/* Identité + actions — colonne sur mobile, rangée sur desktop */}
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <Avatar className="h-10 w-10 sm:h-14 sm:w-14 shrink-0">
-                  <AvatarFallback className="bg-brand-100 text-brand-700 text-base sm:text-lg font-bold">
-                    {initials(patientRow.user.fullName)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-base sm:text-xl font-bold text-slate-900 truncate">{patientRow.user.fullName}</h2>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <span className="text-xs sm:text-sm font-mono text-slate-400">{patientRow.dossierNumber}</span>
-                    <StatusBadge kind="dossier" value={patientRow.status} />
-                    {patientRow.user.email && (
-                      <span className="text-xs text-slate-400 hidden sm:inline truncate">{patientRow.user.email}</span>
-                    )}
+            {/* Hero dossier */}
+            <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+              <div
+                className="px-4 sm:px-6 pt-5 pb-4"
+                style={{
+                  background:
+                    'linear-gradient(135deg, rgba(6,42,48,0.06) 0%, rgba(184,140,92,0.08) 55%, rgba(255,255,255,0.9) 100%)',
+                }}
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+                    <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 ring-2 ring-white shadow-sm">
+                      <AvatarFallback className="bg-brand-100 text-brand-800 text-base sm:text-lg font-bold">
+                        {initials(patientRow.user.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 space-y-1.5">
+                      <h2 className="text-lg sm:text-xl font-bold text-slate-900 truncate">
+                        {patientRow.user.fullName}
+                      </h2>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] sm:text-xs font-mono font-semibold text-brand-800 bg-white/80 border border-brand-100 px-2 py-0.5 rounded-md">
+                          {patientRow.dossierNumber}
+                        </span>
+                        <StatusBadge kind="dossier" value={patientRow.status} />
+                        {devisStatut && <StatusBadge kind="devis" value={devisStatut} />}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                        {patientRow.user.email && (
+                          <span className="inline-flex items-center gap-1 min-w-0">
+                            <Mail className="h-3 w-3 shrink-0 text-slate-400" />
+                            <span className="truncate">{patientRow.user.email}</span>
+                          </span>
+                        )}
+                        {patientRow.phone && (
+                          <span className="inline-flex items-center gap-1">
+                            <Phone className="h-3 w-3 shrink-0 text-slate-400" />
+                            {patientRow.phone}
+                          </span>
+                        )}
+                        {(patientRow.ville || patientRow.pays) && (
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
+                            {[patientRow.ville, patientRow.pays].filter(Boolean).join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              {/* CTA — abstention : message patient ; sinon devis */}
-              <div className="flex flex-col gap-2 w-full sm:items-end">
-                <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:justify-end gap-2 w-full">
-                  {isAbstention ? (
-                    <Button
-                      variant="brand"
-                      className="gap-2 w-full sm:w-auto h-11 sm:h-10 text-sm font-semibold justify-center"
-                      onClick={openAbstentionMessage}
-                      disabled={detailLoading}
-                    >
-                      <MessageSquare className="h-4 w-4" />
-                      Envoyer message
-                    </Button>
-                  ) : (
-                    <>
-                      <Button
-                        variant="brand"
-                        className="gap-2 w-full sm:w-auto h-11 sm:h-10 text-sm font-semibold justify-center"
-                        onClick={() => openModal(!!existingDevis && existingDevis.statut !== 'refuse')}
-                        disabled={detailLoading || !devisAllowed}
-                        title={
-                          devisAllowed
-                            ? undefined
-                            : 'En attente du rapport médical (médecin) avant devis.'
-                        }
-                      >
-                        <FileText className="h-4 w-4" />
-                        {devisActionLabel}
-                      </Button>
-                      {existingDevis && (
+                  <div className="flex flex-col gap-2 w-full lg:w-auto lg:items-end shrink-0">
+                    <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:justify-end gap-2 w-full">
+                      {isAbstention ? (
                         <Button
-                          type="button"
-                          variant="outline"
-                          className="gap-1.5 w-full sm:w-auto h-11 sm:h-10 text-sm text-slate-700 border-slate-200 hover:bg-slate-50 justify-center"
-                          onClick={() => {
-                            if (devisVersions.length === 1) {
-                              openConsultDevis(devisVersions[0].id)
-                              return
+                          variant="brand"
+                          className="gap-2 w-full sm:w-auto h-10 text-sm font-semibold justify-center"
+                          onClick={openAbstentionMessage}
+                          disabled={detailLoading}
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Envoyer message
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            variant="brand"
+                            className="gap-2 w-full sm:w-auto h-10 text-sm font-semibold justify-center"
+                            onClick={() => openModal(!!existingDevis && existingDevis.statut !== 'refuse')}
+                            disabled={detailLoading || !devisAllowed}
+                            title={
+                              devisAllowed
+                                ? undefined
+                                : 'En attente du rapport médical (médecin) avant devis.'
                             }
-                            setConsultVersionsOpen(true)
-                          }}
-                        >
-                          <Eye className="h-4 w-4" />
-                          Consulter le devis
-                          {devisVersions.length > 1 && (
-                            <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                          >
+                            <FileText className="h-4 w-4" />
+                            {devisActionLabel}
+                          </Button>
+                          {existingDevis && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="gap-1.5 w-full sm:w-auto h-10 text-sm border-slate-200 justify-center bg-white/80"
+                              onClick={() => {
+                                if (devisVersions.length === 1) {
+                                  openConsultDevis(devisVersions[0].id)
+                                  return
+                                }
+                                setConsultVersionsOpen(true)
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              Consulter
+                              {devisVersions.length > 1 && (
+                                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                              )}
+                            </Button>
                           )}
-                        </Button>
+                          {existingDevis && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="gap-1.5 w-full sm:w-auto h-10 text-sm text-destructive border-destructive/30 hover:bg-destructive/10 justify-center bg-white/80"
+                              disabled={actionLoading}
+                              onClick={() => handleDeleteDevis()}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Supprimer
+                            </Button>
+                          )}
+                        </>
                       )}
-                      {existingDevis && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="gap-1.5 w-full sm:w-auto h-11 sm:h-10 text-sm text-destructive border-destructive/30 hover:bg-destructive/10 justify-center"
-                          disabled={actionLoading}
-                          onClick={() => handleDeleteDevis()}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Supprimer devis
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </div>
-                {isAbstention ? (
-                  <p className="text-xs text-slate-500 sm:text-right">
-                    Transmettre la décision du médecin à la patiente.
-                  </p>
-                ) : !devisAllowed ? (
-                  <p className="text-xs text-amber-700 sm:text-right">
-                    Rapport médical requis avant devis.
-                  </p>
-                ) : null}
-
-                {devisStatut === 'envoye' && (
-                  <div className={`flex items-center gap-1.5 text-xs font-medium sm:justify-end ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {isRead
-                      ? <><Eye className="h-3.5 w-3.5" /> Vu le {formatDateTime(existingDevis!.vuParPatientAt!)}</>
-                      : <><EyeOff className="h-3.5 w-3.5" /> Pas encore consulté</>}
-                  </div>
-                )}
-                {devisStatut === 'accepte' && (
-                  <div className="flex flex-col gap-0.5 sm:items-end">
-                    <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Accepté par le patient
-                    </span>
-                    {isRead && (
-                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                        <Eye className="h-3 w-3" /> Lu le {formatDateTime(existingDevis!.vuParPatientAt!)}
-                      </span>
+                    </div>
+                    {isAbstention ? (
+                      <p className="text-[11px] text-slate-500 lg:text-right">
+                        Transmettre la décision du médecin à la patiente.
+                      </p>
+                    ) : !devisAllowed ? (
+                      <p className="text-[11px] text-amber-700 lg:text-right">
+                        Rapport médical requis avant devis.
+                      </p>
+                    ) : null}
+                    {devisStatut === 'envoye' && (
+                      <div className={`flex items-center gap-1.5 text-xs font-medium lg:justify-end ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {isRead
+                          ? <><Eye className="h-3.5 w-3.5" /> Vu le {formatDateTime(existingDevis!.vuParPatientAt!)}</>
+                          : <><EyeOff className="h-3.5 w-3.5" /> Pas encore consulté</>}
+                      </div>
+                    )}
+                    {devisStatut === 'accepte' && (
+                      <div className="flex flex-col gap-0.5 lg:items-end">
+                        <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5">
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Accepté par le patient
+                        </span>
+                        {isRead && (
+                          <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                            <Eye className="h-3 w-3" /> Lu le {formatDateTime(existingDevis!.vuParPatientAt!)}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
+                </div>
+              </div>
+
+              {/* Barre statut — comme médecin : badge actuel + classement */}
+              <div className="border-t border-slate-200/80 px-4 sm:px-6 py-3 bg-white space-y-2">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-sm font-medium text-slate-600 shrink-0">Statut dossier :</span>
+                  <span
+                    className={cn(
+                      'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold border',
+                      STATUS_COLORS[patientRow.status as DossierStatus] ?? 'bg-slate-100 text-slate-700 border-slate-200',
+                    )}
+                  >
+                    {STATUS_LABELS[patientRow.status as DossierStatus] ?? patientRow.status}
+                  </span>
+                  <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
+                    <Select
+                      value={dossierStatusDraft || patientRow.status}
+                      onValueChange={(v) => {
+                        setDossierStatusDraft(v)
+                        setStatusError(null)
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 border-dashed w-full sm:w-56">
+                        <SelectValue placeholder="Modifier…" />
+                      </SelectTrigger>
+                    <SelectContent>
+                      {DOSSIER_STATUSES.map((s) => (
+                        <SelectItem key={s} value={s} className="text-xs">
+                          {STATUS_LABELS[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                    </Select>
+                    {dossierStatusDraft && dossierStatusDraft !== patientRow.status && (
+                      <Button
+                        size="sm"
+                        variant="brand"
+                        className="h-9 text-xs shrink-0 px-3"
+                        disabled={statusSaving}
+                        onClick={() => void handleApplyDossierStatus()}
+                      >
+                        {statusSaving ? '…' : 'Appliquer'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {statusError && (
+                  <p className="text-xs text-destructive flex items-center gap-1.5">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    {statusError}
+                  </p>
                 )}
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Contenu scrollable */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 space-y-4 pb-12">
+            {isAbstention && (
+              <div className="relative overflow-hidden rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-slate-50 px-4 sm:px-5 py-4 shadow-sm">
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" aria-hidden />
+                <div className="flex items-start gap-3 pl-1">
+                  <div className="h-10 w-10 rounded-xl bg-amber-100 border border-amber-200/80 flex items-center justify-center shrink-0">
+                    <Ban className="h-5 w-5 text-amber-700" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-sm font-semibold text-slate-900">
+                      Parcours interrompu — abstention médicale
+                    </p>
+                    <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                      Dossier consultable. Réouverture via Patients → Abstention.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {detailLoading && (
               <div className="space-y-3">
-                <Skeleton className="h-14 w-full rounded-2xl" />
-                <Skeleton className="h-14 w-full rounded-2xl" />
-                <Skeleton className="h-14 w-full rounded-2xl" />
-                <Skeleton className="h-14 w-full rounded-2xl" />
+                <Skeleton className="h-36 w-full rounded-2xl" />
+                <Skeleton className="h-24 w-full rounded-2xl" />
+                <Skeleton className="h-24 w-full rounded-2xl" />
               </div>
             )}
 
             {!detailLoading && (
               <>
-                {/* Identité */}
-                <Section icon={<User className="h-4 w-4" />} title="Identité & coordonnées" defaultOpen>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                {/* Aperçu identité — panneau toujours ouvert */}
+                <section className="rounded-2xl border border-slate-200/80 bg-white shadow-sm px-4 sm:px-5 py-5">
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+                      <User className="h-4 w-4" />
+                    </span>
+                    <h3 className="text-sm font-semibold text-slate-900">Identité & coordonnées</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
                     {([
                       [<User key="u" className="h-3.5 w-3.5" />, 'Nom complet', patientDetail?.user.fullName],
                       [<Mail key="m" className="h-3.5 w-3.5" />, 'Email', patientDetail?.user.email],
                       [<Phone key="p" className="h-3.5 w-3.5" />, 'Téléphone', patientDetail?.phone],
                       [<MapPin key="mp" className="h-3.5 w-3.5" />, 'Ville / Pays', [patientDetail?.ville, patientDetail?.pays].filter(Boolean).join(', ') || null],
-                      [<User key="n" className="h-3.5 w-3.5" />, 'Nationalité', patientDetail?.nationalite],
                       [<User key="s" className="h-3.5 w-3.5" />, 'Source', patientDetail?.sourceContact ? formatSourceConnaissanceLabel(patientDetail.sourceContact) : null],
                       [<Calendar key="c" className="h-3.5 w-3.5" />, 'Compte créé le', patientDetail?.user.createdAt ? formatDate(patientDetail.user.createdAt) : null],
                     ] as [React.ReactNode, string, string | null | undefined][]).map(([icon, label, value]) => (
-                      <div key={label} className="flex items-start gap-2.5">
+                      <div key={label} className="flex items-start gap-2.5 min-w-0">
                         <span className="text-slate-300 mt-0.5 shrink-0">{icon}</span>
-                        <div>
-                          <p className="text-[11px] text-slate-400 font-medium uppercase tracking-wide">{label}</p>
-                          <p className="text-sm font-medium text-slate-800 mt-0.5">{value || <span className="text-slate-300">—</span>}</p>
+                        <div className="min-w-0">
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">{label}</p>
+                          <p className="text-sm font-medium text-slate-800 mt-0.5 break-words">
+                            {value || <span className="text-slate-300">—</span>}
+                          </p>
                         </div>
                       </div>
                     ))}
                   </div>
-                </Section>
+                </section>
 
-                {/* Formulaires */}
                 <Section
                   icon={<ClipboardList className="h-4 w-4" />}
                   title="Formulaires médicaux"
@@ -1953,7 +2093,6 @@ export default function DevisGestionnairePage() {
                   )}
                 </Section>
 
-                {/* Rapports */}
                 <Section
                   icon={<Stethoscope className="h-4 w-4" />}
                   title="Rapports médicaux"
@@ -1995,7 +2134,6 @@ export default function DevisGestionnairePage() {
                   ) : null}
                 </Section>
 
-                {/* Historique devis */}
                 <Section
                   icon={<FileText className="h-4 w-4" />}
                   title="Historique des devis"

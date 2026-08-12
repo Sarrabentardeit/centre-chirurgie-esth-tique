@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEffect, useState } from 'react'
 import { STATUS_LABELS, STATUS_COLORS, formatDate, formatCurrency, cn } from '@/lib/utils'
-import { medecinApi } from '@/lib/api'
+import { medecinApi, gestionnaireApi } from '@/lib/api'
 import type { Devis, RendezVous } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
@@ -113,6 +113,8 @@ export default function DossierPatientPage() {
   const tabParam = searchParams.get('tab')
   const initialTab = tabParam && tabParam !== 'devis' ? tabParam : 'profil'
   const { user } = useAuthStore()
+  const isGestionnaire = user?.role === 'gestionnaire'
+  const patientsListPath = isGestionnaire ? '/gestionnaire/patients' : '/medecin/patients'
 
   const [patient, setPatient]   = useState<PatientDetail | null>(null)
   const [loading, setLoading]   = useState(true)
@@ -140,12 +142,15 @@ export default function DossierPatientPage() {
   // Status change
   const [newStatus, setNewStatus]       = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [statusError, setStatusError]   = useState<string | null>(null)
 
   const load = async () => {
     if (!id) return
     setLoading(true); setError(null)
     try {
-      const res = await medecinApi.getPatient(id)
+      const res = isGestionnaire
+        ? await gestionnaireApi.getPatient(id)
+        : await medecinApi.getPatient(id)
       setPatient(res.patient as PatientDetail)
       // Pre-fill rapport form
       const r = res.patient.rapports?.[0]
@@ -191,10 +196,10 @@ export default function DossierPatientPage() {
     }
   }
 
-  useEffect(() => { void load() }, [id])
+  useEffect(() => { void load() }, [id, isGestionnaire])
 
   const handleSaveRapport = async () => {
-    if (!id) return
+    if (!id || isGestionnaire) return
 
     // Validation des champs obligatoires
     const missing: string[] = []
@@ -250,11 +255,13 @@ export default function DossierPatientPage() {
   const handleUpdateStatus = async () => {
     if (!id || !newStatus) return
     setStatusSaving(true)
+    setStatusError(null)
     try {
-      await medecinApi.updatePatientStatus(id, newStatus)
+      if (isGestionnaire) await gestionnaireApi.updatePatientStatus(id, newStatus)
+      else await medecinApi.updatePatientStatus(id, newStatus)
       void load()
     } catch (e) {
-      console.error(e)
+      setStatusError(e instanceof Error ? e.message : 'Impossible de mettre à jour le statut.')
     } finally {
       setStatusSaving(false)
     }
@@ -308,7 +315,7 @@ export default function DossierPatientPage() {
       {/* ── Sticky Header ── */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border mb-4 sm:mb-5 -mx-3 sm:-mx-4 lg:-mx-6 px-3 sm:px-4 lg:px-6 py-3">
         <div className="flex items-start gap-2 sm:items-center sm:gap-3">
-          <Button variant="ghost" size="icon" className="shrink-0 mt-0.5" onClick={() => navigate('/medecin/patients')}>
+          <Button variant="ghost" size="icon" className="shrink-0 mt-0.5" onClick={() => navigate(patientsListPath)}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <Avatar className="h-9 w-9 sm:h-10 sm:w-10 shrink-0">
@@ -362,30 +369,54 @@ export default function DossierPatientPage() {
       </div>
 
       {/* ── Statut dossier ── */}
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
-        <span className="text-sm font-medium text-muted-foreground">Statut dossier :</span>
-        <span className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold border', STATUS_COLORS[patient.status as keyof typeof STATUS_COLORS])}>
-          {STATUS_LABELS[patient.status as keyof typeof STATUS_LABELS] ?? patient.status}
-        </span>
-        <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
-          <Select value={newStatus} onValueChange={setNewStatus}>
-            <SelectTrigger className="w-full sm:w-52 h-8 text-xs border-dashed">
-              <SelectValue placeholder="Modifier manuellement…" />
-            </SelectTrigger>
-            <SelectContent>
-              {DOSSIER_STATUSES.map((s) => (
-                <SelectItem key={s} value={s} className="text-xs">
-                  {STATUS_LABELS[s as keyof typeof STATUS_LABELS] ?? s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {newStatus && newStatus !== patient.status && (
-            <Button size="sm" variant="brand" className="h-8 text-xs" disabled={statusSaving} onClick={handleUpdateStatus}>
-              {statusSaving ? 'Sauvegarde...' : 'Appliquer'}
-            </Button>
-          )}
+      <div className="mb-5 space-y-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-medium text-muted-foreground">Statut dossier :</span>
+          <span className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold border', STATUS_COLORS[patient.status as keyof typeof STATUS_COLORS])}>
+            {STATUS_LABELS[patient.status as keyof typeof STATUS_LABELS] ?? patient.status}
+          </span>
+          <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto flex-wrap">
+            <Select
+              value={newStatus}
+              onValueChange={(v) => {
+                setNewStatus(v)
+                setStatusError(null)
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-52 h-8 text-xs border-dashed">
+                <SelectValue placeholder="Modifier manuellement…" />
+              </SelectTrigger>
+              <SelectContent>
+                {DOSSIER_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s} className="text-xs">
+                    {STATUS_LABELS[s as keyof typeof STATUS_LABELS] ?? s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {newStatus && newStatus !== patient.status && (
+              <Button size="sm" variant="brand" className="h-8 text-xs" disabled={statusSaving} onClick={handleUpdateStatus}>
+                {statusSaving ? 'Sauvegarde...' : 'Appliquer'}
+              </Button>
+            )}
+            {isGestionnaire && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => navigate(`/gestionnaire/devis/${patient.id}`)}
+              >
+                Ouvrir le devis
+              </Button>
+            )}
+          </div>
         </div>
+        {statusError && (
+          <p className="text-xs text-destructive flex items-center gap-1.5">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            {statusError}
+          </p>
+        )}
       </div>
 
       {/* ── Tabs ── */}
@@ -474,36 +505,47 @@ export default function DossierPatientPage() {
 
         {/* ── Rapport médical ── */}
         <TabsContent value="rapport">
+          {isGestionnaire && !rapport ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 rounded-xl border border-dashed">
+              <Stethoscope className="h-10 w-10 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Aucun rapport médical pour ce dossier</p>
+            </div>
+          ) : (
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <CardTitle className="text-sm flex items-center gap-2">
                   <Stethoscope className="h-4 w-4 text-brand-600" />
                   Rapport médical
                   {rapport && <Badge variant="success" className="text-xs">Existant</Badge>}
+                  {isGestionnaire && (
+                    <Badge variant="secondary" className="text-xs">Lecture seule</Badge>
+                  )}
                 </CardTitle>
-                <Button
-                  variant="brand"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={saving || !forfait || Number(forfait) <= 0 || nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '' || vetementContention === null || (drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1))}
-                  title={
-                    !forfait || Number(forfait) <= 0 ? 'Forfait médical requis'
-                    : nuitsPreoperatoires === '' ? 'Nuit préparatoire en clinique requise'
-                    : nuitsClinique === '' ? 'Nuits postopératoires requises'
-                    : nuitsHotel === '' ? 'Nuit de convalescence à l\'hôtel requise'
-                    : vetementContention === null ? 'Vêtement de contention requis'
-                    : drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1) ? 'Nombre de séances de drainage requis'
-                    : undefined
-                  }
-                  onClick={handleSaveRapport}
-                >
-                  {saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-                  {saving ? 'Sauvegarde...' : saved ? 'Sauvegardé !' : 'Sauvegarder'}
-                </Button>
+                {!isGestionnaire && (
+                  <Button
+                    variant="brand"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={saving || !forfait || Number(forfait) <= 0 || nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '' || vetementContention === null || (drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1))}
+                    title={
+                      !forfait || Number(forfait) <= 0 ? 'Forfait médical requis'
+                      : nuitsPreoperatoires === '' ? 'Nuit préparatoire en clinique requise'
+                      : nuitsClinique === '' ? 'Nuits postopératoires requises'
+                      : nuitsHotel === '' ? 'Nuit de convalescence à l\'hôtel requise'
+                      : vetementContention === null ? 'Vêtement de contention requis'
+                      : drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1) ? 'Nombre de séances de drainage requis'
+                      : undefined
+                    }
+                    onClick={handleSaveRapport}
+                  >
+                    {saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                    {saving ? 'Sauvegarde...' : saved ? 'Sauvegardé !' : 'Sauvegarder'}
+                  </Button>
+                )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className={cn('space-y-5', isGestionnaire && 'pointer-events-none opacity-90')}>
               {rapportError && (
                 <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   <AlertCircle className="h-4 w-4 shrink-0" /> {rapportError}
@@ -782,6 +824,7 @@ export default function DossierPatientPage() {
               )}
             </CardContent>
           </Card>
+          )}
         </TabsContent>
 
         {/* ── Suivi ── */}

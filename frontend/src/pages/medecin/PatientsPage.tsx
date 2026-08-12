@@ -584,7 +584,11 @@ export default function PatientsPage() {
                     ${isAbstention ? 'bg-slate-50/80 hover:bg-slate-100/80 opacity-90' : isUrgent ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-muted/40'}
                     ${idx === 0 ? '' : ''}`}
                   onClick={() =>
-                    navigate(isGestionnaire ? `/gestionnaire/devis/${p.id}` : `/medecin/patients/${p.id}`)
+                    navigate(
+                      isGestionnaire
+                        ? `/gestionnaire/patients/${p.id}`
+                        : `/medecin/patients/${p.id}`,
+                    )
                   }
                 >
                   <div className="relative shrink-0">

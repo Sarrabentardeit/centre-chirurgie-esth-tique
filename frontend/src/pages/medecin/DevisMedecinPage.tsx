@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Search, FileCheck, ChevronRight, Printer, RefreshCw,
   CheckCircle2, XCircle, Clock, X,
@@ -19,6 +19,7 @@ import { StatusBadge } from '@/lib/statusUi'
 import { EmptyState } from '@/components/EmptyState'
 import { KpiStrip } from '@/components/PageHeader'
 import { toast } from '@/store/toastStore'
+import { PullToRefresh } from '@/components/PullToRefresh'
 
 const CONTENT_BREAK = DEVIS_CONTENT_BREAK
 
@@ -220,6 +221,11 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
   const hasContent = !!raw.trim()
   const cfg = STATUT[dv.statut as Statut]
 
+  const startY = useRef(0)
+  const dragY = useRef(0)
+  const [offset, setOffset] = useState(0)
+  const [dragging, setDragging] = useState(false)
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -258,8 +264,38 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
         className="relative z-10 flex flex-col w-full sm:max-w-3xl lg:max-w-4xl
           max-h-[min(92dvh,92vh)] sm:max-h-[min(88dvh,88vh)]
           bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-border overflow-hidden
-          pt-[env(safe-area-inset-top)]"
+          pt-safe"
+        style={{
+          transform: offset ? `translateY(${offset}px)` : undefined,
+          transition: dragging ? 'none' : 'transform 0.22s ease-out',
+        }}
       >
+        {/* Handle swipe-to-dismiss (mobile) */}
+        <div
+          className="sm:hidden touch-none flex justify-center pt-2 pb-1"
+          onTouchStart={(e) => {
+            startY.current = e.touches[0]?.clientY ?? 0
+            dragY.current = 0
+            setDragging(true)
+          }}
+          onTouchMove={(e) => {
+            const y = e.touches[0]?.clientY ?? 0
+            const delta = Math.max(0, y - startY.current)
+            dragY.current = delta
+            setOffset(delta)
+          }}
+          onTouchEnd={() => {
+            setDragging(false)
+            if (dragY.current > 96) onClose()
+            setOffset(0)
+          }}
+          onTouchCancel={() => {
+            setDragging(false)
+            setOffset(0)
+          }}
+        >
+          <div className="h-1 w-10 rounded-full bg-brand-200" />
+        </div>
         {/* Header */}
         <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-border bg-white">
           <div className="flex items-start justify-between gap-3">
@@ -450,10 +486,7 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
         </div>
 
         {/* Footer sticky — safe-area iPhone / Android gesture bar */}
-        <div
-          className="shrink-0 border-t border-border bg-white px-4 sm:px-6 pt-3 flex items-center justify-between gap-3"
-          style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
-        >
+        <div className="shrink-0 border-t border-border bg-white px-4 sm:px-6 pt-3 flex items-center justify-between gap-3 pb-safe">
           <p className="text-[11px] text-muted-foreground truncate hidden sm:block">
             {dv.patient.fullName} · {ref}
           </p>
@@ -509,15 +542,22 @@ export default function DevisMedecinPage() {
   const [filter, setFilter]     = useState<'all' | Statut>('all')
   const [selected, setSelected] = useState<DevisWithPatient | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    medecinApi.getAllDevis()
-      .then((r) => { if (!cancelled) setAllDevis(r.devis) })
-      .catch((e: Error) => { if (!cancelled) setError(e.message) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
+    setError(null)
+    try {
+      const r = await medecinApi.getAllDevis()
+      setAllDevis(r.devis)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur de chargement.')
+    } finally {
+      if (!opts?.silent) setLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const filtered = useMemo(() => {
     let list = filter === 'all' ? allDevis : allDevis.filter((d) => d.statut === filter)
@@ -565,6 +605,7 @@ export default function DevisMedecinPage() {
   ]
 
   return (
+    <PullToRefresh onRefresh={() => load({ silent: true })} className="h-full">
     <div className="flex flex-col h-full bg-[#f7f6f4] overflow-hidden">
       <PageHeader list={allDevis} />
 
@@ -638,5 +679,6 @@ export default function DevisMedecinPage() {
         <DetailModal dv={selected} onClose={() => setSelected(null)} />
       )}
     </div>
+    </PullToRefresh>
   )
 }

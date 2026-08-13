@@ -235,6 +235,19 @@ patientRouter.get(
   }
 )
 
+// GET /api/patient/planning-sejour — planning publié (finalisé)
+patientRouter.get(
+  '/planning-sejour',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await patientService.getMyPlanningSejour(req.auth!.sub)
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
 // GET /api/patient/post-op — récupérer son suivi post-opératoire
 patientRouter.get(
   '/post-op',

@@ -14,7 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
-import { toast } from '@/store/toastStore'
+import { feedbackSuccess, toast } from '@/store/toastStore'
 import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, STATUS_COLORS, STATUS_LABELS, type CurrencyUnit } from '@/lib/utils'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
@@ -52,6 +52,7 @@ import {
 } from '@/lib/devisOfferInclus'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { PullToRefresh } from '@/components/PullToRefresh'
 import {
   buildGestionnaireDevisExportHtml,
   refreshDevisCustomContentParts,
@@ -484,12 +485,15 @@ function DevisModal({
 }: DevisModalProps) {
   const tndPerEur = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
   const euroLabel = formatEuroApprox(total, tndPerEur)
+  const [confirmSendOpen, setConfirmSendOpen] = useState(false)
   // Fermer sur Escape
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !confirmSendOpen) onClose()
+    }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [onClose, confirmSendOpen])
 
   return (
     <div
@@ -913,8 +917,11 @@ function DevisModal({
           <Button
             variant="brand"
             className="flex-1 h-10 gap-2 font-semibold"
-            onClick={onSend}
-            disabled={actionLoading}
+            onClick={() => {
+              if (sent) return
+              setConfirmSendOpen(true)
+            }}
+            disabled={actionLoading || sent}
           >
             {sent
               ? <><CheckCircle2 className="h-4 w-4" /> Devis envoyé !</>
@@ -955,6 +962,26 @@ function DevisModal({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmSendOpen}
+        onClose={() => !actionLoading && setConfirmSendOpen(false)}
+        title="Envoyer ce devis au patient ?"
+        description={`Le devis sera validé et transmis à ${patientName}. Cette action ne peut pas être annulée facilement.`}
+        confirmLabel="Envoyer"
+        cancelLabel="Annuler"
+        confirmVariant="brand"
+        loading={actionLoading}
+        onConfirm={async () => {
+          setConfirmSendOpen(false)
+          onSend()
+        }}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center">
+            <Send className="h-5 w-5 text-brand-700" />
+          </div>
+        }
+      />
     </div>
   )
 }
@@ -1051,11 +1078,12 @@ export default function DevisGestionnairePage() {
     void loadTauxEur()
   }, [loadTauxEur])
 
-  const loadPatients = useCallback(async () => {
-    setListLoading(true); setPageError(null)
+  const loadPatients = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setListLoading(true)
+    setPageError(null)
     try { const r = await gestionnaireApi.getPatients(); setPatients(r.patients) }
     catch (e) { setPageError(e instanceof Error ? e.message : 'Impossible de charger.') }
-    finally { setListLoading(false) }
+    finally { if (!opts?.silent) setListLoading(false) }
   }, [])
 
   const loadPatientDetail = useCallback(async (id: string) => {
@@ -1385,7 +1413,7 @@ export default function DevisGestionnairePage() {
         }),
       )
       await gestionnaireApi.sendDevis(r.devis.id, { html: fullHtml })
-      toast({ title: 'Devis envoyé', description: 'Le patient a reçu le devis (PDF joint au chat).', variant: 'success' })
+      feedbackSuccess('Devis envoyé', 'Le patient a reçu le devis (PDF joint au chat).')
       setSent(true); setTimeout(() => { setSent(false); setShowModal(false) }, 2000)
       setIsEditingExisting(false)
       await loadPatientDetail(selectedPatient); await loadPatients()
@@ -1530,6 +1558,7 @@ export default function DevisGestionnairePage() {
 
     return (
     <div className="flex-1 overflow-y-auto">
+      <PullToRefresh onRefresh={() => loadPatients({ silent: true })}>
       <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 space-y-5">
 
         <PageHeader
@@ -1743,6 +1772,7 @@ export default function DevisGestionnairePage() {
         </div>
 
       </div>
+      </PullToRefresh>
     </div>
     )
   }

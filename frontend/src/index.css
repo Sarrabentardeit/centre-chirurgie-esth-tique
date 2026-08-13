@@ -24,6 +24,15 @@
     --input: 24 30% 83%;
     --ring: 30 48% 34%;
     --radius: 0.5rem;
+
+    /* Safe-area + chrome mobile (BottomNav / Navbar) */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --bottom-nav-h: 3.75rem;
+    --top-nav-h: 4rem;
+    --app-main-pb: calc(var(--bottom-nav-h) + var(--safe-bottom) + 0.75rem);
+    --app-chrome-mobile: calc(var(--top-nav-h) + var(--safe-top) + var(--bottom-nav-h) + var(--safe-bottom) + 1.25rem);
+    --app-chrome-desktop: calc(var(--top-nav-h) + var(--safe-top) + 2.5rem);
   }
 
   * {
@@ -57,6 +66,29 @@
 
   img, video, canvas, svg {
     max-width: 100%;
+  }
+}
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: max(0.75rem, var(--safe-bottom));
+  }
+  .pt-safe {
+    padding-top: var(--safe-top);
+  }
+  .pb-app-nav {
+    padding-bottom: var(--app-main-pb);
+  }
+  .h-app-chat {
+    height: calc(100dvh - var(--app-chrome-mobile));
+  }
+  @media (min-width: 1024px) {
+    .h-app-chat {
+      height: calc(100dvh - var(--app-chrome-desktop));
+    }
+    .pb-app-nav {
+      padding-bottom: 1.5rem;
+    }
   }
 }
 
@@ -148,6 +180,21 @@
     animation: fade-in 0.3s ease-out;
   }
 
+  .animate-page-enter {
+    animation: page-enter 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-page-enter,
+    .animate-fade-in,
+    .animate-badge-pop,
+    .animate-success-pop,
+    .animate-toast-in,
+    .animate-brand-shimmer {
+      animation: none !important;
+    }
+  }
+
   .animate-in {
     animation-fill-mode: both;
   }
@@ -181,6 +228,11 @@
   .scrollbar-none::-webkit-scrollbar {
     display: none;
   }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes slide-in-from-bottom-2 {

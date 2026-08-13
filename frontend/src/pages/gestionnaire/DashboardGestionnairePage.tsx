@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FileCheck, Package, Bell, Users, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react'
+import {
+  FileCheck, Package, Bell, Users, ChevronRight, AlertCircle, RefreshCw,
+  CalendarClock, Hourglass,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useNavigate } from 'react-router-dom'
-import { STATUS_LABELS, STATUS_COLORS, formatRelative, cn } from '@/lib/utils'
+import { STATUS_LABELS, STATUS_COLORS, formatRelative, formatDateTime, cn } from '@/lib/utils'
 import { EmptyState } from '@/components/EmptyState'
 import { useAuthStore } from '@/store/authStore'
-import { gestionnaireApi, type GestionnaireFunnelStep, type GestionnairePatientSummary } from '@/lib/api'
+import {
+  gestionnaireApi,
+  type GestionnaireDashboardDevisAttente,
+  type GestionnaireDashboardRdvAttente,
+  type GestionnaireFunnelStep,
+  type GestionnairePatientSummary,
+} from '@/lib/api'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -24,9 +33,18 @@ export default function DashboardGestionnairePage() {
   const { user } = useAuthStore()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [stats, setStats] = useState<{ totalPatients: number; devisEnCours: number; logistique: number; notifications: number } | null>(null)
+  const [stats, setStats] = useState<{
+    totalPatients: number
+    devisEnCours: number
+    devisSansReponse: number
+    rdvAConfirmer: number
+    logistique: number
+    notifications: number
+  } | null>(null)
   const [funnel, setFunnel] = useState<GestionnaireFunnelStep[]>([])
   const [devisATraiter, setDevisATraiter] = useState<GestionnairePatientSummary[]>([])
+  const [devisSansReponse, setDevisSansReponse] = useState<GestionnaireDashboardDevisAttente[]>([])
+  const [rdvAConfirmer, setRdvAConfirmer] = useState<GestionnaireDashboardRdvAttente[]>([])
   const [patientsLogistique, setPatientsLogistique] = useState<GestionnairePatientSummary[]>([])
   const [notifPreview, setNotifPreview] = useState<Array<{ id: string; titre: string; message: string; lienAction?: string | null }>>([])
 
@@ -38,6 +56,8 @@ export default function DashboardGestionnairePage() {
       setStats(res.stats)
       setFunnel(res.funnel)
       setDevisATraiter(res.devisATraiter)
+      setDevisSansReponse(res.devisSansReponse ?? [])
+      setRdvAConfirmer(res.rdvAConfirmer ?? [])
       setPatientsLogistique(res.patientsLogistique)
       const notifs = await gestionnaireApi.getNotifications()
       setNotifPreview(notifs.notifications.filter((n) => !n.lu).slice(0, 2))
@@ -59,29 +79,33 @@ export default function DashboardGestionnairePage() {
       icon: Users,
       color: 'text-brand-950',
       bg: 'bg-[rgba(6,42,48,0.06)]',
+      href: '/gestionnaire/patients',
     },
     {
-      label: 'Devis en cours',
-      value: stats?.devisEnCours ?? 0,
-      icon: FileCheck,
+      label: 'Devis sans réponse',
+      value: stats?.devisSansReponse ?? 0,
+      icon: Hourglass,
       color: 'text-amber-700',
       bg: 'bg-amber-50',
-      urgent: (stats?.devisEnCours ?? 0) > 0,
+      urgent: (stats?.devisSansReponse ?? 0) > 0,
+      href: '/gestionnaire/patients?status=devis_envoye',
+    },
+    {
+      label: 'RDV à confirmer',
+      value: stats?.rdvAConfirmer ?? 0,
+      icon: CalendarClock,
+      color: 'text-brand-700',
+      bg: 'bg-brand-50',
+      urgent: (stats?.rdvAConfirmer ?? 0) > 0,
+      href: '/gestionnaire/agenda',
     },
     {
       label: 'Logistique',
       value: stats?.logistique ?? 0,
       icon: Package,
-      color: 'text-brand-700',
-      bg: 'bg-brand-50',
-    },
-    {
-      label: 'Notifications',
-      value: stats?.notifications ?? 0,
-      icon: Bell,
-      color: 'text-brand-600',
-      bg: 'bg-brand-50',
-      urgent: (stats?.notifications ?? 0) > 0,
+      color: 'text-purple-700',
+      bg: 'bg-purple-50',
+      href: '/gestionnaire/logistique',
     },
   ]
 
@@ -107,10 +131,18 @@ export default function DashboardGestionnairePage() {
             {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Actualiser
-        </Button>
+        <div className="flex items-center gap-2">
+          {(stats?.notifications ?? 0) > 0 && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate('/gestionnaire/notifications')}>
+              <Bell className="h-3.5 w-3.5" />
+              {stats?.notifications} notif{(stats?.notifications ?? 0) > 1 ? 's' : ''}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Actualiser
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -144,13 +176,20 @@ export default function DashboardGestionnairePage() {
         </div>
       )}
 
-      {/* Bande KPI unique — moins de cartes empilées */}
       <div className="rounded-2xl border border-border bg-white shadow-sm overflow-hidden">
         <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border">
           {kpi.map((stat) => {
             const Icon = stat.icon
             return (
-              <div key={stat.label} className={cn('px-4 py-4', stat.urgent && 'bg-amber-50/40')}>
+              <button
+                key={stat.label}
+                type="button"
+                onClick={() => navigate(stat.href)}
+                className={cn(
+                  'px-4 py-4 text-left hover:bg-muted/40 transition-colors',
+                  stat.urgent && 'bg-amber-50/40',
+                )}
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${stat.bg}`}>
                     <Icon className={`h-4 w-4 ${stat.color}`} />
@@ -158,11 +197,118 @@ export default function DashboardGestionnairePage() {
                   {stat.urgent && <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />}
                 </div>
                 <p className="text-2xl font-bold text-brand-950 tabular-nums">{stat.value}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
-              </div>
+                <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                  {stat.label}
+                  <ChevronRight className="h-3 w-3 opacity-60" />
+                </p>
+              </button>
             )
           })}
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Hourglass className="h-4 w-4 text-amber-600" />
+              Devis sans réponse
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/gestionnaire/patients?status=devis_envoye')}
+            >
+              Voir tous <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {devisSansReponse.length === 0 ? (
+              <EmptyState
+                icon={FileCheck}
+                title="Aucun devis en attente"
+                description="Les devis envoyés sans réponse patient apparaîtront ici."
+                className="py-8"
+              />
+            ) : (
+              <div className="space-y-2">
+                {devisSansReponse.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    className="w-full flex items-center gap-3 rounded-xl border p-3 hover:bg-muted/50 text-left group"
+                    onClick={() => navigate(`/gestionnaire/devis/${d.patientId}`)}
+                  >
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="bg-amber-100 text-amber-800 text-sm font-semibold">
+                        {initialsFromFullName(d.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{d.fullName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {d.numeroDevis ?? d.dossierNumber} · {formatRelative(d.updatedAt)}
+                      </p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-brand-600" />
+              RDV à confirmer
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/gestionnaire/agenda')}>
+              Agenda <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {rdvAConfirmer.length === 0 ? (
+              <EmptyState
+                icon={CalendarClock}
+                title="Aucun RDV en attente"
+                description="Les rendez-vous planifiés non confirmés apparaîtront ici."
+                className="py-8"
+              />
+            ) : (
+              <div className="space-y-2">
+                {rdvAConfirmer.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="w-full flex items-center gap-3 rounded-xl border p-3 hover:bg-muted/50 text-left group"
+                    onClick={() =>
+                      navigate(
+                        r.patientId
+                          ? `/gestionnaire/patients`
+                          : '/gestionnaire/agenda',
+                      )
+                    }
+                  >
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="bg-brand-100 text-brand-700 text-sm font-semibold">
+                        {initialsFromFullName(r.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{r.fullName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDateTime(r.dateDebut)} · {r.title}
+                      </p>
+                    </div>
+                    <Badge className="text-[10px] bg-amber-100 text-amber-800 border-0">Planifié</Badge>
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -185,7 +331,7 @@ export default function DashboardGestionnairePage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-base">Devis à traiter</CardTitle>
+            <CardTitle className="text-base">Devis à préparer</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => navigate('/gestionnaire/devis')}>
               Voir tous <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
@@ -242,7 +388,12 @@ export default function DashboardGestionnairePage() {
           <CardContent>
             <div className="space-y-2">
               {patientsLogistique.map((p) => (
-                <div key={p.id} className="flex items-center gap-3 rounded-xl border-l-4 border-l-purple-500 bg-purple-50/50 p-3">
+                <button
+                  key={p.id}
+                  type="button"
+                  className="w-full flex items-center gap-3 rounded-xl border-l-4 border-l-purple-500 bg-purple-50/50 p-3 text-left hover:bg-purple-50"
+                  onClick={() => navigate('/gestionnaire/logistique')}
+                >
                   <Avatar className="h-9 w-9">
                     <AvatarFallback className="bg-purple-100 text-purple-700 text-sm">
                       {initialsFromFullName(p.user.fullName)}
@@ -255,7 +406,7 @@ export default function DashboardGestionnairePage() {
                   <Badge className={`text-xs ${STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] ?? ''}`}>
                     {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
                   </Badge>
-                </div>
+                </button>
               ))}
             </div>
           </CardContent>

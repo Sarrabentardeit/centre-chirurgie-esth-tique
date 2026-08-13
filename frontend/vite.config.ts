@@ -64,6 +64,17 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // SSE chat : pas de buffering, timeouts longs
+      '/api/chat/events': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        // http-proxy option for long-lived streams
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Connection', 'keep-alive')
+          })
+        },
+      },
       '/api': 'http://localhost:4000',
       // Même origine que prod (nginx) : les fichiers formulaire sont sous /uploads sur le backend.
       '/uploads': 'http://localhost:4000',

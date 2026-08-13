@@ -20,6 +20,7 @@ import AgendaPage from './pages/patient/AgendaPage'
 import ChatPage from './pages/patient/ChatPage'
 import PostOpPage from './pages/patient/PostOpPage'
 import PatientNotificationsPage from './pages/patient/NotificationsPage'
+import PlanningSejourPatientPage from './pages/patient/PlanningSejourPage'
 
 // Medecin pages
 import DashboardMedecinPage from './pages/medecin/DashboardMedecinPage'
@@ -40,6 +41,7 @@ import PlanningSejourEditorPage from './pages/gestionnaire/PlanningSejourEditorP
 import NotificationsPage from './pages/gestionnaire/NotificationsPage'
 import CommunicationPage from './pages/gestionnaire/CommunicationPage'
 import AnalyticsPage from './pages/gestionnaire/AnalyticsPage'
+import AuditPage from './pages/gestionnaire/AuditPage'
 import UsersManagementPage from './pages/gestionnaire/UsersManagementPage'
 import AgendaGestionnairePage from './pages/gestionnaire/AgendaGestionnairePage'
 import NotFoundPage from './pages/NotFoundPage'
@@ -131,6 +133,14 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/patient/planning-sejour"
+              element={
+                <ProtectedRoute allowedRoles={['patient']}>
+                  <PlanningSejourPatientPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Medecin routes */}
             <Route
@@ -202,6 +212,14 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['medecin']}>
                   <ChatPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/medecin/notifications"
+              element={
+                <ProtectedRoute allowedRoles={['medecin']}>
+                  <NotificationsPage />
                 </ProtectedRoute>
               }
             />
@@ -316,6 +334,14 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['gestionnaire']}>
                   <AnalyticsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/gestionnaire/audit"
+              element={
+                <ProtectedRoute allowedRoles={['gestionnaire']}>
+                  <AuditPage />
                 </ProtectedRoute>
               }
             />

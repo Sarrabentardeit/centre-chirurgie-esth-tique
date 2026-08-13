@@ -8,7 +8,9 @@ import { EmptyState } from '@/components/EmptyState'
 import { formatRelative, cn } from '@/lib/utils'
 import type { Notification } from '@/types'
 import { useNavigate } from 'react-router-dom'
-import { gestionnaireApi, type GestionnaireNotificationRow } from '@/lib/api'
+import { useAuthStore } from '@/store/authStore'
+import { gestionnaireApi, medecinApi, type GestionnaireNotificationRow } from '@/lib/api'
+import { PullToRefresh } from '@/components/PullToRefresh'
 
 const TYPE_ICONS: Record<Notification['type'], React.ElementType> = {
   info: Info,
@@ -35,22 +37,26 @@ type UiNotif = Omit<GestionnaireNotificationRow, 'type'> & { type: Notification[
 
 export default function NotificationsPage() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
+  const isMedecin = user?.role === 'medecin'
   const [rows, setRows] = useState<GestionnaireNotificationRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     setError(null)
     try {
-      const res = await gestionnaireApi.getNotifications()
+      const res = isMedecin
+        ? await medecinApi.getNotifications()
+        : await gestionnaireApi.getNotifications()
       setRows(res.notifications)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
-  }, [])
+  }, [isMedecin])
 
   useEffect(() => {
     void load()
@@ -65,7 +71,8 @@ export default function NotificationsPage() {
 
   const markAllRead = async () => {
     try {
-      await gestionnaireApi.markAllNotificationsRead()
+      if (isMedecin) await medecinApi.markAllNotificationsRead()
+      else await gestionnaireApi.markAllNotificationsRead()
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Action impossible.')
@@ -74,7 +81,8 @@ export default function NotificationsPage() {
 
   const markRead = async (id: string) => {
     try {
-      await gestionnaireApi.markNotificationRead(id)
+      if (isMedecin) await medecinApi.markNotificationRead(id)
+      else await gestionnaireApi.markNotificationRead(id)
       setRows((prev) => prev.map((n) => (n.id === id ? { ...n, lu: true } : n)))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Action impossible.')
@@ -82,6 +90,7 @@ export default function NotificationsPage() {
   }
 
   return (
+    <PullToRefresh onRefresh={() => load({ silent: true })}>
     <div className="max-w-2xl mx-auto space-y-5">
       <PageHeader
         title="Notifications"
@@ -115,9 +124,9 @@ export default function NotificationsPage() {
         <EmptyState
           icon={Bell}
           title="Aucune notification"
-          description="Les alertes devis, formulaires et messages apparaîtront ici."
-          actionLabel="Voir les devis"
-          onAction={() => navigate('/gestionnaire/devis')}
+          description="Les alertes patients, messages et événements apparaîtront ici."
+          actionLabel={isMedecin ? 'Voir les patients' : 'Voir les devis'}
+          onAction={() => navigate(isMedecin ? '/medecin/patients' : '/gestionnaire/devis')}
         />
       ) : (
         <div className="space-y-2">
@@ -186,5 +195,6 @@ export default function NotificationsPage() {
         </div>
       )}
     </div>
+    </PullToRefresh>
   )
 }

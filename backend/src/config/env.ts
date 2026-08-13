@@ -56,9 +56,9 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   /**
    * Destinataires email (séparés par des virgules).
-   * - MEDECIN : uniquement formulaires patients
-   * - GESTIONNAIRE : uniquement rapport médical généré
-   * - NOTIFICATION_EMAILS : compat (fallback gestionnaire)
+   * - MEDECIN : formulaires patients (sinon fallback NOTIFICATION_EMAILS)
+   * - GESTIONNAIRE : rapport médical généré (sinon fallback NOTIFICATION_EMAILS)
+   * - NOTIFICATION_EMAILS : liste partagée (médecin + gestionnaire si dédiées vides)
    */
   NOTIFICATION_EMAILS: z.string().optional(),
   NOTIFICATION_EMAILS_MEDECIN: z.string().optional(),

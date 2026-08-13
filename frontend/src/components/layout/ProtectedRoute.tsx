@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { useAuthStore } from '@/store/authStore'
+import { useAuthHydrated, useAuthStore } from '@/store/authStore'
 import type { UserRole } from '@/types'
 
 interface ProtectedRouteProps {
@@ -9,7 +9,17 @@ interface ProtectedRouteProps {
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { isAuthenticated, user } = useAuthStore()
+  const hydrated = useAuthHydrated()
   const location = useLocation()
+
+  // Évite une redirection fantôme avant lecture de la session localStorage
+  if (!hydrated) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+        Chargement de la session…
+      </div>
+    )
+  }
 
   if (!isAuthenticated || !user) {
     // Règle absolue : les patients ne voient jamais le backoffice

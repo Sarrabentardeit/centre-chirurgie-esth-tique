@@ -10,8 +10,8 @@ const ICONS = {
 
 const STYLES = {
   default: 'border-brand-200 bg-white text-brand-950',
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-950',
-  error:   'border-rose-200 bg-rose-50 text-rose-950',
+  success: 'border-brand-200 bg-brand-50 text-brand-950',
+  error: 'border-rose-200 bg-rose-50 text-rose-950',
 }
 
 export function Toaster() {
@@ -23,8 +23,8 @@ export function Toaster() {
   return (
     <div
       className="fixed z-[200] flex flex-col gap-2 pointer-events-none
-        bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 left-3
-        sm:left-auto sm:right-4 sm:bottom-6 sm:w-80"
+        bottom-[calc(var(--bottom-nav-h)+var(--safe-bottom)+0.75rem)] right-3 left-3
+        sm:left-auto sm:right-4 sm:bottom-6 sm:w-80 lg:bottom-6"
       aria-live="polite"
     >
       {toasts.map((t) => {
@@ -34,11 +34,20 @@ export function Toaster() {
             key={t.id}
             className={cn(
               'pointer-events-auto flex items-start gap-3 rounded-xl border px-3.5 py-3 shadow-lg',
-              'animate-in fade-in slide-in-from-bottom-2 duration-200',
+              'animate-toast-in',
               STYLES[t.variant],
             )}
           >
-            <Icon className="h-4 w-4 shrink-0 mt-0.5 opacity-80" />
+            <span
+              className={cn(
+                'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full',
+                t.variant === 'success' && 'bg-brand-100 text-brand-700 animate-success-pop',
+                t.variant === 'error' && 'bg-rose-100 text-rose-700',
+                t.variant === 'default' && 'bg-brand-100 text-brand-700',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </span>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold leading-snug">{t.title}</p>
               {t.description && (

@@ -125,16 +125,6 @@ export interface Notification {
   lienAction?: string
 }
 
-export interface MessageChat {
-  id: string
-  dossierPatientId: string
-  expediteurId: string
-  expediteurRole: UserRole | 'bot'
-  contenu: string
-  dateEnvoi: string
-  lu: boolean
-}
-
 export interface RendezVous {
   id: string
   patientId: string
@@ -160,18 +150,4 @@ export interface SuiviPostOp {
     note?: number
     commentaire?: string
   }
-  // Démo: évite d'envoyer plusieurs fois la notification du questionnaire
-  questionnaireDisponibiliteEnvoyee: boolean
-}
-
-export interface LogistiqueSejour {
-  id: string
-  patientId: string
-  passport: boolean
-  billet: boolean
-  hebergement: boolean
-  transfertAeroport: boolean
-  dateArrivee?: string
-  dateDepart?: string
-  notes: string
 }

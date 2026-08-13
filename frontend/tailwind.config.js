@@ -92,11 +92,38 @@ export default {
           from: { opacity: '0', transform: 'translateY(8px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        'page-enter': {
+          from: { opacity: '0', transform: 'translateY(10px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'badge-pop': {
+          '0%': { transform: 'scale(0.4)', opacity: '0' },
+          '70%': { transform: 'scale(1.12)', opacity: '1' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        'success-pop': {
+          '0%': { transform: 'scale(0.6)', opacity: '0' },
+          '55%': { transform: 'scale(1.12)', opacity: '1' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        'brand-shimmer': {
+          '0%': { backgroundPosition: '100% 0' },
+          '100%': { backgroundPosition: '-100% 0' },
+        },
+        'toast-in': {
+          from: { opacity: '0', transform: 'translateY(12px) scale(0.98)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'fade-in': 'fade-in 0.3s ease-out',
+        'page-enter': 'page-enter 0.38s cubic-bezier(0.22, 1, 0.36, 1)',
+        'badge-pop': 'badge-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
+        'success-pop': 'success-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
+        'brand-shimmer': 'brand-shimmer 1.4s ease-in-out infinite',
+        'toast-in': 'toast-in 0.32s cubic-bezier(0.22, 1, 0.36, 1)',
       },
       fontFamily: {
         sans: ['"Source Sans 3"', 'system-ui', 'sans-serif'],

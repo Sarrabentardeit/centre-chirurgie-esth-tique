@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  ArrowLeft, Check, CheckCheck, Download, FileText, Filter, Image as ImageIcon,
-  MessageSquare, Paperclip, Search, Send, Stethoscope, User, Users, X,
+  ArrowLeft, Check, CheckCheck, Download, EyeOff, FileText, Filter, Image as ImageIcon,
+  Mail, MessageSquare, MoreVertical, Paperclip, Pin, PinOff, Search, Send,
+  Stethoscope, Trash2, User, Users, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAuthStore } from '@/store/authStore'
 import {
@@ -23,7 +24,11 @@ import {
   resolveAttachmentUrl,
 } from '@/lib/chatAttachments'
 import { playMessageSound } from '@/lib/notificationSounds'
-import { toast } from '@/store/toastStore'
+import { useChatRealtime } from '@/lib/chatRealtime'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { BottomSheet } from '@/components/BottomSheet'
+import { PullToRefresh } from '@/components/PullToRefresh'
+import { feedbackSuccess, toast } from '@/store/toastStore'
 
 type StaffTab = 'conversations' | 'nouveau'
 type ListFilter = 'all' | 'unread'
@@ -107,13 +112,64 @@ export default function ChatPage() {
   const [staffTab, setStaffTab] = useState<StaffTab>('conversations')
   const [listFilter, setListFilter] = useState<ListFilter>('all')
   const [pendingFile, setPendingFile] = useState<{ file: File; previewUrl?: string } | null>(null)
+  const [menu, setMenu] = useState<{
+    messageId: string
+    top: number
+    left: number
+    placeAbove: boolean
+    mobileSheet: boolean
+  } | null>(null)
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null)
+  const [pendingDeleteAll, setPendingDeleteAll] = useState<ChatMessage | null>(null)
+  const [deleteAllLoading, setDeleteAllLoading] = useState(false)
+  const [deleteAllError, setDeleteAllError] = useState<string | null>(null)
 
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const pollRef = useRef<number | null>(null)
   const lastMessageIdRef = useRef<string | null>(null)
   const searchTimerRef = useRef<number | null>(null)
+  const skipAutoReadUntilRef = useRef(0)
+  const conversationsRef = useRef<ChatConversation[]>([])
+
+  useEffect(() => {
+    conversationsRef.current = conversations
+  }, [conversations])
+  const MENU_WIDTH = 224
+  const MENU_EST_HEIGHT = 200
+
+  const closeMessageMenu = useCallback(() => setMenu(null), [])
+
+  const openMessageMenu = useCallback((messageId: string, anchor: HTMLElement, alignRight: boolean) => {
+    setMenu((prev) => {
+      if (prev?.messageId === messageId) return null
+      const isMobile = window.matchMedia('(max-width: 1023px)').matches
+      if (isMobile) {
+        return {
+          messageId,
+          top: 0,
+          left: 0,
+          placeAbove: true,
+          mobileSheet: true,
+        }
+      }
+      const rect = anchor.getBoundingClientRect()
+      const vv = window.visualViewport
+      const viewH = vv?.height ?? window.innerHeight
+      const viewW = vv?.width ?? window.innerWidth
+      const viewOffsetTop = vv?.offsetTop ?? 0
+      const viewOffsetLeft = vv?.offsetLeft ?? 0
+      const spaceBelow = viewOffsetTop + viewH - rect.bottom
+      const spaceAbove = rect.top - viewOffsetTop
+      const placeAbove = spaceBelow < MENU_EST_HEIGHT + 12 && spaceAbove > spaceBelow
+      const width = Math.min(MENU_WIDTH, viewW - 16)
+      let left = alignRight ? rect.right - width : rect.left
+      left = Math.max(viewOffsetLeft + 8, Math.min(left, viewOffsetLeft + viewW - width - 8))
+      const top = placeAbove ? rect.top - 6 : rect.bottom + 6
+      return { messageId, top, left, placeAbove, mobileSheet: false }
+    })
+  }, [])
 
   const activeConversation = conversations.find((c) => c.patientId === selectedPatientId)
   const activeDirectory = directory.find((p) => p.id === selectedPatientId)
@@ -166,13 +222,26 @@ export default function ChatPage() {
       }
       lastMessageIdRef.current = last?.id ?? null
       setMessages(res.messages)
-      if (isStaff && patientId) {
-        await chatApi.markRead(patientId)
-        setConversations((prev) =>
-          prev.map((c) => (c.patientId === patientId ? { ...c, unreadCount: 0 } : c)),
-        )
-      } else if (isPatient) {
-        await chatApi.markRead()
+      const canAutoRead = Date.now() >= skipAutoReadUntilRef.current
+      if (canAutoRead) {
+        if (isStaff && patientId) {
+          const prevUnread = conversationsRef.current.find((c) => c.patientId === patientId)?.unreadCount ?? 0
+          await chatApi.markRead(patientId)
+          setConversations((prev) =>
+            prev.map((c) => (c.patientId === patientId ? { ...c, unreadCount: 0 } : c)),
+          )
+          if (!silent && prevUnread > 0) {
+            feedbackSuccess(
+              prevUnread === 1 ? 'Message marqué comme lu' : 'Messages marqués comme lus',
+            )
+          }
+        } else if (isPatient) {
+          const hadUnread = res.messages.some((m) => !m.lu && m.expediteurId !== user?.id)
+          await chatApi.markRead()
+          if (!silent && hadUnread) {
+            feedbackSuccess('Messages marqués comme lus')
+          }
+        }
       }
       setError(null)
     } catch (e) {
@@ -214,25 +283,79 @@ export default function ChatPage() {
     }
   }, [isPatient, selectedPatientId, loadMessages])
 
-  useEffect(() => {
-    const tick = () => {
-      if (isPatient) void loadMessages(undefined, true)
-      else if (selectedPatientId) {
-        void loadMessages(selectedPatientId, true)
-        void loadConversations({ keepSelection: true })
+  const refreshThread = useCallback(async () => {
+    if (isPatient) {
+      await loadMessages(undefined, true)
+      return
+    }
+    if (selectedPatientId) {
+      await Promise.all([
+        loadMessages(selectedPatientId, true),
+        loadConversations({ keepSelection: true }),
+      ])
+      return
+    }
+    await loadConversations({ keepSelection: true })
+  }, [isPatient, selectedPatientId, loadMessages, loadConversations])
+
+  useChatRealtime((event) => {
+    if (event.type === 'chat:message' || event.type === 'chat:thread') {
+      if (isPatient) {
+        void loadMessages(undefined, true)
+        return
+      }
+      if (!event.patientId || event.patientId === selectedPatientId) {
+        refreshThread()
       } else {
         void loadConversations({ keepSelection: true })
       }
+      return
     }
-    pollRef.current = window.setInterval(tick, 10000)
+    if (event.type === 'chat:unread' && isStaff) {
+      void loadConversations({ keepSelection: true })
+    }
+  })
+
+  // Filet de sécurité si SSE indisponible
+  useEffect(() => {
+    pollRef.current = window.setInterval(refreshThread, 60_000)
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current)
     }
-  }, [isPatient, selectedPatientId, loadMessages, loadConversations])
+  }, [refreshThread])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const root = messagesScrollRef.current
+    if (!root) return
+    root.scrollTop = root.scrollHeight
   }, [messages.length, selectedPatientId])
+
+  useEffect(() => {
+    if (!menu) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMessageMenu()
+    }
+    const onRepositionClose = () => closeMessageMenu()
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onRepositionClose)
+    if (menu.mobileSheet) {
+      const prev = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => {
+        document.body.style.overflow = prev
+        window.removeEventListener('keydown', onKey)
+        window.removeEventListener('resize', onRepositionClose)
+      }
+    }
+    window.addEventListener('click', closeMessageMenu)
+    messagesScrollRef.current?.addEventListener('scroll', onRepositionClose, { passive: true })
+    return () => {
+      window.removeEventListener('click', closeMessageMenu)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onRepositionClose)
+      messagesScrollRef.current?.removeEventListener('scroll', onRepositionClose)
+    }
+  }, [menu, closeMessageMenu])
 
   const clearPendingFile = () => {
     if (pendingFile?.previewUrl) URL.revokeObjectURL(pendingFile.previewUrl)
@@ -270,6 +393,128 @@ export default function ChatPage() {
     setError(null)
   }
 
+  const runMessageAction = async (
+    messageId: string,
+    action: () => Promise<void>,
+    successTitle: string,
+  ) => {
+    setActionBusyId(messageId)
+    closeMessageMenu()
+    try {
+      await action()
+      toast({ title: successTitle, variant: 'success' })
+    } catch (e) {
+      toast({
+        title: 'Action impossible',
+        description: e instanceof Error ? e.message : undefined,
+        variant: 'error',
+      })
+    } finally {
+      setActionBusyId(null)
+    }
+  }
+
+  const requestDeleteForAll = (m: ChatMessage) => {
+    closeMessageMenu()
+    setDeleteAllError(null)
+    setPendingDeleteAll(m)
+  }
+
+  const confirmDeleteForAll = async () => {
+    const m = pendingDeleteAll
+    if (!m) return
+    setDeleteAllLoading(true)
+    setDeleteAllError(null)
+    setActionBusyId(m.id)
+    try {
+      const res = await chatApi.deleteForAll(m.id)
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? res.message : x)))
+      if (isStaff) void loadConversations({ keepSelection: true })
+      setPendingDeleteAll(null)
+      toast({ title: 'Message supprimé pour tout le monde', variant: 'success' })
+    } catch (e) {
+      setDeleteAllError(e instanceof Error ? e.message : 'Suppression impossible.')
+    } finally {
+      setDeleteAllLoading(false)
+      setActionBusyId(null)
+    }
+  }
+
+  const handleDeleteForMe = (m: ChatMessage) =>
+    void runMessageAction(
+      m.id,
+      async () => {
+        await chatApi.deleteForMe(m.id)
+        setMessages((prev) => prev.filter((x) => x.id !== m.id))
+        if (isStaff) void loadConversations({ keepSelection: true })
+      },
+      'Message supprimé pour vous',
+    )
+
+  const handleTogglePin = (m: ChatMessage) =>
+    void runMessageAction(
+      m.id,
+      async () => {
+        const nextPinned = !m.pinned
+        setMessages((prev) =>
+          prev.map((x) =>
+            x.id === m.id
+              ? {
+                  ...x,
+                  pinned: nextPinned,
+                  pinnedAt: nextPinned ? new Date().toISOString() : null,
+                }
+              : x,
+          ),
+        )
+        const res = await chatApi.setPinned(m.id, nextPinned)
+        setMessages((prev) =>
+          prev.map((x) => (x.id === m.id ? { ...x, ...res.message } : x)),
+        )
+      },
+      m.pinned ? 'Message désépinglé' : 'Message épinglé',
+    )
+
+  const scrollToMessage = (messageId: string) => {
+    const root = messagesScrollRef.current
+    const el = document.getElementById(`msg-${messageId}`)
+    if (!root || !el) return
+    const rootRect = root.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    const offset = elRect.top - rootRect.top - root.clientHeight / 2 + elRect.height / 2
+    root.scrollTo({ top: root.scrollTop + offset, behavior: 'smooth' })
+  }
+
+  const handleMarkUnread = (m: ChatMessage) =>
+    void runMessageAction(
+      m.id,
+      async () => {
+        skipAutoReadUntilRef.current = Date.now() + 60_000
+        await chatApi.markUnread(m.id)
+        setMessages((prev) =>
+          prev.map((x) =>
+            x.id === m.id ||
+            (x.dateEnvoi >= m.dateEnvoi &&
+              x.expediteurId !== user?.id &&
+              !x.deletedForAll)
+              ? { ...x, lu: false }
+              : x,
+          ),
+        )
+        if (isStaff) {
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.patientId === m.patientId
+                ? { ...c, unreadCount: Math.max(1, c.unreadCount) }
+                : c,
+            ),
+          )
+          void loadConversations({ keepSelection: true })
+        }
+      },
+      'Marqué comme non lu',
+    )
+
   const handleSend = async () => {
     const contenu = input.trim()
     if ((!contenu && !pendingFile) || !user) return
@@ -299,7 +544,7 @@ export default function ChatPage() {
       setInput('')
       clearPendingFile()
       if (isStaff) void loadConversations({ keepSelection: true })
-      toast({ title: 'Message envoyé', variant: 'success' })
+      feedbackSuccess('Message envoyé')
       inputRef.current?.focus()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Envoi impossible.')
@@ -329,12 +574,19 @@ export default function ChatPage() {
       .slice(0, q ? 40 : 20)
   }, [directory, conversations, searchPatient])
 
+  const pinnedMessages = useMemo(
+    () => messages.filter((m) => m.pinned && !m.deletedForAll),
+    [messages],
+  )
+
   const threadItems = useMemo((): ThreadItem[] => {
     const q = threadSearch.trim()
     const msgs = q
       ? messages.filter((m) =>
-          normalizeSearch(m.contenu).includes(normalizeSearch(q)) ||
-          normalizeSearch(m.pieceJointeNom ?? '').includes(normalizeSearch(q)),
+          !m.deletedForAll && (
+            normalizeSearch(m.contenu).includes(normalizeSearch(q)) ||
+            normalizeSearch(m.pieceJointeNom ?? '').includes(normalizeSearch(q))
+          ),
         )
       : messages
     const items: ThreadItem[] = []
@@ -618,6 +870,29 @@ export default function ChatPage() {
         </div>
       )}
 
+      {pinnedMessages.length > 0 && (
+        <div className="shrink-0 border-b border-amber-200/70 bg-amber-50 px-3 py-2 space-y-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800/80 flex items-center gap-1">
+            <Pin className="h-3 w-3" /> Messages épinglés
+          </p>
+          {pinnedMessages.map((pm) => {
+            const preview = (pm.contenu?.trim() || pm.pieceJointeNom || 'Pièce jointe').replace(/\s+/g, ' ')
+            const who = pm.expediteurId === user?.id ? 'Vous' : (pm.expediteurNom ?? roleLabel(pm.expediteurRole))
+            return (
+              <button
+                key={`pin-${pm.id}`}
+                type="button"
+                className="w-full text-left rounded-lg px-2 py-1.5 hover:bg-amber-100/80 transition-colors"
+                onClick={() => scrollToMessage(pm.id)}
+              >
+                <span className="block text-[11px] font-semibold text-amber-900/90">{who}</span>
+                <span className="block text-xs text-slate-700 line-clamp-2 break-words">{preview}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {error && (
         <div className="mx-3 mt-3 rounded-xl border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive shrink-0 flex items-start gap-2">
           <span className="flex-1">{error}</span>
@@ -627,7 +902,10 @@ export default function ChatPage() {
         </div>
       )}
 
-      <ScrollArea className="flex-1 bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_40%)]">
+      <div
+        ref={messagesScrollRef}
+        className="flex-1 min-h-0 overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_40%)]"
+      >
         <div className="p-3 sm:p-4 space-y-3">
           {loading && messages.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-16">Chargement…</p>
@@ -662,8 +940,15 @@ export default function ChatPage() {
               }
               const m = item.message
               const own = m.expediteurId === user?.id
+              const deleted = Boolean(m.deletedForAll)
+              const menuOpen = menu?.messageId === m.id
+              const busy = actionBusyId === m.id
               return (
-                <div key={m.id} className={cn('flex gap-2', own ? 'flex-row-reverse' : 'flex-row')}>
+                <div
+                  id={`msg-${m.id}`}
+                  key={m.id}
+                  className={cn('group flex gap-2', own ? 'flex-row-reverse' : 'flex-row')}
+                >
                   <Avatar className="h-8 w-8 shrink-0 mt-1">
                     <AvatarFallback className={cn(
                       'text-[10px]',
@@ -676,7 +961,7 @@ export default function ChatPage() {
                           <User className="h-3.5 w-3.5" />}
                     </AvatarFallback>
                   </Avatar>
-                  <div className={cn('max-w-[88%] sm:max-w-[72%] space-y-1', own ? 'items-end' : 'items-start')}>
+                  <div className={cn('max-w-[88%] sm:max-w-[72%] flex flex-col space-y-1', own ? 'items-end' : 'items-start')}>
                     <div className={cn('flex items-center gap-1.5 px-1 flex-wrap', own && 'justify-end')}>
                       <span className="text-[11px] font-semibold text-slate-600">
                         {own ? 'Vous' : (m.expediteurNom ?? roleLabel(m.expediteurRole))}
@@ -686,79 +971,112 @@ export default function ChatPage() {
                           {roleLabel(m.expediteurRole)}
                         </span>
                       )}
+                      {m.pinned && !deleted && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 font-medium inline-flex items-center gap-0.5">
+                          <Pin className="h-2.5 w-2.5" /> Épinglé
+                        </span>
+                      )}
                     </div>
-                    <div className={cn(
-                      'rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words shadow-sm',
-                      own
-                        ? 'bg-brand-700 text-white rounded-tr-md'
-                        : 'bg-white border border-slate-200 text-slate-800 rounded-tl-md',
-                    )}>
-                      {m.pieceJointeUrl && (
-                        <div className="mb-2">
-                          {isImageUrl(m.pieceJointeUrl) ? (
-                            <a
-                              href={resolveAttachmentUrl(m.pieceJointeUrl)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block"
-                            >
-                              <img
-                                src={resolveAttachmentUrl(m.pieceJointeUrl)}
-                                alt={m.pieceJointeNom ?? 'Image'}
-                                className="max-h-56 rounded-xl object-cover border border-white/20"
-                              />
-                            </a>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void downloadAttachment(
-                                  m.pieceJointeUrl!,
-                                  m.pieceJointeNom ?? 'document.pdf',
-                                )
-                              }
-                              className={cn(
-                                'w-full text-left inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer',
-                                own
-                                  ? 'bg-white/15 hover:bg-white/25'
-                                  : isPdfUrl(m.pieceJointeUrl, m.pieceJointeNom)
-                                    ? 'bg-[#fdeada] hover:bg-[#f8e4d0] border border-[#e4c8bd] text-[#062a30]'
-                                    : 'bg-slate-100 hover:bg-slate-200',
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  'h-9 w-9 rounded-lg flex items-center justify-center shrink-0',
-                                  own ? 'bg-white/20' : 'bg-white border border-[#e4c8bd]',
+                    <div className={cn('relative flex items-start gap-1', own && 'flex-row-reverse')}>
+                      <div className={cn(
+                        'rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words shadow-sm',
+                        deleted
+                          ? 'bg-slate-100 border border-dashed border-slate-300 text-slate-500 italic rounded-2xl'
+                          : own
+                            ? 'bg-brand-700 text-white rounded-tr-md'
+                            : 'bg-white border border-slate-200 text-slate-800 rounded-tl-md',
+                      )}>
+                        {deleted ? (
+                          <p className="text-xs not-italic text-slate-500">Message supprimé</p>
+                        ) : (
+                          <>
+                            {m.pieceJointeUrl && (
+                              <div className="mb-2">
+                                {isImageUrl(m.pieceJointeUrl) ? (
+                                  <a
+                                    href={resolveAttachmentUrl(m.pieceJointeUrl)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block"
+                                  >
+                                    <img
+                                      src={resolveAttachmentUrl(m.pieceJointeUrl)}
+                                      alt={m.pieceJointeNom ?? 'Image'}
+                                      className="max-h-56 rounded-xl object-cover border border-white/20"
+                                    />
+                                  </a>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void downloadAttachment(
+                                        m.pieceJointeUrl!,
+                                        m.pieceJointeNom ?? 'document.pdf',
+                                      )
+                                    }
+                                    className={cn(
+                                      'w-full text-left inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer',
+                                      own
+                                        ? 'bg-white/15 hover:bg-white/25'
+                                        : isPdfUrl(m.pieceJointeUrl, m.pieceJointeNom)
+                                          ? 'bg-[#fdeada] hover:bg-[#f8e4d0] border border-[#e4c8bd] text-[#062a30]'
+                                          : 'bg-slate-100 hover:bg-slate-200',
+                                    )}
+                                  >
+                                    <span
+                                      className={cn(
+                                        'h-9 w-9 rounded-lg flex items-center justify-center shrink-0',
+                                        own ? 'bg-white/20' : 'bg-white border border-[#e4c8bd]',
+                                      )}
+                                    >
+                                      <FileText className={cn('h-4 w-4', own ? 'text-white' : 'text-[#81572d]')} />
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block font-semibold truncate">
+                                        {m.pieceJointeNom ?? 'Document PDF'}
+                                      </span>
+                                      <span className={cn('block text-[10px] mt-0.5', own ? 'text-white/75' : 'text-[#81572d]')}>
+                                        Cliquer pour télécharger
+                                      </span>
+                                    </span>
+                                    <Download className={cn('h-4 w-4 shrink-0', own ? 'text-white/90' : 'text-[#81572d]')} />
+                                  </button>
                                 )}
-                              >
-                                <FileText className={cn('h-4 w-4', own ? 'text-white' : 'text-[#81572d]')} />
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block font-semibold truncate">
-                                  {m.pieceJointeNom ?? 'Document PDF'}
-                                </span>
-                                <span className={cn('block text-[10px] mt-0.5', own ? 'text-white/75' : 'text-[#81572d]')}>
-                                  Cliquer pour télécharger
-                                </span>
-                              </span>
-                              <Download className={cn('h-4 w-4 shrink-0', own ? 'text-white/90' : 'text-[#81572d]')} />
-                            </button>
+                              </div>
+                            )}
+                            {m.contenu && !m.contenu.startsWith('Pièce jointe') && (
+                              <p className="whitespace-pre-wrap">{m.contenu}</p>
+                            )}
+                            {!!m.contenu?.startsWith('Pièce jointe') && !m.pieceJointeUrl && (
+                              <p className="whitespace-pre-wrap">{m.contenu}</p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div className="relative shrink-0 pt-0.5">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className={cn(
+                            'h-7 w-7 rounded-lg border border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-100 hover:border-slate-200 flex items-center justify-center transition-opacity',
+                            menuOpen ? 'opacity-100 bg-slate-100 border-slate-200' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
                           )}
-                        </div>
-                      )}
-                      {m.contenu && !m.contenu.startsWith('Pièce jointe') && (
-                        <p className="whitespace-pre-wrap">{m.contenu}</p>
-                      )}
-                      {m.contenu.startsWith('Pièce jointe') && !m.pieceJointeUrl && (
-                        <p className="whitespace-pre-wrap">{m.contenu}</p>
-                      )}
+                          aria-label="Actions du message"
+                          aria-expanded={menuOpen}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openMessageMenu(m.id, e.currentTarget, own)
+                          }}
+                        >
+                          <MoreVertical className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <div className={cn('flex items-center gap-1 px-1', own ? 'justify-end' : 'justify-start')}>
                       <span className="text-[10px] text-muted-foreground">{formatDateTime(m.dateEnvoi)}</span>
-                      {own && (
+                      {own && !deleted && (
                         m.lu
-                          ? <CheckCheck className="h-3.5 w-3.5 text-sky-500" aria-label="Lu" />
+                          ? <CheckCheck className="h-3.5 w-3.5 text-brand-600 animate-success-pop" aria-label="Lu" />
                           : <Check className="h-3.5 w-3.5 text-muted-foreground" aria-label="Envoyé" />
                       )}
                     </div>
@@ -767,9 +1085,8 @@ export default function ChatPage() {
               )
             })
           )}
-          <div ref={bottomRef} />
         </div>
-      </ScrollArea>
+      </div>
 
       <footer className="border-t border-border/70 p-2.5 sm:p-3 bg-white shrink-0">
         {pendingFile && (
@@ -842,17 +1159,163 @@ export default function ChatPage() {
     </section>
   )
 
+  const menuMessage = menu ? messages.find((m) => m.id === menu.messageId) : null
+  const menuOwn = menuMessage ? menuMessage.expediteurId === user?.id : false
+  const menuDeleted = Boolean(menuMessage?.deletedForAll)
+  const menuCanDeleteForAll = !!menuMessage && !menuDeleted && (menuOwn || isStaff)
+  const menuCanMarkUnread = !!menuMessage && !menuDeleted && !menuOwn
+  const menuCanPin = !!menuMessage && !menuDeleted
+
+  const messageMenuActions = menuMessage ? (
+    <>
+      {menuCanPin && (
+        <button
+          type="button"
+          role="menuitem"
+          className="w-full min-h-12 px-3 py-3 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 rounded-xl"
+          onClick={() => handleTogglePin(menuMessage)}
+        >
+          {menuMessage.pinned ? <PinOff className="h-4 w-4 shrink-0" /> : <Pin className="h-4 w-4 shrink-0" />}
+          {menuMessage.pinned ? 'Désépingler' : 'Épingler le message'}
+        </button>
+      )}
+      {menuCanMarkUnread && (
+        <button
+          type="button"
+          role="menuitem"
+          className="w-full min-h-12 px-3 py-3 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 rounded-xl"
+          onClick={() => handleMarkUnread(menuMessage)}
+        >
+          <Mail className="h-4 w-4 shrink-0" />
+          Marquer comme non lu
+        </button>
+      )}
+      <button
+        type="button"
+        role="menuitem"
+        className="w-full min-h-12 px-3 py-3 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 rounded-xl"
+        onClick={() => handleDeleteForMe(menuMessage)}
+      >
+        <EyeOff className="h-4 w-4 shrink-0" />
+        Supprimer pour moi
+      </button>
+      {menuCanDeleteForAll && (
+        <button
+          type="button"
+          role="menuitem"
+          className="w-full min-h-12 px-3 py-3 text-left text-sm font-medium text-red-700 hover:bg-red-50 active:bg-red-100 flex items-center gap-3 rounded-xl"
+          onClick={() => requestDeleteForAll(menuMessage)}
+        >
+          <Trash2 className="h-4 w-4 shrink-0" />
+          Supprimer pour tout le monde
+        </button>
+      )}
+      <button
+        type="button"
+        className="w-full min-h-12 mt-1 px-3 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 active:bg-slate-100 rounded-xl"
+        onClick={closeMessageMenu}
+      >
+        Annuler
+      </button>
+    </>
+  ) : null
+
   return (
+    <PullToRefresh onRefresh={refreshThread} className="h-full">
     <div
       className={cn(
-        'mx-auto flex w-full gap-3 lg:gap-4',
-        isPatient
-          ? 'max-w-3xl flex-col h-[calc(100dvh-8.5rem)] lg:h-[calc(100dvh-6rem)]'
-          : 'max-w-6xl flex-col lg:flex-row h-[calc(100dvh-8.5rem)] lg:h-[calc(100dvh-6rem)]',
+        'mx-auto flex w-full gap-3 lg:gap-4 h-app-chat',
+        isPatient ? 'max-w-3xl flex-col' : 'max-w-6xl flex-col lg:flex-row',
       )}
     >
       {isStaff && staffSidebar}
       {threadPane}
+      {menu && menuMessage && createPortal(
+        menu.mobileSheet ? (
+          <BottomSheet
+            open
+            onClose={closeMessageMenu}
+            title="Actions du message"
+          >
+            {messageMenuActions}
+          </BottomSheet>
+        ) : (
+          <div
+            role="menu"
+            className="fixed z-[80] rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+            style={{
+              top: menu.top,
+              left: menu.left,
+              width: MENU_WIDTH,
+              maxWidth: 'calc(100vw - 16px)',
+              transform: menu.placeAbove ? 'translateY(-100%)' : undefined,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {menuCanPin && (
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full px-3 py-2.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                onClick={() => handleTogglePin(menuMessage)}
+              >
+                {menuMessage.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                {menuMessage.pinned ? 'Désépingler' : 'Épingler le message'}
+              </button>
+            )}
+            {menuCanMarkUnread && (
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full px-3 py-2.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                onClick={() => handleMarkUnread(menuMessage)}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                Marquer comme non lu
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-2.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+              onClick={() => handleDeleteForMe(menuMessage)}
+            >
+              <EyeOff className="h-3.5 w-3.5" />
+              Supprimer pour moi
+            </button>
+            {menuCanDeleteForAll && (
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full px-3 py-2.5 text-left text-xs font-medium text-red-700 hover:bg-red-50 flex items-center gap-2"
+                onClick={() => requestDeleteForAll(menuMessage)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Supprimer pour tout le monde
+              </button>
+            )}
+          </div>
+        ),
+        document.body,
+      )}
+
+      <ConfirmDialog
+        open={Boolean(pendingDeleteAll)}
+        onClose={() => {
+          if (deleteAllLoading) return
+          setPendingDeleteAll(null)
+          setDeleteAllError(null)
+        }}
+        title="Supprimer pour tout le monde ?"
+        description="Ce message sera retiré pour tous les participants. L’action est enregistrée dans le journal d’audit."
+        confirmLabel="Supprimer pour tous"
+        cancelLabel="Annuler"
+        loading={deleteAllLoading}
+        error={deleteAllError}
+        onConfirm={() => void confirmDeleteForAll()}
+        icon={<Trash2 className="h-5 w-5 text-red-600" />}
+      />
     </div>
+    </PullToRefresh>
   )
 }

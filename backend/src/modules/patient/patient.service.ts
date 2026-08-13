@@ -465,11 +465,52 @@ export async function getMyDossier(userId: string) {
         orderBy: { dateDebut: 'asc' },
         take: 3,
       },
+      planningSejour: {
+        select: { id: true, statut: true, moisLabel: true, updatedAt: true },
+      },
     },
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
 
-  return { patient }
+  const planning =
+    patient.planningSejour?.statut === 'finalise'
+      ? {
+          id: patient.planningSejour.id,
+          available: true as const,
+          moisLabel: patient.planningSejour.moisLabel,
+          updatedAt: patient.planningSejour.updatedAt.toISOString(),
+        }
+      : null
+
+  const { planningSejour: _ps, ...rest } = patient
+  return { patient: { ...rest, planningSejour: planning } }
+}
+
+/** Planning séjour publié (finalisé) — lecture seule pour la patiente. */
+export async function getMyPlanningSejour(userId: string) {
+  const patient = await prisma.patient.findUnique({
+    where: { userId },
+    select: {
+      id: true,
+      planningSejour: true,
+    },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
+
+  const row = patient.planningSejour
+  if (!row || row.statut !== 'finalise') {
+    return { planning: null as null }
+  }
+
+  return {
+    planning: {
+      id: row.id,
+      content: row.content ?? '',
+      moisLabel: row.moisLabel,
+      statut: row.statut,
+      updatedAt: row.updatedAt.toISOString(),
+    },
+  }
 }
 
 // ─── Notifications in-app ─────────────────────────────────────────────────────

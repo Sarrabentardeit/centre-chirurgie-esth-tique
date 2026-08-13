@@ -32,11 +32,17 @@ function parseEmails(raw?: string): string[] {
   return raw.split(',').map((e) => e.trim()).filter(Boolean)
 }
 
-const MEDECIN_RECIPIENTS = parseEmails(env.NOTIFICATION_EMAILS_MEDECIN)
+/** Liste commune (fallback) — utilisée si les listes dédiées sont vides. */
+const SHARED_RECIPIENTS = parseEmails(env.NOTIFICATION_EMAILS)
+
+const MEDECIN_RECIPIENTS = (() => {
+  const dedicated = parseEmails(env.NOTIFICATION_EMAILS_MEDECIN)
+  return dedicated.length > 0 ? dedicated : SHARED_RECIPIENTS
+})()
+
 const GESTIONNAIRE_RECIPIENTS = (() => {
   const dedicated = parseEmails(env.NOTIFICATION_EMAILS_GESTIONNAIRE)
-  if (dedicated.length > 0) return dedicated
-  return parseEmails(env.NOTIFICATION_EMAILS)
+  return dedicated.length > 0 ? dedicated : SHARED_RECIPIENTS
 })()
 
 function recipientsFor(audience: EmailAudience): string[] {
@@ -97,10 +103,10 @@ export function logMailerStatus(): void {
     port: env.SMTP_PORT,
   })
   if (MEDECIN_RECIPIENTS.length === 0) {
-    console.warn('[mailer] ATTENTION : NOTIFICATION_EMAILS_MEDECIN vide — pas d’email formulaire au médecin')
+    console.warn('[mailer] ATTENTION : aucun destinataire médecin (NOTIFICATION_EMAILS_MEDECIN / NOTIFICATION_EMAILS)')
   }
   if (GESTIONNAIRE_RECIPIENTS.length === 0) {
-    console.warn('[mailer] ATTENTION : NOTIFICATION_EMAILS_GESTIONNAIRE / NOTIFICATION_EMAILS vide')
+    console.warn('[mailer] ATTENTION : aucun destinataire gestionnaire (NOTIFICATION_EMAILS_GESTIONNAIRE / NOTIFICATION_EMAILS)')
   }
   if (!smtpOk) {
     console.warn('[mailer] ATTENTION : SMTP incomplet — aucun email ne sera envoyé')

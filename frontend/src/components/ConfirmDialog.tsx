@@ -15,7 +15,7 @@ export type ConfirmDialogProps = {
   onConfirm: () => void | Promise<void>
   icon?: React.ReactNode
   children?: React.ReactNode
-  confirmVariant?: 'destructive' | 'default'
+  confirmVariant?: 'destructive' | 'default' | 'brand'
 }
 
 export function ConfirmDialog({
@@ -100,7 +100,7 @@ export function ConfirmDialog({
           </Button>
           <Button
             type="button"
-            variant={confirmVariant}
+            variant={confirmVariant === 'brand' ? 'brand' : confirmVariant}
             onClick={() => void onConfirm()}
             disabled={loading}
             className={cn(confirmVariant === 'destructive' && 'bg-destructive hover:bg-destructive/90')}

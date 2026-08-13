@@ -5,8 +5,8 @@ type NotifType = 'info' | 'warning' | 'success' | 'error'
 
 /**
  * Notification in-app + email pour un rôle staff.
- * - medecin : emails via NOTIFICATION_EMAILS_MEDECIN
- * - gestionnaire : emails via NOTIFICATION_EMAILS_GESTIONNAIRE
+ * - medecin : NOTIFICATION_EMAILS_MEDECIN (sinon NOTIFICATION_EMAILS)
+ * - gestionnaire : NOTIFICATION_EMAILS_GESTIONNAIRE (sinon NOTIFICATION_EMAILS)
  */
 export async function notifyStaff(input: {
   role: EmailAudience

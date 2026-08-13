@@ -43,6 +43,7 @@ const DevisTextStyle = TextStyle.extend({
   },
 })
 import { ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw, Send } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { toast } from '@/store/toastStore'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
@@ -252,6 +253,7 @@ export default function DevisEditorPage() {
   const [exporting, setExporting]       = useState(false)
   const [sentOk, setSentOk]             = useState(false)
   const [sendError, setSendError]       = useState<string | null>(null)
+  const [confirmSendOpen, setConfirmSendOpen] = useState(false)
   const [initialTopHtml, setInitialTopHtml] = useState<string>('')
   const [initialBottomHtml, setInitialBottomHtml] = useState<string>('')
   const [activeZone, setActiveZone] = useState<'top' | 'bottom'>('top')
@@ -707,7 +709,7 @@ export default function DevisEditorPage() {
           </p>
           <button
             type="button"
-            onClick={() => void handleValidateAndSend()}
+            onClick={() => setConfirmSendOpen(true)}
             disabled={sending || saving || !devisId || dv?.statut === 'envoye' || dv?.statut === 'accepte' || sentOk}
             className="inline-flex items-center justify-center gap-2 h-11 sm:h-10 px-5 text-sm font-semibold text-white rounded-xl disabled:opacity-50 transition-colors shrink-0"
             style={{ background: DEVIS_ACCENT }}
@@ -722,6 +724,26 @@ export default function DevisEditorPage() {
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmSendOpen}
+        onClose={() => !sending && setConfirmSendOpen(false)}
+        title="Envoyer ce devis au patient ?"
+        description={`Le document sera enregistré puis transmis à ${patient?.user.fullName ?? 'la patiente'}. Confirmez uniquement si le devis est finalisé.`}
+        confirmLabel="Envoyer"
+        cancelLabel="Annuler"
+        confirmVariant="brand"
+        loading={sending}
+        onConfirm={async () => {
+          setConfirmSendOpen(false)
+          await handleValidateAndSend()
+        }}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center">
+            <Send className="h-5 w-5 text-brand-700" />
+          </div>
+        }
+      />
     </div>
   )
 }

@@ -1,29 +1,31 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar,
-  Bell, Heart, ClipboardList, FileCheck,
+  Bell, Heart, FileCheck,
   MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { useChatUnreadStore } from '@/store/chatUnreadStore'
+import { useNotifUnreadStore } from '@/store/notifUnreadStore'
 import type { UserRole } from '@/types'
+import { UnreadBadge } from '@/components/UnreadBadge'
 
 interface BottomNavItem {
   label: string
   href: string
   icon: React.ElementType
-  badgeKey?: 'chat'
+  badgeKey?: 'chat' | 'notifications'
 }
 
 /** 5 onglets max — labels courts pour ≤360px. */
 const BOTTOM_NAV_ITEMS: Record<UserRole, BottomNavItem[]> = {
   patient: [
     { label: 'Dossier', href: '/patient/dossier', icon: FileText },
-    { label: 'Form.', href: '/patient/formulaire', icon: ClipboardList },
     { label: 'Agenda', href: '/patient/agenda', icon: Calendar },
     { label: 'Devis', href: '/patient/devis', icon: FileCheck },
     { label: 'Chat', href: '/patient/chat', icon: MessageSquare, badgeKey: 'chat' },
+    { label: 'Notifs', href: '/patient/notifications', icon: Bell, badgeKey: 'notifications' },
   ],
   medecin: [
     { label: 'Accueil', href: '/medecin/dashboard', icon: LayoutDashboard },
@@ -37,24 +39,33 @@ const BOTTOM_NAV_ITEMS: Record<UserRole, BottomNavItem[]> = {
     { label: 'Patients', href: '/gestionnaire/patients', icon: Users },
     { label: 'Chat', href: '/gestionnaire/chat', icon: MessageSquare, badgeKey: 'chat' },
     { label: 'Devis', href: '/gestionnaire/devis', icon: FileCheck },
-    { label: 'Notifs', href: '/gestionnaire/notifications', icon: Bell },
+    { label: 'Notifs', href: '/gestionnaire/notifications', icon: Bell, badgeKey: 'notifications' },
   ],
 }
 
 export function BottomNav() {
   const { user } = useAuthStore()
   const chatUnread = useChatUnreadStore((s) => s.unread)
+  const notifUnread = useNotifUnreadStore((s) => s.unread)
   const location = useLocation()
   const navigate = useNavigate()
 
   if (!user) return null
 
   const items = BOTTOM_NAV_ITEMS[user.role]
+  const badgeFor = (key?: 'chat' | 'notifications') => {
+    if (key === 'chat') return chatUnread
+    if (key === 'notifications') return notifUnread
+    return 0
+  }
 
   return (
     <nav
-      className="fixed bottom-0 inset-x-0 z-50 flex lg:hidden border-t border-border bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed bottom-0 inset-x-0 z-50 flex lg:hidden border-t border-brand-200/80 bg-white/95 backdrop-blur-md supports-[backdrop-filter]:bg-white/92"
+      style={{
+        height: 'calc(var(--bottom-nav-h) + var(--safe-bottom))',
+        paddingBottom: 'var(--safe-bottom)',
+      }}
     >
       {items.map(({ label, href, icon: Icon, badgeKey }) => (
         <NavLink
@@ -69,34 +80,46 @@ export function BottomNav() {
               navigate(href, { replace: true, state: { navReset: Date.now() } })
             }
           }}
-          className={({ isActive }) =>
-            cn(
-              'relative flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-2 text-[10px] font-medium leading-tight transition-colors',
-              isActive
-                ? 'text-brand-600'
-                : 'text-muted-foreground hover:text-foreground'
-            )
-          }
+          className="relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 pt-1.5 text-[10px] font-semibold leading-none tracking-tight"
         >
-          {({ isActive }) => (
-            <>
-              <span
-                className={cn(
-                  'relative flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-                  isActive ? 'bg-brand-50' : '',
-                  badgeKey === 'chat' && 'text-brand-700'
-                )}
-              >
-                <Icon className={cn('h-5 w-5', badgeKey === 'chat' && isActive && 'scale-105')} />
-                {badgeKey === 'chat' && chatUnread > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold leading-none text-white ring-2 ring-white">
-                    {chatUnread > 9 ? '9+' : chatUnread}
-                  </span>
-                )}
-              </span>
-              <span className="w-full text-center truncate">{label}</span>
-            </>
-          )}
+          {({ isActive }) => {
+            const count = badgeFor(badgeKey)
+            return (
+              <>
+                {/* Indicateur actif — pill */}
+                <span
+                  className={cn(
+                    'absolute top-1 h-0.5 w-5 rounded-full transition-all duration-200',
+                    isActive ? 'bg-brand-600 opacity-100 scale-100' : 'opacity-0 scale-75',
+                  )}
+                />
+                <span
+                  className={cn(
+                    'relative mt-0.5 flex h-8 w-[2.65rem] items-center justify-center rounded-full transition-all duration-200',
+                    isActive ? 'bg-brand-100 text-brand-950' : 'text-brand-800/55',
+                  )}
+                >
+                  <Icon
+                    className={cn('h-[1.35rem] w-[1.35rem]', isActive && 'text-brand-700')}
+                    strokeWidth={isActive ? 2.35 : 1.9}
+                  />
+                  <UnreadBadge
+                    count={count}
+                    size="sm"
+                    className="absolute -right-0.5 -top-0.5"
+                  />
+                </span>
+                <span
+                  className={cn(
+                    'w-full truncate text-center transition-colors',
+                    isActive ? 'text-brand-950' : 'text-brand-800/55',
+                  )}
+                >
+                  {label}
+                </span>
+              </>
+            )
+          }}
         </NavLink>
       ))}
     </nav>

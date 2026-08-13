@@ -91,6 +91,7 @@ model User {
   patient      Patient?
   sessions     Session[]
   messages     Message[]
+  hiddenMessages MessageHidden[]
   notifications Notification[]
   agendaEvents       AgendaEvent[]
   googleCalendarSync GoogleCalendarSync?
@@ -320,21 +321,43 @@ model SuiviPostOp {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Message {
-  id             String   @id @default(uuid())
-  patientId      String   @map("patient_id")
-  expediteurId   String   @map("expediteur_id")
-  expediteurRole String   @map("expediteur_role")
-  contenu        String
-  pieceJointeUrl String?  @map("piece_jointe_url")
-  pieceJointeNom String?  @map("piece_jointe_nom")
-  lu             Boolean  @default(false)
-  dateEnvoi      DateTime @default(now()) @map("date_envoi")
+  id              String    @id @default(uuid())
+  patientId       String    @map("patient_id")
+  expediteurId    String    @map("expediteur_id")
+  expediteurRole  String    @map("expediteur_role")
+  contenu         String
+  pieceJointeUrl  String?   @map("piece_jointe_url")
+  pieceJointeNom  String?   @map("piece_jointe_nom")
+  lu              Boolean   @default(false)
+  dateEnvoi       DateTime  @default(now()) @map("date_envoi")
+  deletedForAll   Boolean   @default(false) @map("deleted_for_all")
+  deletedForAllAt DateTime? @map("deleted_for_all_at")
+  pinned          Boolean   @default(false)
+  pinnedAt        DateTime? @map("pinned_at")
+  pinnedById      String?   @map("pinned_by_id")
 
-  patient    Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  expediteur User    @relation(fields: [expediteurId], references: [id], onDelete: Cascade)
+  patient    Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  expediteur User            @relation(fields: [expediteurId], references: [id], onDelete: Cascade)
+  hiddenBy   MessageHidden[]
 
   @@index([patientId, dateEnvoi])
+  @@index([patientId, pinned])
   @@map("messages")
+}
+
+/** Suppression « pour moi seulement » — le message reste visible pour les autres. */
+model MessageHidden {
+  id        String   @id @default(uuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId])
+  @@map("message_hidden")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

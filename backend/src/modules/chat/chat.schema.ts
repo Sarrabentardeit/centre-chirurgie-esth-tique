@@ -22,5 +22,13 @@ export const markReadSchema = z.object({
   patientId: z.string().uuid().optional(),
 })
 
+export const messageIdParamSchema = z.object({
+  messageId: z.string().uuid(),
+})
+
+export const pinMessageSchema = z.object({
+  pinned: z.boolean(),
+})
+
 export type SendMessageInput = z.infer<typeof sendMessageSchema>
 export type MarkReadInput = z.infer<typeof markReadSchema>

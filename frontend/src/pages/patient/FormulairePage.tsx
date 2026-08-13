@@ -884,8 +884,8 @@ export default function FormulairePage() {
         className="min-h-[100dvh] px-4 py-10 sm:py-14"
         style={{
           background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 40%, #1a4a3a 100%)',
-          paddingTop: 'max(2.5rem, env(safe-area-inset-top))',
-          paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))',
+          paddingTop: 'max(2.5rem, var(--safe-top))',
+          paddingBottom: 'max(2.5rem, var(--safe-bottom))',
         }}
       >
         <div className="w-full max-w-3xl mx-auto animate-fade-in">
@@ -990,14 +990,14 @@ export default function FormulairePage() {
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'scroll',
-        paddingBottom: 'env(safe-area-inset-bottom)',
+        paddingBottom: 'var(--safe-bottom)',
       }}
     >
       {/* â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <header
         style={{
           background: '#062a30',
-          paddingTop: 'env(safe-area-inset-top)',
+          paddingTop: 'var(--safe-top)',
         }}
       >
         <div className="max-w-4xl mx-auto px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
@@ -2130,7 +2130,7 @@ export default function FormulairePage() {
         style={{
           background: '#062a30',
           color: 'rgba(253,234,218,0.35)',
-          paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+          paddingBottom: 'max(0.75rem, var(--safe-bottom))',
         }}
       >
         © 2026 Dr. Mehdi Chennoufi — Chirurgien Esthétique

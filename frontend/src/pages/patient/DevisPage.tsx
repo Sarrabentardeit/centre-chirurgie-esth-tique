@@ -540,10 +540,7 @@ export default function DevisPage() {
               </div>
 
               {/* Actions */}
-              <div
-                className="shrink-0 px-5 sm:px-6 pt-4 bg-white border-t border-[#e4c8bd]/60 space-y-2.5"
-                style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-              >
+              <div className="shrink-0 px-5 sm:px-6 pt-4 bg-white border-t border-[#e4c8bd]/60 space-y-2.5 pb-safe">
                 {selected.statut === 'envoye' && (
                   <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-2">
                     <Button

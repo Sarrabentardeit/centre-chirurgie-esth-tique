@@ -336,6 +336,22 @@ gestionnaireRouter.get('/analytics', async (_req: Request, res: Response, next: 
   }
 })
 
+gestionnaireRouter.get('/audit', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const entity = typeof req.query.entity === 'string' ? req.query.entity : undefined
+    const action = typeof req.query.action === 'string' ? req.query.action : undefined
+    const limitRaw = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const result = await gestionnaireService.listAuditLogs({
+      entity,
+      action,
+      limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+    })
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
 function queryMedecinId(req: Request): string | undefined {
   return typeof req.query.medecinId === 'string' ? req.query.medecinId : undefined
 }

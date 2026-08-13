@@ -194,7 +194,11 @@ medecinRouter.patch(
   validate(updatePatientStatusSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await medecinService.updatePatientStatus(paramToString(req.params.id), req.body)
+      const result = await medecinService.updatePatientStatus(
+        req.auth!.sub,
+        paramToString(req.params.id),
+        req.body,
+      )
       res.json({ ok: true, ...result })
     } catch (e) { next(e) }
   }
@@ -306,4 +310,35 @@ medecinRouter.post('/post-op/:patientId/photos', async (req: Request, res: Respo
     const result = await medecinService.addPostOpPhoto(paramToString(req.params.patientId), req.body)
     res.json({ ok: true, ...result })
   } catch (e) { next(e) }
+})
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+medecinRouter.get('/notifications', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await medecinService.listNotifications(req.auth!.sub)
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+medecinRouter.patch('/notifications/:id/lu', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await medecinService.markNotificationRead(
+      req.auth!.sub,
+      paramToString(req.params.id),
+    )
+    res.json(result)
+  } catch (e) {
+    next(e)
+  }
+})
+
+medecinRouter.post('/notifications/lu-toutes', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await medecinService.markAllNotificationsRead(req.auth!.sub)
+    res.json(result)
+  } catch (e) {
+    next(e)
+  }
 })

@@ -162,12 +162,29 @@ export function startSessionKeepAlive(): () => void {
   const id = window.setInterval(tick, 60_000)
 
   const onStorage = (e: StorageEvent) => {
-    if (e.key !== 'auth-storage' || !e.newValue) return
+    if (e.key !== 'auth-storage') return
+    // Déconnexion dans un autre onglet
+    if (!e.newValue) {
+      useAuthStore.getState().logout()
+      return
+    }
     try {
       const parsed = JSON.parse(e.newValue) as AuthPersistShape
-      const access = parsed.state?.token
-      const refresh = parsed.state?.refreshToken
-      if (access) useAuthStore.getState().setTokens(access, refresh ?? undefined)
+      const state = parsed.state
+      if (!state) return
+      // Sync complète user + tokens (éviter rôle UI ≠ rôle JWT → « Accès refusé »)
+      if (state.isAuthenticated === false || !state.token || !state.user) {
+        useAuthStore.getState().logout()
+        return
+      }
+      const user = state.user as {
+        id: string
+        email: string
+        name: string
+        role: 'patient' | 'medecin' | 'gestionnaire'
+        avatar?: string
+      }
+      useAuthStore.getState().login(user, state.token, state.refreshToken ?? '')
     } catch { /* ignore */ }
   }
   window.addEventListener('storage', onStorage)
@@ -419,6 +436,9 @@ export interface ChatMessage {
   pieceJointeNom?: string | null
   dateEnvoi: string
   lu: boolean
+  deletedForAll?: boolean
+  pinned?: boolean
+  pinnedAt?: string | null
 }
 
 export interface ChatConversation {
@@ -472,6 +492,27 @@ export const chatApi = {
     request<{ ok: true }>('/chat/messages/read', {
       method: 'POST',
       body: JSON.stringify(patientId ? { patientId } : {}),
+    }),
+
+  deleteForAll: (messageId: string) =>
+    request<{ ok: true; message: ChatMessage }>(`/chat/messages/${messageId}/for-all`, {
+      method: 'DELETE',
+    }),
+
+  deleteForMe: (messageId: string) =>
+    request<{ ok: true }>(`/chat/messages/${messageId}/for-me`, {
+      method: 'DELETE',
+    }),
+
+  setPinned: (messageId: string, pinned: boolean) =>
+    request<{ ok: true; message: ChatMessage }>(`/chat/messages/${messageId}/pin`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pinned }),
+    }),
+
+  markUnread: (messageId: string) =>
+    request<{ ok: true; patientId: string }>(`/chat/messages/${messageId}/unread`, {
+      method: 'POST',
     }),
 
   upload: async (file: File) => {
@@ -593,6 +634,18 @@ export const patientApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  getMyPlanningSejour: () =>
+    request<{
+      ok: true
+      planning: {
+        id: string
+        content: string
+        moisLabel: string | null
+        statut: string
+        updatedAt: string
+      } | null
+    }>('/patient/planning-sejour'),
 }
 
 // ─── Médecin API ──────────────────────────────────────────────────────────────
@@ -903,6 +956,15 @@ export const medecinApi = {
   getAllDevis: () =>
     request<{ ok: true; devis: DevisWithPatient[] }>('/medecin/devis'),
 
+  getNotifications: () =>
+    request<{ ok: true; notifications: GestionnaireNotificationRow[] }>('/medecin/notifications'),
+
+  markNotificationRead: (id: string) =>
+    request<{ ok: true }>(`/medecin/notifications/${id}/lu`, { method: 'PATCH' }),
+
+  markAllNotificationsRead: () =>
+    request<{ ok: true }>('/medecin/notifications/lu-toutes', { method: 'POST' }),
+
   /** Même moteur Chromium que gestionnaire / patient / envoi chat. */
   renderDevisPdf: async (html: string): Promise<Blob> => {
     const { access } = getTokens()
@@ -947,8 +1009,28 @@ export const medecinApi = {
 export interface GestionnaireDashboardStats {
   totalPatients: number
   devisEnCours: number
+  devisSansReponse: number
+  rdvAConfirmer: number
   logistique: number
   notifications: number
+}
+
+export interface GestionnaireDashboardDevisAttente {
+  id: string
+  numeroDevis: string | null
+  updatedAt: string
+  patientId: string
+  dossierNumber: string
+  fullName: string
+}
+
+export interface GestionnaireDashboardRdvAttente {
+  id: string
+  dateDebut: string
+  title: string
+  patientId: string | null
+  dossierNumber: string | null
+  fullName: string
 }
 
 export interface GestionnaireFunnelStep {
@@ -1012,6 +1094,21 @@ export interface GestionnaireNotificationRow {
   lu: boolean
   dateCreation: string
   lienAction?: string | null
+}
+
+export interface GestionnaireAuditLog {
+  id: string
+  action: 'create' | 'update' | 'delete' | 'status_change'
+  entity: string
+  entityId: string
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  createdAt: string
+  actor: {
+    id: string
+    role: string
+    fullName: string
+  }
 }
 
 export interface GestionnaireLogistiqueChecklist {
@@ -1140,6 +1237,8 @@ export const gestionnaireApi = {
       ok: true
       stats: GestionnaireDashboardStats
       devisATraiter: GestionnairePatientSummary[]
+      devisSansReponse: GestionnaireDashboardDevisAttente[]
+      rdvAConfirmer: GestionnaireDashboardRdvAttente[]
       patientsLogistique: GestionnairePatientSummary[]
       funnel: GestionnaireFunnelStep[]
     }>('/gestionnaire/dashboard'),
@@ -1341,6 +1440,17 @@ export const gestionnaireApi = {
       monthlyDevis: GestionnaireAnalyticsMonthly[]
       kpis: { acceptanceRate: number; rdvRate: number }
     }>('/gestionnaire/analytics'),
+
+  getAuditLogs: (params?: { entity?: string; action?: string; limit?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.entity) q.set('entity', params.entity)
+    if (params?.action) q.set('action', params.action)
+    if (params?.limit) q.set('limit', String(params.limit))
+    const qs = q.toString()
+    return request<{ ok: true; logs: GestionnaireAuditLog[] }>(
+      `/gestionnaire/audit${qs ? `?${qs}` : ''}`,
+    )
+  },
 
   getAgenda: (params?: { from?: string; to?: string; medecinId?: string }) => {
     const q = new URLSearchParams()

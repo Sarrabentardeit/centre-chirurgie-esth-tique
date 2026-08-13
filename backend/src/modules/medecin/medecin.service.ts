@@ -572,7 +572,11 @@ export async function deletePatient(patientId: string) {
   return { deleted: true }
 }
 
-export async function updatePatientStatus(patientId: string, input: UpdatePatientStatusInput) {
+export async function updatePatientStatus(
+  actorId: string,
+  patientId: string,
+  input: UpdatePatientStatusInput,
+) {
   const patient = await prisma.patient.findUnique({ where: { id: patientId } })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
@@ -590,6 +594,17 @@ export async function updatePatientStatus(patientId: string, input: UpdatePatien
           : {}),
     },
   })
+
+  await writeAuditLog({
+    actorId,
+    actorRole: 'medecin',
+    action: 'status_change',
+    entity: 'patient',
+    entityId: patientId,
+    before: { status: patient.status },
+    after: { status: updated.status },
+  }).catch(() => undefined)
+
   return { patient: updated }
 }
 
@@ -985,5 +1000,47 @@ export async function getAllDevis() {
       },
     })),
   }
+}
+
+// ─── Notifications in-app ─────────────────────────────────────────────────────
+
+export async function listNotifications(userId: string) {
+  const rows = await prisma.notification.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  })
+  return {
+    notifications: rows.map((n) => ({
+      id: n.id,
+      userId: n.userId,
+      titre: n.titre,
+      message: n.message,
+      type: n.type,
+      lu: n.lu,
+      dateCreation: n.createdAt.toISOString(),
+      lienAction: n.lienAction,
+    })),
+  }
+}
+
+export async function markNotificationRead(userId: string, notificationId: string) {
+  const n = await prisma.notification.findFirst({
+    where: { id: notificationId, userId },
+  })
+  if (!n) throw new AppError(404, 'NOTIF_NOT_FOUND', 'Notification introuvable.')
+  await prisma.notification.update({
+    where: { id: notificationId },
+    data: { lu: true },
+  })
+  return { ok: true as const }
+}
+
+export async function markAllNotificationsRead(userId: string) {
+  await prisma.notification.updateMany({
+    where: { userId, lu: false },
+    data: { lu: true },
+  })
+  return { ok: true as const }
 }
 

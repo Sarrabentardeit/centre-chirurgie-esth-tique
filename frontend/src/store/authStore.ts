@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { useEffect, useState } from 'react'
 import type { User, UserRole } from '@/types'
 
 interface AuthState {
@@ -57,4 +58,17 @@ export function getDashboardPath(role: UserRole): string {
     case 'gestionnaire':
       return '/gestionnaire/dashboard'
   }
+}
+
+/** Attend la rehydratation localStorage avant les redirections ProtectedRoute. */
+export function useAuthHydrated() {
+  const [hydrated, setHydrated] = useState(() => useAuthStore.persist.hasHydrated())
+  useEffect(() => {
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true)
+      return
+    }
+    return useAuthStore.persist.onFinishHydration(() => setHydrated(true))
+  }, [])
+  return hydrated
 }

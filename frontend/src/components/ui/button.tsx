@@ -4,19 +4,19 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        default: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm',
-        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-        outline: 'border border-brand-200 bg-background hover:bg-brand-50 hover:text-brand-900 hover:border-brand-300',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        default: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm hover:-translate-y-0.5 hover:shadow-md',
+        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:-translate-y-0.5',
+        outline: 'border border-brand-200 bg-background hover:bg-brand-50 hover:text-brand-900 hover:border-brand-300 hover:-translate-y-0.5',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:-translate-y-0.5',
         ghost: 'hover:bg-brand-50 hover:text-brand-900',
         link: 'text-brand-600 underline-offset-4 hover:underline',
-        brand: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm',
-        teal: 'bg-brand-950 text-white hover:bg-[#0a3a42] shadow-sm',
-        'brand-outline': 'border border-brand-600 text-brand-600 hover:bg-brand-50',
+        brand: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm hover:-translate-y-0.5 hover:shadow-md',
+        teal: 'bg-brand-950 text-white hover:bg-[#0a3a42] shadow-sm hover:-translate-y-0.5 hover:shadow-md',
+        'brand-outline': 'border border-brand-600 text-brand-600 hover:bg-brand-50 hover:-translate-y-0.5',
       },
       size: {
         default: 'h-10 px-4 py-2',

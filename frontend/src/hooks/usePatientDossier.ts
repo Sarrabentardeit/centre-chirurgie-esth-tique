@@ -26,6 +26,7 @@ export interface PatientDossierData {
   formulaire: { id: string; status: string; submittedAt: string | null } | null
   devis: { id: string; statut: string; total: number; currency: string } | null
   prochainsRdv: Array<{ id: string; date: string; heure: string; type: string; statut: string }>
+  planningSejour: { id: string; available: true; moisLabel: string | null; updatedAt: string } | null
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -85,6 +86,12 @@ export function usePatientDossier(): UsePatientDossierReturn {
                 motif: string | null
                 statut: string | null
               }>
+              planningSejour?: {
+                id: string
+                available: true
+                moisLabel: string | null
+                updatedAt: string
+              } | null
             }
           }
         }),
@@ -132,6 +139,7 @@ export function usePatientDossier(): UsePatientDossierReturn {
         formulaire: p.formulaires[0] ?? null,
         devis: p.devis[0] ?? null,
         prochainsRdv: mappedRdv,
+        planningSejour: p.planningSejour ?? null,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur lors du chargement du dossier.')

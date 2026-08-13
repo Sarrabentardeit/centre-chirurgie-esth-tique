@@ -193,23 +193,67 @@ async function assignNumeroDevisWithRetry(
 }
 
 export async function getDashboard(gestionnaireUserId: string) {
+  const now = new Date()
   const [
     totalPatients,
     devisEnFlux,
+    devisSansReponseCount,
+    rdvAConfirmerCount,
     logistiqueCount,
     notifUnread,
     devisATraiter,
+    devisSansReponse,
+    rdvAConfirmer,
     patientsLogistique,
     funnel,
   ] = await Promise.all([
     prisma.patient.count({ where: { status: { not: 'abstention' } } }),
     prisma.devis.count({ where: { statut: { in: ['brouillon', 'envoye'] } } }),
+    prisma.devis.count({ where: { statut: 'envoye' } }),
+    prisma.agendaEvent.count({
+      where: { type: 'rdv', statut: 'planifie', dateDebut: { gte: now } },
+    }),
     prisma.patient.count({ where: { status: { in: ['date_reservee', 'logistique'] } } }),
     prisma.notification.count({ where: { userId: gestionnaireUserId, lu: false } }),
     prisma.patient.findMany({
       where: { status: { in: ['rapport_genere', 'devis_preparation'] } },
       include: { user: { select: { fullName: true } } },
       orderBy: { updatedAt: 'desc' },
+      take: 6,
+    }),
+    prisma.devis.findMany({
+      where: { statut: 'envoye' },
+      select: {
+        id: true,
+        numeroDevis: true,
+        updatedAt: true,
+        patient: {
+          select: {
+            id: true,
+            dossierNumber: true,
+            user: { select: { fullName: true } },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 6,
+    }),
+    prisma.agendaEvent.findMany({
+      where: { type: 'rdv', statut: 'planifie', dateDebut: { gte: now } },
+      select: {
+        id: true,
+        dateDebut: true,
+        title: true,
+        motif: true,
+        patient: {
+          select: {
+            id: true,
+            dossierNumber: true,
+            user: { select: { fullName: true } },
+          },
+        },
+      },
+      orderBy: { dateDebut: 'asc' },
       take: 6,
     }),
     prisma.patient.findMany({
@@ -248,10 +292,28 @@ export async function getDashboard(gestionnaireUserId: string) {
     stats: {
       totalPatients,
       devisEnCours: devisEnFlux,
+      devisSansReponse: devisSansReponseCount,
+      rdvAConfirmer: rdvAConfirmerCount,
       logistique: logistiqueCount,
       notifications: notifUnread,
     },
     devisATraiter,
+    devisSansReponse: devisSansReponse.map((d) => ({
+      id: d.id,
+      numeroDevis: d.numeroDevis,
+      updatedAt: d.updatedAt.toISOString(),
+      patientId: d.patient.id,
+      dossierNumber: d.patient.dossierNumber,
+      fullName: d.patient.user.fullName,
+    })),
+    rdvAConfirmer: rdvAConfirmer.map((e) => ({
+      id: e.id,
+      dateDebut: e.dateDebut.toISOString(),
+      title: e.title ?? e.motif ?? 'RDV',
+      patientId: e.patient?.id ?? null,
+      dossierNumber: e.patient?.dossierNumber ?? null,
+      fullName: e.patient?.user.fullName ?? 'Patient',
+    })),
     patientsLogistique,
     funnel: funnelData,
   }
@@ -270,6 +332,7 @@ export async function getPatients(search?: string, status?: string) {
                 { user: { email: { contains: search, mode: 'insensitive' } } },
                 { dossierNumber: { contains: search, mode: 'insensitive' } },
                 { phone: { contains: search, mode: 'insensitive' } },
+                { devis: { some: { numeroDevis: { contains: search, mode: 'insensitive' } } } },
               ],
             }
           : {}),
@@ -620,6 +683,28 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
     }
   }
 
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'status_change',
+      entity: 'devis',
+      entityId: devisId,
+      before: {
+        statut: devis.statut,
+        patientId: patient.id,
+        patientStatus: patient.status,
+        numeroDevis: devis.numeroDevis,
+      } as never,
+      after: {
+        statut: updated.statut,
+        patientId: patient.id,
+        patientStatus: 'devis_envoye',
+        numeroDevis: devis.numeroDevis,
+      } as never,
+    },
+  }).catch(() => undefined)
+
   return { devis: updated }
 }
 
@@ -653,6 +738,27 @@ export async function refuseDevis(gestionnaireId: string, devisId: string, input
     notifTitle: 'Mise à jour concernant votre devis',
     notifLink: '/patient/chat',
   })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'status_change',
+      entity: 'devis',
+      entityId: devisId,
+      before: {
+        statut: devis.statut,
+        patientId: devis.patientId,
+        numeroDevis: devis.numeroDevis,
+      } as never,
+      after: {
+        statut: updated.statut,
+        patientId: devis.patientId,
+        numeroDevis: devis.numeroDevis,
+        reason: reasonText || null,
+      } as never,
+    },
+  }).catch(() => undefined)
 
   return { devis: updated }
 }
@@ -1112,6 +1218,20 @@ export async function upsertPlanningSejour(
       after: { patientId, statut: row.statut } as never,
     },
   })
+
+  // Publier vers la patiente quand le planning passe en finalisé
+  const justFinalised = row.statut === 'finalise' && existing?.statut !== 'finalise'
+  if (justFinalised) {
+    await prisma.notification.create({
+      data: {
+        userId: ctx.patient.userId,
+        type: 'success',
+        titre: 'Votre planning de séjour est prêt',
+        message: 'Consultez le détail de votre séjour (itinéraire, hébergement, dates).',
+        lienAction: '/patient/planning-sejour',
+      },
+    }).catch(() => undefined)
+  }
 
   return {
     planning: {
@@ -1716,4 +1836,58 @@ export async function markAllNotificationsRead(userId: string) {
     data: { lu: true },
   })
   return { ok: true as const }
+}
+
+const AUDIT_ENTITIES = ['devis', 'patient', 'message'] as const
+
+export async function listAuditLogs(input?: {
+  entity?: string
+  action?: string
+  limit?: number
+}) {
+  const limit = Math.min(Math.max(input?.limit ?? 80, 1), 200)
+  const entity = input?.entity?.trim()
+  const action = input?.action?.trim()
+
+  const logs = await prisma.auditLog.findMany({
+    where: {
+      entity: entity && AUDIT_ENTITIES.includes(entity as (typeof AUDIT_ENTITIES)[number])
+        ? entity
+        : { in: [...AUDIT_ENTITIES] },
+      ...(action
+        ? { action: action as 'create' | 'update' | 'delete' | 'status_change' }
+        : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  })
+
+  const actorIds = [...new Set(logs.map((l) => l.actorId))]
+  const actors = actorIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: actorIds } },
+        select: { id: true, fullName: true, role: true },
+      })
+    : []
+  const actorMap = new Map(actors.map((a) => [a.id, a]))
+
+  return {
+    logs: logs.map((l) => {
+      const actor = actorMap.get(l.actorId)
+      return {
+        id: l.id,
+        action: l.action,
+        entity: l.entity,
+        entityId: l.entityId,
+        before: l.before,
+        after: l.after,
+        createdAt: l.createdAt.toISOString(),
+        actor: {
+          id: l.actorId,
+          role: l.actorRole,
+          fullName: actor?.fullName ?? 'Utilisateur inconnu',
+        },
+      }
+    }),
+  }
 }

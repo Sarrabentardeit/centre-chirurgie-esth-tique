@@ -750,7 +750,7 @@ export default function RapportsPage() {
         </div>
 
         {/* Barre d’actions mobile sticky */}
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white/95 backdrop-blur px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:hidden flex items-center gap-2">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white/95 backdrop-blur px-4 py-3 pb-safe lg:hidden flex items-center gap-2">
           <Button variant="outline" className="h-11 flex-1" onClick={closeEditor}>Retour</Button>
           <Button
             variant="brand"

@@ -3,10 +3,10 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Navbar } from './Navbar'
 import { BottomNav } from './BottomNav'
-import { useDemoStore } from '@/store/demoStore'
 import { useAuthStore } from '@/store/authStore'
 import { useChatUnreadStore } from '@/store/chatUnreadStore'
 import { chatApi, type ChatMessage } from '@/lib/api'
+import { useChatRealtime } from '@/lib/chatRealtime'
 import { playMessageSound, unlockNotificationAudio } from '@/lib/notificationSounds'
 import { Button } from '@/components/ui/button'
 import { Download, FileText, MessageCircle, MessageSquare, Send, X } from 'lucide-react'
@@ -25,6 +25,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/patient/formulaire': 'Formulaire Médical',
   '/patient/devis': 'Mes Devis',
   '/patient/agenda': 'Mon Agenda',
+  '/patient/planning-sejour': 'Mon planning de séjour',
   '/patient/post-op': 'Suivi Post-Opératoire',
   '/patient/chat': 'Messages',
   '/patient/notifications': 'Notifications',
@@ -45,6 +46,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/gestionnaire/logistique': 'Logistique Séjours',
   '/gestionnaire/notifications': 'Notifications',
   '/gestionnaire/analytics': 'Analytics',
+  '/gestionnaire/audit': 'Journal d’audit',
 }
 
 function ChatUnreadBadge({ count }: { count: number }) {
@@ -68,7 +70,6 @@ export function AppLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuthStore()
-  const ensurePatientForUser = useDemoStore((s) => s.ensurePatientForUser)
 
   const title = Object.entries(ROUTE_TITLES).find(([path]) =>
     location.pathname.startsWith(path)
@@ -87,72 +88,6 @@ export function AppLayout() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!user) {
-      setChatUnread(0)
-      prevChatUnreadRef.current = null
-      return
-    }
-    // Sur la page chat, les messages sont marqués lus → badge à 0
-    if (isChatRoute) {
-      setChatUnread(0)
-      prevChatUnreadRef.current = 0
-      return
-    }
-    let cancelled = false
-    const load = () => {
-      void chatApi
-        .getUnread()
-        .then((r) => {
-          if (cancelled) return
-          const prev = prevChatUnreadRef.current
-          if (prev !== null && r.unread > prev) {
-            playMessageSound()
-          }
-          prevChatUnreadRef.current = r.unread
-          setChatUnread(r.unread)
-        })
-        .catch(() => {
-          if (!cancelled) setChatUnread(0)
-        })
-    }
-    load()
-    const id = window.setInterval(load, 20000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [user?.id, user?.role, isChatRoute, location.pathname])
-
-  // Démo "envoi auto" du questionnaire à J+1 (24h après retour).
-  useEffect(() => {
-    const tick = () => {
-      const st = useDemoStore.getState()
-      const now = Date.now()
-
-      for (const sp of st.suiviPostOp) {
-        const q = sp.questionnaireSatisfaction
-        if (!q) continue
-        if (sp.questionnaireDisponibiliteEnvoyee) continue
-        if (q.repondu) continue
-
-        const readyAt = new Date(`${q.dateEnvoi}T00:00:00`).getTime()
-        if (now >= readyAt) {
-          st.sendQuestionnaireIfReady(sp.patientId)
-        }
-      }
-    }
-
-    tick()
-    const intervalId = window.setInterval(tick, 20000)
-    return () => window.clearInterval(intervalId)
-  }, [])
-
-  useEffect(() => {
-    if (!user || user.role !== 'patient') return
-    ensurePatientForUser(user, { sourceContact: 'direct' })
-  }, [ensurePatientForUser, user])
-
   const loadWidgetMessages = useCallback(async () => {
     if (!user || user.role !== 'patient') return
     try {
@@ -163,10 +98,51 @@ export function AppLayout() {
     }
   }, [user])
 
+  const refreshChatUnread = useCallback(() => {
+    if (!user) {
+      setChatUnread(0)
+      prevChatUnreadRef.current = null
+      return
+    }
+    if (isChatRoute) {
+      setChatUnread(0)
+      prevChatUnreadRef.current = 0
+      return
+    }
+    void chatApi
+      .getUnread()
+      .then((r) => {
+        const prev = prevChatUnreadRef.current
+        if (prev !== null && r.unread > prev) {
+          playMessageSound()
+        }
+        prevChatUnreadRef.current = r.unread
+        setChatUnread(r.unread)
+      })
+      .catch(() => setChatUnread(0))
+  }, [user, isChatRoute, setChatUnread])
+
+  useEffect(() => {
+    refreshChatUnread()
+    const id = window.setInterval(refreshChatUnread, 90_000)
+    return () => window.clearInterval(id)
+  }, [refreshChatUnread, location.pathname])
+
+  useChatRealtime((event) => {
+    if (event.type === 'chat:message' || event.type === 'chat:unread') {
+      refreshChatUnread()
+      if (chatOpen && user?.role === 'patient') void loadWidgetMessages()
+    }
+    if (event.type === 'chat:thread' && chatOpen && user?.role === 'patient') {
+      void loadWidgetMessages()
+    }
+  }, Boolean(user))
+
   useEffect(() => {
     if (!chatOpen || user?.role !== 'patient') return
     void loadWidgetMessages()
-    const id = window.setInterval(() => void loadWidgetMessages(), 15000)
+    // SSE rafraîchit le widget ; polling lent en secours
+    const id = window.setInterval(() => void loadWidgetMessages(), 60_000)
     return () => window.clearInterval(id)
   }, [chatOpen, user?.role, loadWidgetMessages])
 
@@ -198,7 +174,10 @@ export function AppLayout() {
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Navbar onMenuClick={() => setSidebarOpen(true)} title={title} />
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="animate-fade-in px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-6">
+          <div
+            key={location.pathname}
+            className="animate-page-enter px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-6 pb-app-nav"
+          >
             <Outlet />
           </div>
         </main>
@@ -391,7 +370,7 @@ export function AppLayout() {
             </Button>
           </div>
           {/* Mobile — bouton flottant visible au-dessus de la barre */}
-          <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-3 z-[60] lg:hidden">
+          <div className="fixed bottom-[calc(var(--bottom-nav-h)+var(--safe-bottom)+0.75rem)] right-3 z-[60] lg:hidden">
             <Button
               variant="brand"
               size="icon"

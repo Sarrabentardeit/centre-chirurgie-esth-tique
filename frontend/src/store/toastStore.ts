@@ -43,3 +43,8 @@ export function toast(input: {
     variant: input.variant ?? 'default',
   })
 }
+
+/** Micro-feedback succès (envoi devis, message lu, etc.) */
+export function feedbackSuccess(title: string, description?: string) {
+  return toast({ title, description, variant: 'success' })
+}

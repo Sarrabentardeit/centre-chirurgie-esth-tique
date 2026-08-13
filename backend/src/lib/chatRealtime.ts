@@ -1,0 +1,80 @@
+import type { Response } from 'express'
+import type { UserRole } from '../modules/auth/auth.types.js'
+
+export type ChatRealtimeEvent = {
+  type: 'chat:message' | 'chat:thread' | 'chat:unread'
+  patientId?: string
+  messageId?: string
+}
+
+type Client = {
+  userId: string
+  role: UserRole
+  res: Response
+}
+
+const clients = new Set<Client>()
+
+function writeEvent(res: Response, event: ChatRealtimeEvent) {
+  res.write(`event: ${event.type}\n`)
+  res.write(`data: ${JSON.stringify(event)}\n\n`)
+}
+
+export function subscribeChatRealtime(userId: string, role: UserRole, res: Response) {
+  const client: Client = { userId, role, res }
+  clients.add(client)
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: ping ${Date.now()}\n\n`)
+    } catch {
+      clearInterval(heartbeat)
+      clients.delete(client)
+    }
+  }, 25000)
+
+  const cleanup = () => {
+    clearInterval(heartbeat)
+    clients.delete(client)
+  }
+
+  res.on('close', cleanup)
+  res.on('error', cleanup)
+
+  res.write(`: connected\n\n`)
+  return cleanup
+}
+
+export function publishChatToUser(userId: string, event: ChatRealtimeEvent) {
+  for (const client of clients) {
+    if (client.userId !== userId) continue
+    try {
+      writeEvent(client.res, event)
+    } catch {
+      clients.delete(client)
+    }
+  }
+}
+
+export function publishChatToUsers(userIds: string[], event: ChatRealtimeEvent) {
+  const set = new Set(userIds)
+  for (const client of clients) {
+    if (!set.has(client.userId)) continue
+    try {
+      writeEvent(client.res, event)
+    } catch {
+      clients.delete(client)
+    }
+  }
+}
+
+export function publishChatToStaff(event: ChatRealtimeEvent) {
+  for (const client of clients) {
+    if (client.role !== 'medecin' && client.role !== 'gestionnaire') continue
+    try {
+      writeEvent(client.res, event)
+    } catch {
+      clients.delete(client)
+    }
+  }
+}

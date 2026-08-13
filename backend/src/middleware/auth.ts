@@ -4,13 +4,21 @@ import { env } from '../config/env.js'
 import { AppError } from './errorHandler.js'
 import type { JwtPayload, UserRole } from '../modules/auth/auth.types.js'
 
-export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
+function extractAccessToken(req: Request): string | null {
   const header = req.headers.authorization
-  if (!header?.startsWith('Bearer ')) {
+  if (header?.startsWith('Bearer ')) return header.slice(7)
+  // EventSource ne peut pas envoyer Authorization → token en query
+  const q = req.query.access_token
+  if (typeof q === 'string' && q.trim()) return q.trim()
+  return null
+}
+
+export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
+  const token = extractAccessToken(req)
+  if (!token) {
     return next(new AppError(401, 'SESSION_EXPIRED', 'Session expirée. Veuillez vous reconnecter.'))
   }
 
-  const token = header.slice(7)
   try {
     const payload = jwt.verify(token, env.JWT_ACCESS_SECRET) as JwtPayload
     req.auth = payload

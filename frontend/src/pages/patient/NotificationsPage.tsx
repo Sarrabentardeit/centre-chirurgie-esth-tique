@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bell, CheckCheck, Info, AlertCircle, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react'
+import {
+  Bell, Calendar, CheckCheck, FileCheck, Info, AlertCircle, CheckCircle2,
+  AlertTriangle, MessageSquare, RefreshCw,
+} from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,6 +12,7 @@ import { formatRelative, cn } from '@/lib/utils'
 import type { Notification } from '@/types'
 import { useNavigate } from 'react-router-dom'
 import { patientApi, type GestionnaireNotificationRow } from '@/lib/api'
+import { PullToRefresh } from '@/components/PullToRefresh'
 
 const TYPE_ICONS: Record<Notification['type'], React.ElementType> = {
   info: Info,
@@ -39,8 +43,8 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     setError(null)
     try {
       const res = await patientApi.getNotifications()
@@ -48,7 +52,7 @@ export default function NotificationsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }, [])
 
@@ -85,6 +89,7 @@ export default function NotificationsPage() {
   }
 
   return (
+    <PullToRefresh onRefresh={() => load({ silent: true })}>
     <div className="max-w-2xl mx-auto space-y-5">
       <PageHeader
         title="Notifications"
@@ -111,6 +116,24 @@ export default function NotificationsPage() {
       {error && (
         <p className="text-sm text-destructive">{error}</p>
       )}
+
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { label: 'Mes devis', href: '/patient/devis', icon: FileCheck },
+          { label: 'Mon agenda', href: '/patient/agenda', icon: Calendar },
+          { label: 'Messages', href: '/patient/chat', icon: MessageSquare },
+        ].map(({ label, href, icon: Icon }) => (
+          <button
+            key={href}
+            type="button"
+            onClick={() => navigate(href)}
+            className="flex flex-col items-center gap-1.5 rounded-xl border border-border bg-white px-2 py-3 text-xs font-medium text-foreground hover:border-brand-300 hover:bg-brand-50/50"
+          >
+            <Icon className="h-4 w-4 text-brand-700" />
+            {label}
+          </button>
+        ))}
+      </div>
 
       {loading && allNotifs.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">Chargement…</p>
@@ -189,5 +212,6 @@ export default function NotificationsPage() {
         </div>
       )}
     </div>
+    </PullToRefresh>
   )
 }

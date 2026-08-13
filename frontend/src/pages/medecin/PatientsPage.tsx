@@ -19,6 +19,7 @@ import { medecinApi, gestionnaireApi } from '@/lib/api'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import type { DossierBucketCounts, PatientListItem } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
+import { PullToRefresh } from '@/components/PullToRefresh'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -375,8 +376,9 @@ export default function PatientsPage() {
     mode: 'classer' | 'reouvrir'
   } | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
+    setError(null)
     try {
       const params = {
         search: search || undefined,
@@ -390,7 +392,7 @@ export default function PatientsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }, [search, statusFilter, isGestionnaire])
 
@@ -407,6 +409,7 @@ export default function PatientsPage() {
   }
 
   return (
+    <PullToRefresh onRefresh={() => load({ silent: true })}>
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-5">
 
       <PageHeader
@@ -738,5 +741,6 @@ export default function PatientsPage() {
         />
       )}
     </div>
+    </PullToRefresh>
   )
 }

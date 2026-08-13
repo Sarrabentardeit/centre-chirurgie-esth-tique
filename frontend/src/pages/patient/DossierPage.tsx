@@ -1,12 +1,13 @@
 import {
-  CheckCircle2, Clock, AlertCircle, FileText,
-  Calendar, MessageSquare, ChevronRight, RefreshCw,
+  CheckCircle2, Clock, AlertCircle, FileText, Heart,
+  Calendar, CalendarDays, MessageSquare, ChevronRight, RefreshCw, ArrowRight, Ban,
+  type LucideIcon,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { usePatientDossier } from '@/hooks/usePatientDossier'
-import { STATUS_LABELS, formatDate, formatRelative } from '@/lib/utils'
+import { usePatientDossier, type PatientDossierData } from '@/hooks/usePatientDossier'
+import { STATUS_LABELS, formatDate, formatRelative, cn } from '@/lib/utils'
 import { useNavigate } from 'react-router-dom'
 import type { DossierStatus } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -23,37 +24,189 @@ const PARCOURS = [
   { key: 'post_op',             label: 'Suivi post-op',      desc: '6 mois de suivi' },
 ] as const
 
-const STATUS_ORDER: DossierStatus[] = [
-  'nouveau', 'formulaire_en_cours', 'formulaire_complete',
-  'en_analyse', 'rapport_genere', 'devis_preparation', 'devis_envoye',
-  'devis_accepte', 'date_reservee', 'logistique', 'intervention',
-  'post_op', 'suivi_termine',
-]
+/** Mappe le statut réel vers l’étape visible du parcours. */
+function resolveParcoursKey(status: DossierStatus): (typeof PARCOURS)[number]['key'] | null {
+  if (status === 'abstention' || status === 'suivi_termine') return null
+  if (status === 'nouveau' || status === 'formulaire_en_cours' || status === 'formulaire_complete') {
+    return 'formulaire_complete'
+  }
+  if (status === 'en_analyse' || status === 'rapport_genere') return 'rapport_genere'
+  if (status === 'devis_preparation' || status === 'devis_envoye') return 'devis_envoye'
+  if (status === 'devis_accepte' || status === 'date_reservee') return 'date_reservee'
+  if (status === 'logistique') return 'logistique'
+  if (status === 'intervention') return 'intervention'
+  if (status === 'post_op') return 'post_op'
+  return 'formulaire_complete'
+}
 
 function getProgress(status: DossierStatus): number {
   if (status === 'abstention') return 0
-  const idx = STATUS_ORDER.indexOf(status)
+  if (status === 'suivi_termine') return 100
+  const key = resolveParcoursKey(status)
+  if (!key) return 0
+  const idx = PARCOURS.findIndex((s) => s.key === key)
   if (idx < 0) return 0
-  return Math.round((idx / (STATUS_ORDER.length - 1)) * 100)
+  return Math.round(((idx + 0.35) / PARCOURS.length) * 100)
 }
 
-function isStepDone(stepKey: string, currentStatus: DossierStatus): boolean {
-  if (currentStatus === 'abstention') return false
-  return STATUS_ORDER.indexOf(stepKey as DossierStatus) <= STATUS_ORDER.indexOf(currentStatus)
+type NextStep = {
+  title: string
+  description: string
+  ctaLabel?: string
+  href?: string
+  tone: 'action' | 'wait' | 'pause'
+  icon: LucideIcon
 }
 
-function isCurrentStep(stepKey: string, currentStatus: DossierStatus): boolean {
-  if (currentStatus === 'abstention') return false
-  const sIdx = STATUS_ORDER.indexOf(stepKey as DossierStatus)
-  const cIdx = STATUS_ORDER.indexOf(currentStatus)
-  return sIdx === cIdx
-}
+function resolveNextStep(patient: PatientDossierData): NextStep {
+  const formSubmitted = patient.formulaire?.status === 'submitted'
+  const hasUpcomingRdv = patient.prochainsRdv.some(
+    (r) => r.statut === 'planifie' || r.statut === 'confirme',
+  )
+  const needsRdvConfirm = patient.prochainsRdv.some((r) => r.statut === 'planifie')
 
-function isNextStep(stepKey: string, currentStatus: DossierStatus): boolean {
-  if (currentStatus === 'abstention') return false
-  const sIdx = STATUS_ORDER.indexOf(stepKey as DossierStatus)
-  const cIdx = STATUS_ORDER.indexOf(currentStatus)
-  return sIdx === cIdx + 1
+  if (patient.status === 'abstention') {
+    return {
+      title: 'Dossier en pause',
+      description:
+        'Votre dossier est actuellement en abstention. Contactez l’équipe si vous souhaitez le réouvrir ou poser une question.',
+      ctaLabel: 'Contacter l’équipe',
+      href: '/patient/chat',
+      tone: 'pause',
+      icon: Ban,
+    }
+  }
+
+  if (patient.status === 'suivi_termine') {
+    return {
+      title: 'Parcours terminé',
+      description: 'Votre suivi est clôturé. L’équipe reste disponible via le chat si besoin.',
+      ctaLabel: 'Ouvrir le chat',
+      href: '/patient/chat',
+      tone: 'wait',
+      icon: CheckCircle2,
+    }
+  }
+
+  if (!formSubmitted || patient.status === 'nouveau' || patient.status === 'formulaire_en_cours') {
+    return {
+      title: 'Compléter votre formulaire médical',
+      description:
+        'C’est la prochaine étape pour que le médecin puisse analyser votre dossier.',
+      ctaLabel: 'Remplir mon formulaire',
+      href: '/patient/formulaire',
+      tone: 'action',
+      icon: FileText,
+    }
+  }
+
+  if (patient.devis?.statut === 'envoye') {
+    return {
+      title: 'Consulter et répondre à votre devis',
+      description:
+        'Un devis personnalisé vous attend. Lisez-le puis acceptez ou refusez.',
+      ctaLabel: 'Voir mon devis',
+      href: '/patient/devis',
+      tone: 'action',
+      icon: FileText,
+    }
+  }
+
+  if (needsRdvConfirm) {
+    return {
+      title: 'Confirmer votre rendez-vous',
+      description:
+        'Une date vous a été proposée. Confirmez-la ou demandez une autre date.',
+      ctaLabel: 'Voir mon agenda',
+      href: '/patient/agenda',
+      tone: 'action',
+      icon: Calendar,
+    }
+  }
+
+  if (
+    patient.planningSejour?.available &&
+    (patient.status === 'devis_accepte' || patient.status === 'date_reservee')
+  ) {
+    return {
+      title: 'Consulter votre planning de séjour',
+      description: patient.planningSejour.moisLabel
+        ? `Votre planning (${patient.planningSejour.moisLabel}) est prêt.`
+        : 'Votre planning de séjour a été finalisé par l’équipe.',
+      ctaLabel: 'Voir mon planning',
+      href: '/patient/planning-sejour',
+      tone: 'action',
+      icon: CalendarDays,
+    }
+  }
+
+  if (
+    (patient.status === 'devis_accepte' || patient.devis?.statut === 'accepte') &&
+    !hasUpcomingRdv
+  ) {
+    return {
+      title: 'Planifier une date',
+      description:
+        'Votre devis est accepté. Consultez l’agenda pour la suite de la planification.',
+      ctaLabel: 'Ouvrir mon agenda',
+      href: '/patient/agenda',
+      tone: 'action',
+      icon: Calendar,
+    }
+  }
+
+  if (patient.status === 'post_op') {
+    return {
+      title: 'Suivi post-opératoire',
+      description: 'Consultez votre espace de suivi et échangez avec l’équipe si besoin.',
+      ctaLabel: 'Voir le suivi post-op',
+      href: '/patient/post-op',
+      tone: 'action',
+      icon: Heart,
+    }
+  }
+
+  if (
+    patient.status === 'en_analyse' ||
+    patient.status === 'rapport_genere' ||
+    patient.status === 'devis_preparation' ||
+    patient.status === 'formulaire_complete'
+  ) {
+    return {
+      title: 'Aucune action de votre côté',
+      description:
+        'Votre dossier est entre les mains de l’équipe. Vous serez notifiée dès qu’une étape nécessitera votre réponse.',
+      ctaLabel: 'Écrire à l’équipe',
+      href: '/patient/chat',
+      tone: 'wait',
+      icon: Clock,
+    }
+  }
+
+  if (
+    patient.status === 'date_reservee' ||
+    patient.status === 'logistique' ||
+    patient.status === 'intervention'
+  ) {
+    return {
+      title: 'Préparation en cours',
+      description:
+        'L’équipe organise la suite de votre parcours. Surveillez vos notifications et le chat.',
+      ctaLabel: 'Voir mon agenda',
+      href: '/patient/agenda',
+      tone: 'wait',
+      icon: Clock,
+    }
+  }
+
+  return {
+    title: 'Besoin d’aide ?',
+    description: 'L’équipe est disponible pour répondre à vos questions.',
+    ctaLabel: 'Contacter l’équipe',
+    href: '/patient/chat',
+    tone: 'wait',
+    icon: MessageSquare,
+  }
 }
 
 // ─── Skeleton de chargement ───────────────────────────────────────────────────
@@ -62,6 +215,7 @@ function DossierSkeleton() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <Skeleton className="h-40 w-full rounded-2xl" />
+      <Skeleton className="h-36 w-full rounded-2xl" />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Skeleton className="lg:col-span-2 h-72 rounded-xl" />
         <div className="space-y-4">
@@ -79,10 +233,8 @@ export default function DossierPage() {
   const navigate = useNavigate()
   const { data: patient, loading, error, refresh } = usePatientDossier()
 
-  // ── Chargement ──
   if (loading) return <DossierSkeleton />
 
-  // ── Erreur ──
   if (error) {
     return (
       <div className="max-w-2xl mx-auto mt-16">
@@ -99,7 +251,6 @@ export default function DossierPage() {
     )
   }
 
-  // ── Pas encore de dossier ──
   if (!patient) {
     return (
       <div className="max-w-2xl mx-auto mt-16">
@@ -119,27 +270,60 @@ export default function DossierPage() {
   }
 
   const progress = getProgress(patient.status)
+  const nextStep = resolveNextStep(patient)
+  const NextIcon = nextStep.icon
+  const currentParcoursKey = resolveParcoursKey(patient.status)
+  const currentParcoursIdx = currentParcoursKey
+    ? PARCOURS.findIndex((s) => s.key === currentParcoursKey)
+    : -1
 
-  // ── Alerte formulaire non soumis ──
-  const showFormulaireAlert =
-    patient.status === 'nouveau' ||
-    patient.status === 'formulaire_en_cours' ||
-    !patient.formulaire ||
-    patient.formulaire.status !== 'submitted'
-
-  // ── Alerte devis en attente ──
-  const showDevisAlert = patient.devis?.statut === 'envoye'
+  const secondaryLinks = [
+    {
+      label: 'Mon formulaire médical',
+      href: '/patient/formulaire',
+      desc: patient.formulaire?.status === 'submitted' ? 'Soumis ✓' : 'À compléter',
+      icon: FileText,
+    },
+    {
+      label: 'Mon devis',
+      href: '/patient/devis',
+      desc: patient.devis ? `Devis ${patient.devis.statut}` : 'En attente',
+      icon: FileText,
+    },
+    {
+      label: 'Mon agenda',
+      href: '/patient/agenda',
+      desc: patient.prochainsRdv.length > 0
+        ? `${patient.prochainsRdv.length} RDV`
+        : 'Aucun RDV',
+      icon: Calendar,
+    },
+    ...(patient.planningSejour?.available
+      ? [{
+          label: 'Planning séjour',
+          href: '/patient/planning-sejour',
+          desc: patient.planningSejour.moisLabel ?? 'Disponible',
+          icon: CalendarDays,
+        }]
+      : []),
+    {
+      label: 'Chat',
+      href: '/patient/chat',
+      desc: 'Contacter l’équipe',
+      icon: MessageSquare,
+    },
+  ]
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
 
-      {/* ── En-tête de bienvenue ── */}
+      {/* ── En-tête ── */}
       <div
         className="rounded-2xl p-4 sm:p-6 shadow-lg relative overflow-hidden"
         style={{ background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 55%, #1a4a3a 100%)' }}
       >
-        {/* Décoration background */}
-        <div className="absolute inset-0 opacity-10"
+        <div
+          className="absolute inset-0 opacity-10"
           style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, #e4c8bd 0%, transparent 50%)' }}
         />
         <div
@@ -173,7 +357,6 @@ export default function DossierPage() {
           </div>
         </div>
 
-        {/* Barre de progression */}
         <div className="relative mt-6">
           <div className="flex justify-between text-xs mb-2" style={{ color: 'rgba(228,200,189,0.6)' }}>
             <span>Progression du parcours</span>
@@ -191,95 +374,82 @@ export default function DossierPage() {
         </div>
       </div>
 
-      {/* ── Alertes contextuelles ── */}
-      <div className="space-y-2">
-        {showFormulaireAlert && (
-          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 sm:px-4 py-3">
-            <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-amber-800">
-                Formulaire médical incomplet
-              </p>
-              <p className="text-xs text-amber-700 mt-0.5">
-                Veuillez compléter et soumettre votre formulaire pour que votre dossier soit traité.
-              </p>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-amber-700 hover:bg-amber-100 mt-2 h-8 px-2 sm:hidden"
-                onClick={() => navigate('/patient/formulaire')}
-              >
-                Compléter
-              </Button>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-amber-700 hover:bg-amber-100 shrink-0 hidden sm:inline-flex"
-              onClick={() => navigate('/patient/formulaire')}
-            >
-              Compléter
-            </Button>
-          </div>
+      {/* ── Une seule prochaine étape ── */}
+      <div
+        className={cn(
+          'rounded-2xl border px-4 py-5 sm:px-6 sm:py-6 shadow-sm',
+          nextStep.tone === 'action' && 'border-brand-200 bg-gradient-to-br from-brand-50 to-white',
+          nextStep.tone === 'wait' && 'border-slate-200 bg-slate-50/80',
+          nextStep.tone === 'pause' && 'border-amber-200 bg-amber-50/90',
         )}
-
-        {showDevisAlert && (
-          <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 sm:px-4 py-3">
-            <CheckCircle2 className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-emerald-800">
-                Votre devis est disponible
-              </p>
-              <p className="text-xs text-emerald-700 mt-0.5">
-                Un devis personnalisé vous a été envoyé. Consultez-le et donnez votre réponse.
-              </p>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-emerald-700 hover:bg-emerald-100 mt-2 h-8 px-2 sm:hidden"
-                onClick={() => navigate('/patient/devis')}
-              >
-                Voir le devis
-              </Button>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-emerald-700 hover:bg-emerald-100 shrink-0 hidden sm:inline-flex"
-              onClick={() => navigate('/patient/devis')}
-            >
-              Voir le devis
-            </Button>
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+          Votre prochaine étape
+        </p>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div
+            className={cn(
+              'h-12 w-12 rounded-2xl flex items-center justify-center shrink-0',
+              nextStep.tone === 'action' && 'bg-brand-100 text-brand-800',
+              nextStep.tone === 'wait' && 'bg-slate-200 text-slate-700',
+              nextStep.tone === 'pause' && 'bg-amber-100 text-amber-800',
+            )}
+          >
+            <NextIcon className="h-6 w-6" />
           </div>
-        )}
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-bold text-slate-900">{nextStep.title}</h3>
+            <p className="text-sm text-muted-foreground mt-1 max-w-xl">{nextStep.description}</p>
+          </div>
+          {nextStep.ctaLabel && nextStep.href && (
+            <Button
+              variant={nextStep.tone === 'action' ? 'brand' : 'outline'}
+              size="lg"
+              className="w-full sm:w-auto shrink-0 gap-2 h-12 px-5 text-sm font-semibold"
+              onClick={() => navigate(nextStep.href!)}
+            >
+              {nextStep.ctaLabel}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        {/* ── Timeline du parcours ── */}
+        {/* ── Timeline ── */}
         <div className="lg:col-span-2">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Votre Parcours</CardTitle>
+              <CardTitle className="text-base">Où vous en êtes</CardTitle>
             </CardHeader>
             <CardContent>
+              {patient.status === 'abstention' && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4">
+                  Parcours en pause (abstention). Les étapes ci-dessous restent indicatives.
+                </p>
+              )}
               <div className="space-y-0">
                 {PARCOURS.map((step, index) => {
-                  const done = isStepDone(step.key, patient.status)
-                  const current = isCurrentStep(step.key, patient.status) && !done
-                  const next = isNextStep(step.key, patient.status) && !done
+                  const done =
+                    patient.status !== 'abstention' &&
+                    currentParcoursIdx >= 0 &&
+                    index < currentParcoursIdx
+                  const current =
+                    patient.status !== 'abstention' &&
+                    currentParcoursKey === step.key
+                  const upcoming = !done && !current
 
                   return (
                     <div key={step.key} className="flex gap-4">
                       <div className="flex flex-col items-center">
                         <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
-                            done
-                              ? 'border-emerald-500 bg-emerald-500'
-                              : current
-                              ? 'border-brand-500 bg-brand-50'
-                              : 'border-border bg-background'
-                          }`}
+                          className={cn(
+                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition-all',
+                            done && 'border-emerald-500 bg-emerald-500',
+                            current && 'border-brand-500 bg-brand-50 ring-4 ring-brand-100',
+                            upcoming && 'border-border bg-background',
+                          )}
                         >
                           {done ? (
                             <CheckCircle2 className="h-4 w-4 text-white" />
@@ -290,24 +460,22 @@ export default function DossierPage() {
                           )}
                         </div>
                         {index < PARCOURS.length - 1 && (
-                          <div className={`w-0.5 flex-1 min-h-[24px] ${done ? 'bg-emerald-300' : 'bg-border'}`} />
+                          <div className={cn('w-0.5 flex-1 min-h-[24px]', done ? 'bg-emerald-300' : 'bg-border')} />
                         )}
                       </div>
-                      <div className={`pb-6 ${index === PARCOURS.length - 1 ? 'pb-0' : ''}`}>
+                      <div className={cn('pb-6', index === PARCOURS.length - 1 && 'pb-0')}>
                         <p
-                          className={`text-sm font-semibold ${
-                            done ? 'text-foreground' : current ? 'text-brand-700' : 'text-muted-foreground'
-                          }`}
+                          className={cn(
+                            'text-sm font-semibold',
+                            done && 'text-foreground',
+                            current && 'text-brand-700',
+                            upcoming && 'text-muted-foreground',
+                          )}
                         >
                           {step.label}
                           {current && (
                             <span className="ml-2 inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-xs text-brand-700">
-                              En cours
-                            </span>
-                          )}
-                          {next && (
-                            <span className="ml-2 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                              À venir
+                              Étape actuelle
                             </span>
                           )}
                         </p>
@@ -323,58 +491,22 @@ export default function DossierPage() {
 
         {/* ── Colonne droite ── */}
         <div className="space-y-4">
-
-          {/* Actions rapides */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Actions Rapides</CardTitle>
+              <CardTitle className="text-base">Accès rapide</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {[
-                {
-                  label: 'Mon formulaire médical',
-                  icon: FileText,
-                  href: '/patient/formulaire',
-                  desc: patient.formulaire?.status === 'submitted' ? 'Soumis ✓' : 'À compléter',
-                  color: 'text-blue-600',
-                  bg: 'bg-blue-50',
-                },
-                {
-                  label: 'Mon devis',
-                  icon: FileText,
-                  href: '/patient/devis',
-                  desc: patient.devis ? `Devis ${patient.devis.statut}` : 'En attente',
-                  color: 'text-emerald-600',
-                  bg: 'bg-emerald-50',
-                },
-                {
-                  label: 'Prendre rendez-vous',
-                  icon: Calendar,
-                  href: '/patient/agenda',
-                  desc: patient.prochainsRdv.length > 0
-                    ? `${patient.prochainsRdv.length} RDV à venir`
-                    : 'Aucun RDV',
-                  color: 'text-purple-600',
-                  bg: 'bg-purple-50',
-                },
-                {
-                  label: "Contacter l'équipe",
-                  icon: MessageSquare,
-                  href: '/patient/chat',
-                  desc: 'Chat disponible',
-                  color: 'text-brand-600',
-                  bg: 'bg-brand-50',
-                },
-              ].map((action) => {
+            <CardContent className="space-y-1">
+              {secondaryLinks.map((action) => {
                 const Icon = action.icon
                 return (
                   <button
                     key={action.href}
+                    type="button"
                     onClick={() => navigate(action.href)}
-                    className="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-muted/50 transition-all group text-left"
+                    className="w-full flex items-center gap-3 rounded-lg p-2.5 hover:bg-muted/50 transition-all group text-left"
                   >
-                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${action.bg}`}>
-                      <Icon className={`h-4 w-4 ${action.color}`} />
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                      <Icon className="h-4 w-4" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground">{action.label}</p>
@@ -387,7 +519,6 @@ export default function DossierPage() {
             </CardContent>
           </Card>
 
-          {/* Infos du dossier */}
           <Card>
             <CardContent className="pt-4 space-y-3">
               <div>
@@ -424,7 +555,6 @@ export default function DossierPage() {
               </div>
             </CardContent>
           </Card>
-
         </div>
       </div>
     </div>

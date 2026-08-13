@@ -12,7 +12,13 @@ import { useNavigate } from 'react-router-dom'
 import { STATUS_LABELS, STATUS_COLORS, formatDate, formatRelative } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { medecinApi } from '@/lib/api'
-import type { PatientListItem, RdvMedecin, DashboardMonthStat, DashboardSourceStat } from '@/lib/api'
+import type {
+  PatientListItem,
+  RdvMedecin,
+  DashboardMonthStat,
+  DashboardSourceStat,
+  DashboardAlerte,
+} from '@/lib/api'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -49,21 +55,33 @@ export default function DashboardMedecinPage() {
   const [prochainRdv, setProchainRdv]     = useState<RdvMedecin[]>([])
   const [evolutionPatients, setEvolutionPatients] = useState<DashboardMonthStat[]>([])
   const [sourcesContact, setSourcesContact]       = useState<DashboardSourceStat[]>([])
+  const [alertes, setAlertes] = useState<DashboardAlerte[]>([])
 
   const load = async () => {
     setLoading(true); setError(null)
     try {
-      const res = await medecinApi.getDashboard()
+      const [res, alertesRes] = await Promise.all([
+        medecinApi.getDashboard(),
+        medecinApi.getDashboardAlertes().catch(() => ({ alertes: [] as DashboardAlerte[] })),
+      ])
       setStats(res.stats)
       setDerniers(res.derniersPatients)
       setProchainRdv(res.prochainRdv)
       setEvolutionPatients(res.evolutionPatients)
       setSourcesContact(res.sourcesContact)
+      setAlertes(alertesRes.alertes.filter((a) => a.count > 0))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
       setLoading(false)
     }
+  }
+
+  const alerteHref = (id: string) => {
+    if (id === 'rdv_non_confirmes' || id === 'rdv_manques') return '/medecin/agenda'
+    if (id === 'postop_sans_photo') return '/medecin/post-op'
+    if (id === 'dossiers_bloques') return '/medecin/patients'
+    return '/medecin/dashboard'
   }
 
   useEffect(() => { void load() }, [])
@@ -127,6 +145,30 @@ export default function DashboardMedecinPage() {
         </div>
       )}
 
+      {alertes.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {alertes.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => navigate(alerteHref(a.id))}
+              className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+                a.severity === 'error'
+                  ? 'border-red-200 bg-red-50 hover:bg-red-100'
+                  : 'border-amber-200 bg-amber-50 hover:bg-amber-100'
+              }`}
+            >
+              <div className="min-w-0">
+                <p className={`text-sm font-semibold ${a.severity === 'error' ? 'text-red-800' : 'text-amber-800'}`}>
+                  {a.count} · {a.title}
+                </p>
+              </div>
+              <ChevronRight className={`h-4 w-4 shrink-0 ${a.severity === 'error' ? 'text-red-600' : 'text-amber-700'}`} />
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── KPIs ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -147,7 +189,7 @@ export default function DashboardMedecinPage() {
             border: stats.aAnalyser > 0 ? 'border-amber-200' : 'border-slate-100',
             sub: 'Formulaires complets',
             urgent: stats.aAnalyser > 0,
-            onClick: () => navigate('/medecin/patients'),
+            onClick: () => navigate('/medecin/patients?status=formulaire_complete'),
           },
           {
             label: "RDV aujourd'hui",

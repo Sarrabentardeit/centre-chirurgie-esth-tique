@@ -140,15 +140,16 @@ export function scheduleRoleWarmup(role: UserRole) {
     prefetchRoleData(role)
   }
 
-  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-    const id = window.requestIdleCallback(run, { timeout: 600 })
-    const t = window.setTimeout(run, 200)
-    return () => {
-      window.clearTimeout(t)
-      window.cancelIdleCallback?.(id)
+  const timer = setTimeout(run, 200)
+  const idleId =
+    typeof requestIdleCallback === 'function'
+      ? requestIdleCallback(run, { timeout: 600 })
+      : undefined
+
+  return () => {
+    clearTimeout(timer)
+    if (idleId !== undefined && typeof cancelIdleCallback === 'function') {
+      cancelIdleCallback(idleId)
     }
   }
-
-  const t = window.setTimeout(run, 200)
-  return () => window.clearTimeout(t)
 }

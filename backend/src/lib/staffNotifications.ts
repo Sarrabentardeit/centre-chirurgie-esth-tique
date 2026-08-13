@@ -1,5 +1,6 @@
 import { prisma } from './prisma.js'
 import { sendNotificationEmail, type EmailAudience } from './mailer.js'
+import { createUserNotification } from './userNotifications.js'
 
 type NotifType = 'info' | 'warning' | 'success' | 'error'
 
@@ -34,14 +35,13 @@ export async function notifyStaff(input: {
     })
     if (exists) return
 
-    await prisma.notification.create({
-      data: {
-        userId: user.id,
-        type: input.type ?? 'info',
-        titre: input.titre,
-        message: input.message,
-        lienAction: input.lienAction ?? null,
-      },
+    await createUserNotification({
+      userId: user.id,
+      type: input.type ?? 'info',
+      titre: input.titre,
+      message: input.message,
+      lienAction: input.lienAction ?? null,
+      kind: 'system',
     })
   })
 

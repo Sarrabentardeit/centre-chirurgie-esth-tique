@@ -23,6 +23,7 @@ import {
   syncPatientDossierFromDevis,
 } from '../../lib/devisNumber.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
+import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
@@ -475,14 +476,13 @@ async function dispatchTemplateMessage(input: {
   }).trim()
 
   if (input.template.channel === 'notification' || input.template.channel === 'both') {
-    await prisma.notification.create({
-      data: {
-        userId: input.patientUserId,
-        type: 'info',
-        titre: input.notifTitle,
-        message: content,
-        lienAction: input.notifLink,
-      },
+    await createUserNotification({
+      userId: input.patientUserId,
+      type: 'info',
+      titre: input.notifTitle,
+      message: content,
+      lienAction: input.notifLink,
+      kind: 'system',
     })
   }
 
@@ -968,14 +968,13 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
 
       const med = await prisma.user.findFirst({ where: { role: 'medecin' }, select: { id: true } })
       if (med) {
-        await prisma.notification.create({
-          data: {
-            userId: med.id,
-            type: 'info',
-            titre: 'Logistique prête',
-            message: `La logistique de ${patient.user.fullName} est prête. Le dossier est prêt pour l'étape intervention.`,
-            lienAction: `/medecin/patients/${patientId}`,
-          },
+        await createUserNotification({
+          userId: med.id,
+          type: 'info',
+          titre: 'Logistique prête',
+          message: `La logistique de ${patient.user.fullName} est prête. Le dossier est prêt pour l'étape intervention.`,
+          lienAction: `/medecin/patients/${patientId}`,
+          kind: 'system',
         })
       }
     }
@@ -1222,14 +1221,13 @@ export async function upsertPlanningSejour(
   // Publier vers la patiente quand le planning passe en finalisé
   const justFinalised = row.statut === 'finalise' && existing?.statut !== 'finalise'
   if (justFinalised) {
-    await prisma.notification.create({
-      data: {
-        userId: ctx.patient.userId,
-        type: 'success',
-        titre: 'Votre planning de séjour est prêt',
-        message: 'Consultez le détail de votre séjour (itinéraire, hébergement, dates).',
-        lienAction: '/patient/planning-sejour',
-      },
+    await createUserNotification({
+      userId: ctx.patient.userId,
+      type: 'success',
+      titre: 'Votre planning de séjour est prêt',
+      message: 'Consultez le détail de votre séjour (itinéraire, hébergement, dates).',
+      lienAction: '/patient/planning-sejour',
+      kind: 'system',
     }).catch(() => undefined)
   }
 

@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuthStore } from '@/store/authStore'
 import { cn, formatRelative } from '@/lib/utils'
 import { playNotificationSound, unlockNotificationAudio } from '@/lib/notificationSounds'
+import { useChatRealtime } from '@/lib/chatRealtime'
 import { dossierStatusUi } from '@/lib/statusUi'
 import type { DossierStatus } from '@/types'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -16,6 +17,8 @@ import {
   type PatientListItem,
 } from '@/lib/api'
 import { useNotifUnreadStore } from '@/store/notifUnreadStore'
+import { cachedFetch } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 
 interface NavbarProps {
   onMenuClick: () => void
@@ -51,6 +54,7 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
   const [openNotif, setOpenNotif] = useState(false)
   const notifRef = useRef<HTMLDivElement | null>(null)
   const [apiNotifs, setApiNotifs] = useState<ApiNotif[]>([])
+  const [notifsReady, setNotifsReady] = useState(false)
   const prevNotifUnreadRef = useRef<number | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -64,19 +68,22 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
   const searchTimerRef = useRef<number | null>(null)
   const searchReqRef = useRef(0)
 
-  const loadApiNotifications = useCallback(async () => {
+  const loadApiNotifications = useCallback(async (opts?: { force?: boolean }) => {
     if (!user) return
+    if (user.role !== 'gestionnaire' && user.role !== 'patient' && user.role !== 'medecin') return
+    const key = queryKeys.notifications(user.role)
     try {
-      if (user.role === 'gestionnaire') {
-        const res = await gestionnaireApi.getNotifications()
-        setApiNotifs(res.notifications)
-      } else if (user.role === 'patient') {
-        const res = await patientApi.getNotifications()
-        setApiNotifs(res.notifications)
-      } else if (user.role === 'medecin') {
-        const res = await medecinApi.getNotifications()
-        setApiNotifs(res.notifications)
-      }
+      const res = await cachedFetch(
+        key,
+        () => {
+          if (user.role === 'gestionnaire') return gestionnaireApi.getNotifications()
+          if (user.role === 'patient') return patientApi.getNotifications()
+          return medecinApi.getNotifications()
+        },
+        { force: opts?.force },
+      )
+      setApiNotifs(res.notifications)
+      setNotifsReady(true)
     } catch {
       // Silent fallback: keep current UI state.
     }
@@ -85,11 +92,14 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
   useEffect(() => {
     if (!user) {
       setApiNotifs([])
+      setNotifsReady(false)
+      prevNotifUnreadRef.current = null
       return
     }
     void loadApiNotifications()
+    // Poll forcé : badges à jour, tout en partageant le cache avec la page Notifications
     const id = window.setInterval(() => {
-      void loadApiNotifications()
+      void loadApiNotifications({ force: true })
     }, 15000)
     return () => window.clearInterval(id)
   }, [user, loadApiNotifications])
@@ -109,19 +119,20 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
     return apiNotifs.filter((n) => !n.lu && !isChatNotif(n.titre)).length
   }, [apiNotifs])
 
-  // Son quand une nouvelle notification (hors chat) arrive
+  // Baseline compteur (sans son) — le son temps réel vient de SSE `notif:new`
   useEffect(() => {
-    if (!user) {
-      prevNotifUnreadRef.current = null
-      return
-    }
-    const prev = prevNotifUnreadRef.current
-    if (prev !== null && nonChatUnreadCount > prev) {
-      unlockNotificationAudio()
-      playNotificationSound()
-    }
+    if (!user || !notifsReady) return
     prevNotifUnreadRef.current = nonChatUnreadCount
-  }, [nonChatUnreadCount, user])
+  }, [nonChatUnreadCount, user, notifsReady])
+
+  // Temps réel : son notif dès l’arrivée serveur (hors notifs chat → son message)
+  useChatRealtime((event) => {
+    if (event.type !== 'notif:new') return
+    void loadApiNotifications({ force: true })
+    if (event.kind === 'chat') return
+    unlockNotificationAudio()
+    playNotificationSound()
+  }, Boolean(user))
 
   const userNotifications = useMemo(
     () =>

@@ -6,6 +6,9 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { cn } from '@/lib/utils'
 import { gestionnaireApi, type GestionnairePlanningSejourPatient } from '@/lib/api'
+import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
+import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 
 function isFinalise(p: GestionnairePlanningSejourPatient) {
   return p.planning?.statut === 'finalise'
@@ -19,6 +22,7 @@ export default function PlanningSejourPage() {
   const [deleteTarget, setDeleteTarget] = useState<GestionnairePlanningSejourPatient | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   const ordered = useMemo(() => {
     return [...patients].sort((a, b) => {
@@ -32,11 +36,21 @@ export default function PlanningSejourPage() {
   const aTraiter = ordered.filter((p) => !isFinalise(p))
   const finalises = ordered.filter((p) => isFinalise(p))
 
-  const load = async () => {
-    setLoading(true)
+  const { slice: pagePatients, totalPages, page: safePage, total: listTotal } = useMemo(
+    () => paginateSlice(ordered, page, LIST_PAGE_SIZE),
+    [ordered, page],
+  )
+  const pageATraiter = pagePatients.filter((p) => !isFinalise(p))
+  const pageFinalises = pagePatients.filter((p) => isFinalise(p))
+
+  const load = async (opts?: { useCache?: boolean }) => {
+    const key = queryKeys.planningSejour()
+    const force = !opts?.useCache
+    if (opts?.useCache && hasCachedData(key)) setLoading(false)
+    else setLoading(true)
     setError(null)
     try {
-      const res = await gestionnaireApi.getPlanningSejour()
+      const res = await cachedFetch(key, () => gestionnaireApi.getPlanningSejour(), { force })
       setPatients(res.patients)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -46,7 +60,7 @@ export default function PlanningSejourPage() {
   }
 
   useEffect(() => {
-    void load()
+    void load({ useCache: true })
   }, [])
 
   const openEditor = (id: string) => {
@@ -115,26 +129,35 @@ export default function PlanningSejourPage() {
           <p className="text-muted-foreground text-sm">Aucune patiente avec devis accepté pour le moment.</p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm max-h-[75vh] overflow-y-auto space-y-4">
-          {aTraiter.length > 0 && (
-            <PatientSection
-              title="À traiter"
-              titleClass="text-amber-700"
-              patients={aTraiter}
-              onOpen={openEditor}
-              onDelete={setDeleteTarget}
-            />
-          )}
-          {finalises.length > 0 && (
-            <PatientSection
-              title="Finalisés"
-              titleClass="text-emerald-700"
-              patients={finalises}
-              onOpen={openEditor}
-              onDelete={setDeleteTarget}
-              done
-            />
-          )}
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="p-4 max-h-[75vh] overflow-y-auto space-y-4">
+            {pageATraiter.length > 0 && (
+              <PatientSection
+                title="À traiter"
+                titleClass="text-amber-700"
+                patients={pageATraiter}
+                onOpen={openEditor}
+                onDelete={setDeleteTarget}
+              />
+            )}
+            {pageFinalises.length > 0 && (
+              <PatientSection
+                title="Finalisés"
+                titleClass="text-emerald-700"
+                patients={pageFinalises}
+                onOpen={openEditor}
+                onDelete={setDeleteTarget}
+                done
+              />
+            )}
+          </div>
+          <PaginationBar
+            page={safePage}
+            totalPages={totalPages}
+            total={listTotal}
+            pageSize={LIST_PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </div>
       )}
 

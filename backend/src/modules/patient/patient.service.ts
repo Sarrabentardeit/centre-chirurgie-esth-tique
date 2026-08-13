@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
+import { createUserNotification } from '../../lib/userNotifications.js'
 import { dispatchFormulaireAck } from '../gestionnaire/gestionnaire.service.js'
 import type { FormulaireSubmitInput, UpdateProfilInput, RepondreDevisInput, RepondreRendezVousInput } from './patient.schema.js'
 
@@ -82,14 +83,13 @@ async function syncPostOpReminders(patientId: string, userId: string, dateInterv
       select: { id: true },
     })
     if (!exists) {
-      await prisma.notification.create({
-        data: {
-          userId,
-          type: 'info',
-          titre,
-          message,
-          lienAction: '/patient/post-op',
-        },
+      await createUserNotification({
+        userId,
+        type: 'info',
+        titre,
+        message,
+        lienAction: '/patient/post-op',
+        kind: 'system',
       })
     }
   }

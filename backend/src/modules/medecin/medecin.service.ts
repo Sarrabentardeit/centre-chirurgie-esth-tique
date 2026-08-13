@@ -15,6 +15,7 @@ import {
   syncPatientDossierFromDevis,
 } from '../../lib/devisNumber.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
+import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 
 function notifyGestionnaires(input: {
@@ -64,8 +65,13 @@ async function syncPostOpReminders(userId: string, dateIntervention: Date) {
       select: { id: true },
     })
     if (!exists) {
-      await prisma.notification.create({
-        data: { userId, type: 'info', titre, message, lienAction: '/patient/post-op' },
+      await createUserNotification({
+        userId,
+        type: 'info',
+        titre,
+        message,
+        lienAction: '/patient/post-op',
+        kind: 'system',
       })
     }
   }

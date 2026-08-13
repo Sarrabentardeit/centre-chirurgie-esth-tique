@@ -7,6 +7,7 @@ import {
   publishChatToUsers,
   type ChatRealtimeEvent,
 } from '../../lib/chatRealtime.js'
+import { createUserNotification } from '../../lib/userNotifications.js'
 import type { UserRole } from '../auth/auth.types.js'
 import type { MarkReadInput, SendMessageInput } from './chat.schema.js'
 
@@ -122,14 +123,13 @@ async function notifyStaffNewPatientMessage(input: {
 
   await Promise.all([
     ...staff.map((u) =>
-      prisma.notification.create({
-        data: {
-          userId: u.id,
-          type: 'info',
-          titre,
-          message,
-          lienAction: u.role === 'medecin' ? '/medecin/chat' : '/gestionnaire/chat',
-        },
+      createUserNotification({
+        userId: u.id,
+        type: 'info',
+        titre,
+        message,
+        lienAction: u.role === 'medecin' ? '/medecin/chat' : '/gestionnaire/chat',
+        kind: 'chat',
       }).catch(() => undefined)
     ),
   ])
@@ -146,14 +146,13 @@ async function notifyPatientNewStaffMessage(input: {
   const who = input.senderRole === 'medecin' ? 'Dr Chennoufi' : 'la gestionnaire'
   const titre = 'Nouveau message de l’équipe'
   const message = `${who} : ${input.preview.slice(0, 140)}`
-  await prisma.notification.create({
-    data: {
-      userId: input.patientUserId,
-      type: 'info',
-      titre,
-      message,
-      lienAction: '/patient/chat',
-    },
+  await createUserNotification({
+    userId: input.patientUserId,
+    type: 'info',
+    titre,
+    message,
+    lienAction: '/patient/chat',
+    kind: 'chat',
   })
 
   const email = input.patientEmail?.trim()

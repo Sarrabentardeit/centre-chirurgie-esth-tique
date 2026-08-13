@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   Search, Users, AlertCircle,
   RefreshCw, ChevronRight, UserPlus, Phone, Mail, MapPin,
@@ -20,6 +20,9 @@ import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import type { DossierBucketCounts, PatientListItem } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { PullToRefresh } from '@/components/PullToRefresh'
+import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
+import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -365,6 +368,7 @@ export default function PatientsPage() {
 
   const [search, setSearch]             = useState('')
   const [statusFilter, setStatusFilter] = useState<ListFilter>(initialStatus)
+  const [page, setPage]                 = useState(1)
   const [patients, setPatients]         = useState<PatientListItem[]>([])
   const [counts, setCounts]             = useState<DossierBucketCounts | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -376,17 +380,25 @@ export default function PatientsPage() {
     mode: 'classer' | 'reouvrir'
   } | null>(null)
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean; useCache?: boolean }) => {
+    const role = isGestionnaire ? 'gestionnaire' as const : 'medecin' as const
+    const key = queryKeys.patients(role, search, statusFilter)
+    const force = !opts?.useCache
+    if (!opts?.silent) {
+      if (opts?.useCache && hasCachedData(key)) setLoading(false)
+      else setLoading(true)
+    }
     setError(null)
     try {
       const params = {
         search: search || undefined,
         status: statusFilter,
       }
-      const res = isGestionnaire
-        ? await gestionnaireApi.getPatients(params)
-        : await medecinApi.getPatients(params)
+      const res = await cachedFetch(
+        key,
+        () => (isGestionnaire ? gestionnaireApi.getPatients(params) : medecinApi.getPatients(params)),
+        { force },
+      )
       setPatients(res.patients)
       if (res.counts) setCounts(res.counts)
     } catch (e) {
@@ -397,9 +409,18 @@ export default function PatientsPage() {
   }, [search, statusFilter, isGestionnaire])
 
   useEffect(() => {
-    const t = setTimeout(() => { void load() }, search ? 400 : 0)
+    const t = setTimeout(() => { void load({ useCache: true }) }, search ? 400 : 0)
     return () => clearTimeout(t)
   }, [load])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, statusFilter])
+
+  const { slice: pagePatients, totalPages, page: safePage, total } = useMemo(
+    () => paginateSlice(patients, page, LIST_PAGE_SIZE),
+    [patients, page],
+  )
 
   const stats = {
     nonTraites: counts?.non_traites ?? 0,
@@ -566,7 +587,7 @@ export default function PatientsPage() {
           />
         ) : (
           <div className="divide-y divide-border/50">
-            {patients.map((p, idx) => {
+            {pagePatients.map((p, idx) => {
               const isUrgent = isGestionnaire
                 ? ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse', 'rapport_genere', 'devis_preparation'].includes(p.status)
                 : p.status === 'formulaire_complete' || p.status === 'en_analyse'
@@ -690,20 +711,13 @@ export default function PatientsPage() {
         )}
 
         {!loading && patients.length > 0 && (
-          <div className="px-5 py-3 border-t border-border/60 bg-muted/10 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              {patients.length} patient{patients.length > 1 ? 's' : ''}
-              {statusFilter !== 'non_traites' ? ' · filtre actif' : ''}
-            </p>
-            {statusFilter !== 'non_traites' && (
-              <button
-                className="text-xs text-brand-600 hover:underline"
-                onClick={() => setStatusFilter('non_traites')}
-              >
-                Voir les non traités
-              </button>
-            )}
-          </div>
+          <PaginationBar
+            page={safePage}
+            totalPages={totalPages}
+            total={total}
+            pageSize={LIST_PAGE_SIZE}
+            onPageChange={setPage}
+          />
         )}
       </div>
 

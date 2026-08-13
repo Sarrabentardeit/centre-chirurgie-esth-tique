@@ -2,9 +2,13 @@ import type { Response } from 'express'
 import type { UserRole } from '../modules/auth/auth.types.js'
 
 export type ChatRealtimeEvent = {
-  type: 'chat:message' | 'chat:thread' | 'chat:unread'
+  type: 'chat:message' | 'chat:thread' | 'chat:unread' | 'notif:new'
   patientId?: string
   messageId?: string
+  notificationId?: string
+  titre?: string
+  /** chat = pas de son notif (déjà couvert par son message) */
+  kind?: 'chat' | 'system'
 }
 
 type Client = {
@@ -77,4 +81,17 @@ export function publishChatToStaff(event: ChatRealtimeEvent) {
       clients.delete(client)
     }
   }
+}
+
+/** Alias sémantique : même canal SSE que le chat (`/api/chat/events`). */
+export function publishNotifToUser(
+  userId: string,
+  event: Omit<ChatRealtimeEvent, 'type'> & { type?: 'notif:new' },
+) {
+  publishChatToUser(userId, {
+    type: 'notif:new',
+    notificationId: event.notificationId,
+    titre: event.titre,
+    kind: event.kind,
+  })
 }

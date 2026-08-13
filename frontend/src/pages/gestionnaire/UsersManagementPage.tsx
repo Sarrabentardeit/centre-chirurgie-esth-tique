@@ -209,7 +209,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
 export default function UsersManagementPage() {
   const [users, setUsers]           = useState<GestionnaireUserRow[]>([])
   const [stats, setStats]           = useState<GestionnaireUsersStats>({ all: 0, patients: 0, medecins: 0, gestionnaires: 0 })
-  const [pagination, setPagination] = useState<GestionnaireUsersPagination>({ page: 1, pageSize: 12, total: 0, totalPages: 1 })
+  const [pagination, setPagination] = useState<GestionnaireUsersPagination>({ page: 1, pageSize: 20, total: 0, totalPages: 1 })
   const [loading, setLoading]       = useState(true)
   const [showModal, setShowModal]   = useState(false)
 
@@ -227,7 +227,7 @@ export default function UsersManagementPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const r = await gestionnaireApi.getUsers({ search: query.trim() || undefined, role: roleFilter, page, pageSize: 12 })
+      const r = await gestionnaireApi.getUsers({ search: query.trim() || undefined, role: roleFilter, page, pageSize: 20 })
       setUsers(r.users); setStats(r.stats); setPagination(r.pagination)
     } catch { /* silent */ }
     setLoading(false)

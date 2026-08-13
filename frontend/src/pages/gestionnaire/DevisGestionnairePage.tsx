@@ -53,6 +53,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { PullToRefresh } from '@/components/PullToRefresh'
+import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
+import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 import {
   buildGestionnaireDevisExportHtml,
   refreshDevisCustomContentParts,
@@ -1005,6 +1008,7 @@ export default function DevisGestionnairePage() {
   const [hotelNomInvalid, setHotelNomInvalid] = useState(false)
   const [search, setSearch]               = useState('')
   const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'accepte' | 'refuse'>('all')
+  const [page, setPage]                   = useState(1)
   const [view, setView]                   = useState<PageView>('list')
   const [selectedPatient, setSelectedPatient] = useState('')
   const [patientDetail, setPatientDetail] = useState<GestionnairePatientDetail | null>(null)
@@ -1065,6 +1069,15 @@ export default function DevisGestionnairePage() {
     })
   }, [patients, search, devisFilter])
 
+  useEffect(() => {
+    setPage(1)
+  }, [search, devisFilter])
+
+  const { slice: pagePatients, totalPages, page: safePage, total: listTotal } = useMemo(
+    () => paginateSlice(patientsFiltered, page, LIST_PAGE_SIZE),
+    [patientsFiltered, page],
+  )
+
   const loadTauxEur = useCallback(async () => {
     try {
       const r = await gestionnaireApi.getTauxEur()
@@ -1078,12 +1091,22 @@ export default function DevisGestionnairePage() {
     void loadTauxEur()
   }, [loadTauxEur])
 
-  const loadPatients = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setListLoading(true)
+  const loadPatients = useCallback(async (opts?: { silent?: boolean; useCache?: boolean }) => {
+    const key = queryKeys.gestionnairePatients()
+    const force = !opts?.useCache
+    if (!opts?.silent) {
+      if (opts?.useCache && hasCachedData(key)) setListLoading(false)
+      else setListLoading(true)
+    }
     setPageError(null)
-    try { const r = await gestionnaireApi.getPatients(); setPatients(r.patients) }
-    catch (e) { setPageError(e instanceof Error ? e.message : 'Impossible de charger.') }
-    finally { if (!opts?.silent) setListLoading(false) }
+    try {
+      const r = await cachedFetch(key, () => gestionnaireApi.getPatients(), { force })
+      setPatients(r.patients)
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Impossible de charger.')
+    } finally {
+      if (!opts?.silent) setListLoading(false)
+    }
   }, [])
 
   const loadPatientDetail = useCallback(async (id: string) => {
@@ -1094,7 +1117,7 @@ export default function DevisGestionnairePage() {
     finally { setDetailLoading(false) }
   }, [])
 
-  useEffect(() => { void loadPatients() }, [loadPatients])
+  useEffect(() => { void loadPatients({ useCache: true }) }, [loadPatients])
 
   useEffect(() => {
     if (patientIdFromUrl) {
@@ -1668,8 +1691,9 @@ export default function DevisGestionnairePage() {
 
           {/* Liste */}
           {!listLoading && patientsFiltered.length > 0 && (
+            <>
             <div className="divide-y divide-border/40">
-              {patientsFiltered.map((p) => {
+              {pagePatients.map((p) => {
               const lastDevis = p.devis[0]
               const devisStatut = lastDevis?.statut
               const hasDevis = !!devisStatut
@@ -1768,6 +1792,14 @@ export default function DevisGestionnairePage() {
               )
             })}
             </div>
+            <PaginationBar
+              page={safePage}
+              totalPages={totalPages}
+              total={listTotal}
+              pageSize={LIST_PAGE_SIZE}
+              onPageChange={setPage}
+            />
+            </>
           )}
         </div>
 

@@ -105,17 +105,14 @@ export function AppLayout() {
       return
     }
     if (isChatRoute) {
+      // Badge masqué sur la page chat — ne pas remettre le baseline à 0
+      // (sinon un bip part en quittant la page alors qu’il n’y a rien de nouveau).
       setChatUnread(0)
-      prevChatUnreadRef.current = 0
       return
     }
     void chatApi
       .getUnread()
       .then((r) => {
-        const prev = prevChatUnreadRef.current
-        if (prev !== null && r.unread > prev) {
-          playMessageSound()
-        }
         prevChatUnreadRef.current = r.unread
         setChatUnread(r.unread)
       })
@@ -129,7 +126,17 @@ export function AppLayout() {
   }, [refreshChatUnread, location.pathname])
 
   useChatRealtime((event) => {
-    if (event.type === 'chat:message' || event.type === 'chat:unread') {
+    // Son Messenger uniquement à la réception d’un vrai message (pas à l’ouverture)
+    if (event.type === 'chat:message') {
+      if (!isChatRoute) {
+        unlockNotificationAudio()
+        playMessageSound()
+      }
+      refreshChatUnread()
+      if (chatOpen && user?.role === 'patient') void loadWidgetMessages()
+      return
+    }
+    if (event.type === 'chat:unread') {
       refreshChatUnread()
       if (chatOpen && user?.role === 'patient') void loadWidgetMessages()
     }

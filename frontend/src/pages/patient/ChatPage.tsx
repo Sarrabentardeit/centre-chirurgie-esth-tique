@@ -211,6 +211,8 @@ export default function ChatPage() {
       const res = await chatApi.getMessages(isPatient ? undefined : patientId)
       const last = res.messages[res.messages.length - 1]
       const prevLastId = lastMessageIdRef.current
+      // Son Messenger si un nouveau message arrive pendant que le fil est ouvert
+      // (SSE peut déjà avoir joué hors page chat — debounce dans playMessageSound)
       if (
         silent &&
         prevLastId &&

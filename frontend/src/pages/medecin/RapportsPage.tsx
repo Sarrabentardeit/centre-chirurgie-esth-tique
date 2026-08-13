@@ -20,6 +20,9 @@ import { useAuthStore } from '@/store/authStore'
 import { medecinApi } from '@/lib/api'
 import type { PatientListItem } from '@/lib/api'
 import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
+import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
+import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -169,6 +172,7 @@ export default function RapportsPage() {
   const [error, setError]       = useState<string | null>(null)
   const [search, setSearch]     = useState('')
   const [listBucket, setListBucket] = useState<ListBucket>('all')
+  const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
@@ -200,10 +204,14 @@ export default function RapportsPage() {
     setSaveError(null)
   }
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
+  const load = useCallback(async (opts?: { useCache?: boolean }) => {
+    const key = queryKeys.medecinPatientsAll()
+    const force = !opts?.useCache
+    if (opts?.useCache && hasCachedData(key)) setLoading(false)
+    else setLoading(true)
+    setError(null)
     try {
-      const res = await medecinApi.getPatients()
+      const res = await cachedFetch(key, () => medecinApi.getPatients(), { force })
       const eligible = res.patients.filter((p) =>
         ['formulaire_complete', 'en_analyse', 'rapport_genere', 'devis_preparation',
           'devis_envoye', 'devis_accepte', 'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine'].includes(p.status)
@@ -229,7 +237,7 @@ export default function RapportsPage() {
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load({ useCache: true }) }, [load])
 
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
@@ -396,6 +404,15 @@ export default function RapportsPage() {
       p.rapport?.diagnostic?.toLowerCase().includes(q)
     )
   }, [patients, search, listBucket])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, listBucket])
+
+  const { slice: pageRows, totalPages, page: safePage, total } = useMemo(
+    () => paginateSlice(filtered, page, LIST_PAGE_SIZE),
+    [filtered, page],
+  )
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
   const examensCount = examensDemandes.length + (examensAutreChecked ? 1 : 0)
@@ -871,7 +888,7 @@ export default function RapportsPage() {
               className="py-14"
             />
           ) : (
-            filtered.map((p) => {
+            pageRows.map((p) => {
               const hasRapport = patientHasRapport(p)
               const needsAnalysis = !hasRapport && (p.status === 'formulaire_complete' || p.status === 'en_analyse')
               const rowPct = rowCompletion(p)
@@ -939,6 +956,15 @@ export default function RapportsPage() {
             })
           )}
         </div>
+        {!loading && filtered.length > 0 && (
+          <PaginationBar
+            page={safePage}
+            totalPages={totalPages}
+            total={total}
+            pageSize={LIST_PAGE_SIZE}
+            onPageChange={setPage}
+          />
+        )}
       </div>
     </div>
   )

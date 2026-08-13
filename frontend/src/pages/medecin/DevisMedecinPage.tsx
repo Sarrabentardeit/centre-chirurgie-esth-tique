@@ -20,6 +20,9 @@ import { EmptyState } from '@/components/EmptyState'
 import { KpiStrip } from '@/components/PageHeader'
 import { toast } from '@/store/toastStore'
 import { PullToRefresh } from '@/components/PullToRefresh'
+import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
+import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 
 const CONTENT_BREAK = DEVIS_CONTENT_BREAK
 
@@ -540,13 +543,19 @@ export default function DevisMedecinPage() {
   const [error, setError]       = useState<string | null>(null)
   const [search, setSearch]     = useState('')
   const [filter, setFilter]     = useState<'all' | Statut>('all')
+  const [page, setPage]         = useState(1)
   const [selected, setSelected] = useState<DevisWithPatient | null>(null)
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean; useCache?: boolean }) => {
+    const key = queryKeys.medecinDevis()
+    const force = !opts?.useCache
+    if (!opts?.silent) {
+      if (opts?.useCache && hasCachedData(key)) setLoading(false)
+      else setLoading(true)
+    }
     setError(null)
     try {
-      const r = await medecinApi.getAllDevis()
+      const r = await cachedFetch(key, () => medecinApi.getAllDevis(), { force })
       setAllDevis(r.devis)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -556,7 +565,7 @@ export default function DevisMedecinPage() {
   }, [])
 
   useEffect(() => {
-    void load()
+    void load({ useCache: true })
   }, [load])
 
   const filtered = useMemo(() => {
@@ -571,6 +580,15 @@ export default function DevisMedecinPage() {
     }
     return list
   }, [allDevis, search, filter])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, filter])
+
+  const { slice: pageDevis, totalPages, page: safePage, total } = useMemo(
+    () => paginateSlice(filtered, page, LIST_PAGE_SIZE),
+    [filtered, page],
+  )
 
   const counts = useMemo(() => ({
     all:     allDevis.length,
@@ -667,11 +685,21 @@ export default function DevisMedecinPage() {
             {filtered.length === 0 ? (
               <ListEmpty hasData={allDevis.length > 0} />
             ) : (
-              filtered.map((dv) => (
+              pageDevis.map((dv) => (
                 <DevisRow key={dv.id} dv={dv} onClick={() => setSelected(dv)} />
               ))
             )}
           </div>
+          {filtered.length > 0 && (
+            <PaginationBar
+              page={safePage}
+              totalPages={totalPages}
+              total={total}
+              pageSize={LIST_PAGE_SIZE}
+              onPageChange={setPage}
+              className="shrink-0"
+            />
+          )}
         </div>
       </div>
 

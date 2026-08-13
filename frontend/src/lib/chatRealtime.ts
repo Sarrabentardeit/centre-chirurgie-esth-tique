@@ -2,9 +2,12 @@ import { useEffect, useRef } from 'react'
 import { useAuthStore } from '@/store/authStore'
 
 export type ChatRealtimeEvent = {
-  type: 'chat:message' | 'chat:thread' | 'chat:unread'
+  type: 'chat:message' | 'chat:thread' | 'chat:unread' | 'notif:new'
   patientId?: string
   messageId?: string
+  notificationId?: string
+  titre?: string
+  kind?: 'chat' | 'system'
 }
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api'
@@ -88,6 +91,7 @@ function ensureSharedConnection() {
   es.addEventListener('chat:message', onTyped('chat:message'))
   es.addEventListener('chat:thread', onTyped('chat:thread'))
   es.addEventListener('chat:unread', onTyped('chat:unread'))
+  es.addEventListener('notif:new', onTyped('notif:new'))
 
   es.onopen = () => {
     reconnectAttempt = 0

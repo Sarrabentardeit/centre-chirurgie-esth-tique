@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Camera, Download, Upload, Bell, CheckCircle2, Star, AlertCircle,
   Clock, FileText, RefreshCw, Users, ChevronRight, ImageIcon, X,
@@ -16,6 +16,9 @@ import { useAuthStore } from '@/store/authStore'
 import { medecinApi, patientApi, uploadPostOpPhoto, uploadMedecinFile } from '@/lib/api'
 import type { SuiviPostOp, PostOpPatient } from '@/lib/api'
 import { formatDate, formatRelative } from '@/lib/utils'
+import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
+import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -65,6 +68,7 @@ function MedecinView() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   // Form création/édition suivi
   const [dateIntervention, setDateIntervention] = useState('')
@@ -78,10 +82,14 @@ function MedecinView() {
   const [photoNote, setPhotoNote] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
+  const load = useCallback(async (opts?: { useCache?: boolean }) => {
+    const key = queryKeys.postOpPatients()
+    const force = !opts?.useCache
+    if (opts?.useCache && hasCachedData(key)) setLoading(false)
+    else setLoading(true)
+    setError(null)
     try {
-      const res = await medecinApi.getPostOpPatients()
+      const res = await cachedFetch(key, () => medecinApi.getPostOpPatients(), { force })
       setPatients(res.patients)
       if (res.patients.length > 0 && !selectedId) {
         setSelectedId(res.patients[0].id)
@@ -93,12 +101,17 @@ function MedecinView() {
     }
   }, [selectedId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load({ useCache: true }) }, [load])
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
   const suivi    = selected?.suiviPostOp ?? null
   const beforeAfter = getBeforeAfterPhotos(suivi)
   const recoveryScore = getRecoveryScore(suivi)
+
+  const { slice: pagePatients, totalPages, page: safePage, total } = useMemo(
+    () => paginateSlice(patients, page, LIST_PAGE_SIZE),
+    [patients, page],
+  )
 
   const handleSelectPatient = (id: string) => {
     setSelectedId(id)
@@ -211,37 +224,47 @@ function MedecinView() {
             <Users className="h-4 w-4" /> Patients en suivi
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          {patients.map((p) => {
-            const jours = p.suiviPostOp
-              ? daysSince(p.suiviPostOp.dateIntervention)
-              : null
-            const isSelected = p.id === selectedId
-            return (
-              <button
-                key={p.id}
-                onClick={() => handleSelectPatient(p.id)}
-                className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 text-sm transition-all ${
-                  isSelected
-                    ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-sm'
-                    : 'border-border hover:bg-muted/60'
-                }`}
-              >
-                <Avatar className="h-7 w-7">
-                  <AvatarFallback className={`text-[10px] font-bold ${isSelected ? 'bg-brand-200 text-brand-800' : 'bg-muted text-muted-foreground'}`}>
-                    {getInitials(p.user.fullName)}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="font-medium">{p.user.fullName}</span>
-                {jours !== null && (
-                  <Badge className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">J+{jours}</Badge>
-                )}
-                {!p.suiviPostOp && (
-                  <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200">À créer</Badge>
-                )}
-              </button>
-            )
-          })}
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {pagePatients.map((p) => {
+              const jours = p.suiviPostOp
+                ? daysSince(p.suiviPostOp.dateIntervention)
+                : null
+              const isSelected = p.id === selectedId
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => handleSelectPatient(p.id)}
+                  className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 text-sm transition-all ${
+                    isSelected
+                      ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-sm'
+                      : 'border-border hover:bg-muted/60'
+                  }`}
+                >
+                  <Avatar className="h-7 w-7">
+                    <AvatarFallback className={`text-[10px] font-bold ${isSelected ? 'bg-brand-200 text-brand-800' : 'bg-muted text-muted-foreground'}`}>
+                      {getInitials(p.user.fullName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="font-medium">{p.user.fullName}</span>
+                  {jours !== null && (
+                    <Badge className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">J+{jours}</Badge>
+                  )}
+                  {!p.suiviPostOp && (
+                    <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200">À créer</Badge>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+          <PaginationBar
+            page={safePage}
+            totalPages={totalPages}
+            total={total}
+            pageSize={LIST_PAGE_SIZE}
+            onPageChange={setPage}
+            className="border-t-0 px-0 bg-transparent"
+          />
         </CardContent>
       </Card>
 

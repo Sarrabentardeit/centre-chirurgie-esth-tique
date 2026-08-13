@@ -2,10 +2,13 @@ import { Package, CheckCircle2, Circle, Plane, FileText, Home, Car, Calendar, Re
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { formatDate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { gestionnaireApi, type GestionnaireLogistiquePatient } from '@/lib/api'
+import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
+import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { queryKeys } from '@/lib/queryKeys'
 
 const CHECKLIST_ITEMS = [
   { key: 'passport', label: 'Passeport vérifié', icon: FileText },
@@ -34,6 +37,7 @@ export default function LogistiquePage() {
   const [transport, setTransport] = useState('')
   const [accompagnateur, setAccompagnateur] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [page, setPage] = useState(1)
 
   const completionCount = Object.values(checklist).filter(Boolean).length
   const totalItems = Object.keys(checklist).length
@@ -49,26 +53,38 @@ export default function LogistiquePage() {
       : 0
   )
 
-  const orderedPatients = [...patientsLogistique].sort((a, b) => {
-    const aDone = getDoneCount(a)
-    const bDone = getDoneCount(b)
-    const aComplete = aDone === 4
-    const bComplete = bDone === 4
+  const orderedPatients = useMemo(() => {
+    return [...patientsLogistique].sort((a, b) => {
+      const aDone = getDoneCount(a)
+      const bDone = getDoneCount(b)
+      const aComplete = aDone === 4
+      const bComplete = bDone === 4
 
-    if (aComplete !== bComplete) return aComplete ? 1 : -1
-    if (aDone !== bDone) return aDone - bDone
-    return a.user.fullName.localeCompare(b.user.fullName, 'fr')
-  })
+      if (aComplete !== bComplete) return aComplete ? 1 : -1
+      if (aDone !== bDone) return aDone - bDone
+      return a.user.fullName.localeCompare(b.user.fullName, 'fr')
+    })
+  }, [patientsLogistique])
 
   const patientsATraiter = orderedPatients.filter((p) => getDoneCount(p) < 4)
   const patientsCompletes = orderedPatients.filter((p) => getDoneCount(p) === 4)
   const selectedDone = selected ? getDoneCount(selected) : 0
 
-  const load = async () => {
-    setLoading(true)
+  const { slice: pagePatients, totalPages, page: safePage, total: listTotal } = useMemo(
+    () => paginateSlice(orderedPatients, page, LIST_PAGE_SIZE),
+    [orderedPatients, page],
+  )
+  const pageATraiter = pagePatients.filter((p) => getDoneCount(p) < 4)
+  const pageCompletes = pagePatients.filter((p) => getDoneCount(p) === 4)
+
+  const load = async (opts?: { useCache?: boolean }) => {
+    const key = queryKeys.logistique()
+    const force = !opts?.useCache
+    if (opts?.useCache && hasCachedData(key)) setLoading(false)
+    else setLoading(true)
     setError(null)
     try {
-      const res = await gestionnaireApi.getLogistique()
+      const res = await cachedFetch(key, () => gestionnaireApi.getLogistique(), { force })
       setPatientsLogistique(res.patients)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -78,7 +94,7 @@ export default function LogistiquePage() {
   }
 
   useEffect(() => {
-    void load()
+    void load({ useCache: true })
   }, [])
 
   useEffect(() => {
@@ -167,96 +183,105 @@ export default function LogistiquePage() {
       ) : (
         <div className="grid grid-cols-1 gap-5">
           {/* Patient list */}
-          <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm max-h-[75vh] overflow-y-auto">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-              Séjours à organiser (cliquez pour ouvrir la fiche)
-            </p>
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="space-y-2 p-4 max-h-[75vh] overflow-y-auto">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                Séjours à organiser (cliquez pour ouvrir la fiche)
+              </p>
 
-            {patientsATraiter.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide">À traiter</p>
-                {patientsATraiter.map((p) => {
-                  const done = getDoneCount(p)
-                  return (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        setSelectedPatient(p.id)
-                        setIsModalOpen(true)
-                      }}
-                      className={cn(
-                        'w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-all',
-                        selectedPatient === p.id
-                          ? 'border-brand-500 bg-brand-50 shadow-sm'
-                          : 'border-border hover:bg-muted/50'
-                      )}
-                    >
-                      <Avatar className="h-9 w-9">
-                        <AvatarFallback className="bg-purple-100 text-purple-700 text-sm font-semibold">
-                          {p.user.fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
-                        <p className="text-xs text-muted-foreground">{p.ville ?? '—'}</p>
-                        <div className="flex items-center gap-1 mt-1">
-                          <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-brand-500 rounded-full"
-                              style={{ width: `${(done / 4) * 100}%` }}
-                            />
+              {pageATraiter.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide">À traiter</p>
+                  {pageATraiter.map((p) => {
+                    const done = getDoneCount(p)
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          setSelectedPatient(p.id)
+                          setIsModalOpen(true)
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-all',
+                          selectedPatient === p.id
+                            ? 'border-brand-500 bg-brand-50 shadow-sm'
+                            : 'border-border hover:bg-muted/50'
+                        )}
+                      >
+                        <Avatar className="h-9 w-9">
+                          <AvatarFallback className="bg-purple-100 text-purple-700 text-sm font-semibold">
+                            {p.user.fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
+                          <p className="text-xs text-muted-foreground">{p.ville ?? '—'}</p>
+                          <div className="flex items-center gap-1 mt-1">
+                            <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-brand-500 rounded-full"
+                                style={{ width: `${(done / 4) * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-muted-foreground">{done}/4</span>
                           </div>
-                          <span className="text-xs text-muted-foreground">{done}/4</span>
                         </div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
 
-            {patientsCompletes.length > 0 && (
-              <div className="space-y-2 pt-1">
-                <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Complétés</p>
-                {patientsCompletes.map((p) => {
-                  const done = getDoneCount(p)
-                  return (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        setSelectedPatient(p.id)
-                        setIsModalOpen(true)
-                      }}
-                      className={cn(
-                        'w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-all',
-                        selectedPatient === p.id
-                          ? 'border-slate-300 bg-slate-50 shadow-sm'
-                          : 'border-slate-200 hover:bg-slate-50/80'
-                      )}
-                    >
-                      <Avatar className="h-9 w-9">
-                        <AvatarFallback className="bg-slate-100 text-slate-700 text-sm font-semibold">
-                          {p.user.fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
-                        <p className="text-xs text-muted-foreground">{p.ville ?? '—'}</p>
-                        <div className="flex items-center gap-1 mt-1">
-                          <div className="h-1.5 flex-1 bg-slate-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500/80 rounded-full" style={{ width: '100%' }} />
+              {pageCompletes.length > 0 && (
+                <div className="space-y-2 pt-1">
+                  <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Complétés</p>
+                  {pageCompletes.map((p) => {
+                    const done = getDoneCount(p)
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          setSelectedPatient(p.id)
+                          setIsModalOpen(true)
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-all',
+                          selectedPatient === p.id
+                            ? 'border-slate-300 bg-slate-50 shadow-sm'
+                            : 'border-slate-200 hover:bg-slate-50/80'
+                        )}
+                      >
+                        <Avatar className="h-9 w-9">
+                          <AvatarFallback className="bg-slate-100 text-slate-700 text-sm font-semibold">
+                            {p.user.fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
+                          <p className="text-xs text-muted-foreground">{p.ville ?? '—'}</p>
+                          <div className="flex items-center gap-1 mt-1">
+                            <div className="h-1.5 flex-1 bg-slate-200 rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500/80 rounded-full" style={{ width: '100%' }} />
+                            </div>
+                            <span className="text-xs text-slate-600 font-medium">{done}/4</span>
                           </div>
-                          <span className="text-xs text-slate-600 font-medium">{done}/4</span>
                         </div>
-                      </div>
-                      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                        Terminé
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Terminé
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+            <PaginationBar
+              page={safePage}
+              totalPages={totalPages}
+              total={listTotal}
+              pageSize={LIST_PAGE_SIZE}
+              onPageChange={setPage}
+            />
           </div>
         </div>
       )}

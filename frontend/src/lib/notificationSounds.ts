@@ -1,6 +1,8 @@
 /** Sons courts via Web Audio API (aucun fichier audio requis). */
 
 let audioCtx: AudioContext | null = null
+let lastMessageAt = 0
+let lastNotifAt = 0
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -22,53 +24,68 @@ export function unlockNotificationAudio() {
   if (ctx.state === 'suspended') void ctx.resume()
 }
 
-function playToneSequence(
-  notes: Array<{ freq: number; start: number; duration: number }>,
-  type: OscillatorType,
-  volume: number,
+function playTone(
+  ctx: AudioContext,
+  opts: {
+    freq: number
+    start: number
+    duration: number
+    type: OscillatorType
+    volume: number
+    /** Léger glissando (Messenger-like) */
+    freqEnd?: number
+  },
 ) {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = opts.type
+  const t0 = ctx.currentTime + opts.start
+  osc.frequency.setValueAtTime(opts.freq, t0)
+  if (opts.freqEnd != null) {
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, opts.freqEnd), t0 + opts.duration)
+  }
+  gain.gain.setValueAtTime(0.0001, t0)
+  gain.gain.exponentialRampToValueAtTime(opts.volume, t0 + 0.012)
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + opts.duration)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(t0)
+  osc.stop(t0 + opts.duration + 0.03)
+}
+
+/**
+ * Son message — style Messenger / chat classique :
+ * double « pop » doux, clair, court (pas une alarme).
+ */
+export function playMessageSound() {
+  const now = Date.now()
+  if (now - lastMessageAt < 450) return
+  lastMessageAt = now
+
   const ctx = getAudioContext()
   if (!ctx) return
   if (ctx.state === 'suspended') void ctx.resume()
 
-  const now = ctx.currentTime
-  for (const note of notes) {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = type
-    osc.frequency.value = note.freq
-    const t0 = now + note.start
-    gain.gain.setValueAtTime(0.0001, t0)
-    gain.gain.exponentialRampToValueAtTime(volume, t0 + 0.015)
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + note.duration)
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.start(t0)
-    osc.stop(t0 + note.duration + 0.02)
-  }
+  // Pop 1 (plus grave) + Pop 2 (plus aigu) — signature type Messenger
+  playTone(ctx, { freq: 920, freqEnd: 1100, start: 0, duration: 0.09, type: 'sine', volume: 0.11 })
+  playTone(ctx, { freq: 1240, freqEnd: 1480, start: 0.1, duration: 0.11, type: 'sine', volume: 0.1 })
+  // Harmonique légère pour le « bubble »
+  playTone(ctx, { freq: 1840, start: 0.1, duration: 0.07, type: 'triangle', volume: 0.035 })
 }
 
-/** Son « nouveau message chat » — double bip clair. */
-export function playMessageSound() {
-  playToneSequence(
-    [
-      { freq: 880, start: 0, duration: 0.12 },
-      { freq: 1174, start: 0.13, duration: 0.14 },
-    ],
-    'sine',
-    0.12,
-  )
-}
-
-/** Son « nouvelle notification » — triple bip plus grave. */
+/**
+ * Son notification — distinct du chat : carillon plus grave / « ding » app.
+ */
 export function playNotificationSound() {
-  playToneSequence(
-    [
-      { freq: 523, start: 0, duration: 0.1 },
-      { freq: 659, start: 0.11, duration: 0.1 },
-      { freq: 784, start: 0.22, duration: 0.14 },
-    ],
-    'triangle',
-    0.1,
-  )
+  const now = Date.now()
+  if (now - lastNotifAt < 600) return
+  lastNotifAt = now
+
+  const ctx = getAudioContext()
+  if (!ctx) return
+  if (ctx.state === 'suspended') void ctx.resume()
+
+  playTone(ctx, { freq: 520, start: 0, duration: 0.14, type: 'triangle', volume: 0.1 })
+  playTone(ctx, { freq: 690, start: 0.12, duration: 0.16, type: 'triangle', volume: 0.09 })
+  playTone(ctx, { freq: 520, start: 0.28, duration: 0.18, type: 'sine', volume: 0.06 })
 }

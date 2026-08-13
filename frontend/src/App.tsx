@@ -8,6 +8,10 @@ import { ScrollToTop } from './components/layout/ScrollToTop'
 import { PageLoader } from './components/PageLoader'
 import { queryClient } from './lib/queryClient'
 
+function LazyPage({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<PageLoader />}>{children}</Suspense>
+}
+
 // Auth — chargés immédiatement (entrée app)
 import LoginPage from './pages/auth/LoginPage'
 import InscriptionPage from './pages/auth/InscriptionPage'
@@ -51,13 +55,12 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ScrollToTop />
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
+        <Routes>
             {/* Public */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/acces-patient" element={<PatientAccessPage />} />
             <Route path="/inscription" element={<InscriptionPage />} />
-            <Route path="/formulaire" element={<FormulairePage />} />
+            <Route path="/formulaire" element={<LazyPage><FormulairePage /></LazyPage>} />
             <Route path="/" element={<Navigate to="/formulaire" replace />} />
 
             {/* Protected App Shell */}
@@ -339,9 +342,8 @@ export default function App() {
               />
             </Route>
 
-            <Route path="*" element={<NotFoundPage />} />
+            <Route path="*" element={<LazyPage><NotFoundPage /></LazyPage>} />
           </Routes>
-        </Suspense>
       </BrowserRouter>
     </QueryClientProvider>
   )

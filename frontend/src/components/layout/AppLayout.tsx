@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Navbar } from './Navbar'
@@ -19,6 +19,8 @@ import {
   isPdfUrl,
   resolveAttachmentUrl,
 } from '@/lib/chatAttachments'
+import { scheduleRoleWarmup } from '@/lib/routePrefetch'
+import { PageLoader } from '@/components/PageLoader'
 
 const ROUTE_TITLES: Record<string, string> = {
   '/patient/dossier': 'Mon Dossier',
@@ -87,6 +89,12 @@ export function AppLayout() {
       window.removeEventListener('keydown', unlock)
     }
   }, [])
+
+  // Chauffe les chunks sidebar + listes API en arrière-plan (évite le délai au clic)
+  useEffect(() => {
+    if (!user?.role) return
+    return scheduleRoleWarmup(user.role)
+  }, [user?.role])
 
   const loadWidgetMessages = useCallback(async () => {
     if (!user || user.role !== 'patient') return
@@ -185,7 +193,10 @@ export function AppLayout() {
             key={location.pathname}
             className="animate-page-enter px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-6 pb-app-nav"
           >
-            <Outlet />
+            {/* Suspense ici : la sidebar reste visible pendant le chargement du chunk */}
+            <Suspense fallback={<PageLoader />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>

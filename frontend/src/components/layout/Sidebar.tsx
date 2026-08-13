@@ -16,6 +16,7 @@ import { UnreadBadge } from '@/components/UnreadBadge'
 import { useEffect, useMemo, useState } from 'react'
 import type { UserRole } from '@/types'
 import { gestionnaireApi, medecinApi, patientApi } from '@/lib/api'
+import { prefetchRoute } from '@/lib/routePrefetch'
 
 interface NavItem {
   label: string
@@ -187,7 +188,11 @@ function NavItemLink({
     <NavLink
       to={item.href}
       end={item.href === '/gestionnaire/devis' || item.href === '/medecin/devis'}
+      onMouseEnter={() => prefetchRoute(item.href)}
+      onFocus={() => prefetchRoute(item.href)}
+      onTouchStart={() => prefetchRoute(item.href)}
       onClick={(e) => {
+        prefetchRoute(item.href)
         onClose()
         if (
           location.pathname !== item.href &&

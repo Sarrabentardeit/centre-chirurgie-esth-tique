@@ -1,11 +1,19 @@
-import { RefreshCw } from 'lucide-react'
-
-/** Fallback Suspense — affichage court pendant le chargement d’un chunk de page. */
+/** Fallback Suspense discret — barre haute, pas de plein écran bloquant. */
 export function PageLoader() {
   return (
-    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-muted-foreground">
-      <RefreshCw className="h-5 w-5 animate-spin text-brand-700" />
-      <p className="text-sm">Chargement…</p>
+    <div className="pointer-events-none fixed inset-x-0 top-0 z-[100] h-0.5 overflow-hidden bg-transparent">
+      <div
+        className="h-full w-1/3 bg-brand-600 animate-[page-load_0.9s_ease-in-out_infinite]"
+        style={{
+          animationName: 'page-load',
+        }}
+      />
+      <style>{`
+        @keyframes page-load {
+          0% { transform: translateX(-120%); }
+          100% { transform: translateX(320%); }
+        }
+      `}</style>
     </div>
   )
 }

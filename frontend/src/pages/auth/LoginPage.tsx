@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { useAuth } from '@/hooks/useAuth'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { getDashboardPath, useAuthStore } from '@/store/authStore'
 
 const loginSchema = z.object({
   email: z.string().email('Adresse email invalide'),
@@ -41,6 +42,15 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const { handleLogin, isLoading } = useAuth()
   const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+
+  // Déjà connecté → dashboard du rôle
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      navigate(getDashboardPath(user.role), { replace: true })
+    }
+  }, [isAuthenticated, user, navigate])
 
   const {
     register,

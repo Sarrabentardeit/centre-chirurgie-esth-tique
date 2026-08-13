@@ -10,6 +10,7 @@ import { useChatUnreadStore } from '@/store/chatUnreadStore'
 import { useNotifUnreadStore } from '@/store/notifUnreadStore'
 import type { UserRole } from '@/types'
 import { UnreadBadge } from '@/components/UnreadBadge'
+import { prefetchRoute } from '@/lib/routePrefetch'
 
 interface BottomNavItem {
   label: string
@@ -71,7 +72,11 @@ export function BottomNav() {
         <NavLink
           key={href}
           to={href}
+          onMouseEnter={() => prefetchRoute(href)}
+          onFocus={() => prefetchRoute(href)}
+          onTouchStart={() => prefetchRoute(href)}
           onClick={(e) => {
+            prefetchRoute(href)
             if (location.pathname !== href && location.pathname.startsWith(`${href}/`)) {
               e.preventDefault()
               navigate(href)

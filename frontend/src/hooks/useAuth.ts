@@ -1,13 +1,12 @@
 import { useEffect } from 'react'
 import { useAuthStore, getDashboardPath } from '@/store/authStore'
 import { authApi, ApiRequestError, startSessionKeepAlive } from '@/lib/api'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import type { User, UserRole } from '@/types'
 
 export function useAuth() {
   const { user, isAuthenticated, isLoading, login, logout, setLoading } = useAuthStore()
   const navigate = useNavigate()
-  const location = useLocation()
 
   // Écoute l'événement auth:logout émis lors d'un 401 non-récupérable
   useEffect(() => {
@@ -63,15 +62,9 @@ export function useAuth() {
       }
       login(user, result.accessToken, result.refreshToken)
 
-      const fromPath =
-        (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
-      const canUseFromPath = Boolean(
-        fromPath &&
-          ((userRole === 'patient' && fromPath.startsWith('/patient')) ||
-            (userRole === 'medecin' && fromPath.startsWith('/medecin')) ||
-            (userRole === 'gestionnaire' && fromPath.startsWith('/gestionnaire')))
-      )
-      navigate(canUseFromPath ? (fromPath as string) : getDashboardPath(userRole))
+      // Après « Se connecter » : toujours l’accueil du rôle
+      // patient → dossier · médecin / gestionnaire → dashboard
+      navigate(getDashboardPath(userRole), { replace: true })
       return { success: true }
     } catch (err) {
       setLoading(false)

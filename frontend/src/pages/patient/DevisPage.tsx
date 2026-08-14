@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
   FileCheck, Download, CheckCircle2, Clock, XCircle,
-  AlertCircle, RefreshCw, MessageSquare, X, ChevronRight, Gift,
+  AlertCircle, RefreshCw, MessageSquare, X, ChevronRight, Eye, FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -11,13 +12,11 @@ import { authApi, patientApi } from '@/lib/api'
 import type { Devis } from '@/lib/api'
 import {
   formatDate,
-  formatCurrency,
   formatDevisPdfFileName,
   formatDevisListName,
   getDevisDisplayNumber,
   cn,
 } from '@/lib/utils'
-import { parseSejourMeta } from '@/lib/devisSejourNotes'
 import { inlineHtmlImages } from '@/lib/pdf'
 import { buildDevisExportHtml } from '@/lib/devisExportHtml'
 
@@ -26,14 +25,6 @@ const DEVIS_STATUS = {
   envoye:    { label: 'Reçu',      color: 'info' as const,      icon: AlertCircle, chip: 'bg-sky-100 text-sky-800 border-sky-200' },
   accepte:   { label: 'Accepté',   color: 'success' as const,   icon: CheckCircle2, chip: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   refuse:    { label: 'Refusé',    color: 'destructive' as const, icon: XCircle, chip: 'bg-rose-100 text-rose-800 border-rose-200' },
-}
-
-/** Retire les aides entre parenthèses : (nbr de nuitées), (à préciser), etc. */
-function cleanPrestationLabel(raw: string | null | undefined): string {
-  return (raw ?? '')
-    .replace(/\s*\([^)]*\)\s*/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
 }
 
 function PageSkeleton() {
@@ -163,30 +154,71 @@ export default function DevisPage() {
     }
   }
 
+  const buildPdfBlob = async (d: Devis) => {
+    // Recharger le devis depuis l’API → toujours la dernière version sauvegardée
+    let fresh = d
+    try {
+      const res = await patientApi.getDevis()
+      fresh = res.devis.find((x) => x.id === d.id) ?? d
+    } catch {
+      /* garde la version locale */
+    }
+    const fullName =
+      patientIdentity.fullName ||
+      [patientIdentity.prenom, patientIdentity.nom].filter(Boolean).join(' ')
+    const dossierRef =
+      getDevisDisplayNumber(fresh, patientIdentity.dossierNumber) ||
+      patientIdentity.dossierNumber ||
+      fresh.numeroDevis ||
+      ''
+    const html = await inlineHtmlImages(
+      buildDevisExportHtml({
+        devis: fresh,
+        dossierNumber: dossierRef,
+        patientFullName: fullName,
+      }),
+    )
+    const blob = await patientApi.renderDevisPdf(html)
+    return {
+      blob,
+      fileName: formatDevisPdfFileName(dossierRef, fullName, fresh.version),
+    }
+  }
+
+  const handleOpenPdf = async (d: Devis) => {
+    setExporting(true)
+    setError(null)
+    try {
+      const { blob, fileName } = await buildPdfBlob(d)
+      const url = URL.createObjectURL(blob)
+      const win = window.open(url, '_blank', 'noopener,noreferrer')
+      if (!win) {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fileName
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        URL.revokeObjectURL(url)
+      } else {
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Impossible d’ouvrir le PDF.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const handleDownloadPdf = async (d: Devis) => {
     setExporting(true)
     setError(null)
     try {
-      const fullName =
-        patientIdentity.fullName ||
-        [patientIdentity.prenom, patientIdentity.nom].filter(Boolean).join(' ')
-      const dossierRef =
-        getDevisDisplayNumber(d, patientIdentity.dossierNumber) ||
-        patientIdentity.dossierNumber ||
-        d.numeroDevis ||
-        ''
-      const html = await inlineHtmlImages(
-        buildDevisExportHtml({
-          devis: d,
-          dossierNumber: dossierRef,
-          patientFullName: fullName,
-        }),
-      )
-      const blob = await patientApi.renderDevisPdf(html)
+      const { blob, fileName } = await buildPdfBlob(d)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = formatDevisPdfFileName(dossierRef, fullName, d.version)
+      a.download = fileName
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -245,12 +277,9 @@ export default function DevisPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <div>
-        <h2 className="font-display text-2xl font-semibold text-[#062a30] tracking-tight">Mes Devis</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {sortedDevis.length} devis — cliquez pour consulter le détail
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        {sortedDevis.length} devis — consultez le document PDF officiel
+      </p>
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">
@@ -273,7 +302,7 @@ export default function DevisPage() {
               className="w-full text-left px-4 sm:px-5 py-4 hover:bg-[#fdeada]/35 transition-colors flex items-start sm:items-center gap-3 sm:gap-4"
             >
               <div className="h-10 w-10 rounded-xl bg-[#fdeada] border border-[#e4c8bd] flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
-                <FileCheck className="h-5 w-5 text-[#81572d]" />
+                <FileText className="h-5 w-5 text-[#81572d]" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -287,9 +316,9 @@ export default function DevisPage() {
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>Version {d.version}</span>
                   <span>{formatDate(d.dateCreation)}</span>
+                  <span className="text-[#81572d] font-medium">Document PDF</span>
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 sm:hidden">
-                  <p className="text-sm font-bold text-[#81572d] tabular-nums">{formatCurrency(d.total)}</p>
+                <div className="mt-2 sm:hidden">
                   <span
                     className={cn(
                       'inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border',
@@ -302,18 +331,15 @@ export default function DevisPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                <div className="text-right hidden sm:block">
-                  <p className="text-sm font-bold text-[#81572d] tabular-nums">{formatCurrency(d.total)}</p>
-                  <span
-                    className={cn(
-                      'inline-flex items-center gap-1 mt-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border',
-                      statusInfo.chip,
-                    )}
-                  >
-                    <StatusIcon className="h-3 w-3" />
-                    {statusInfo.label}
-                  </span>
-                </div>
+                <span
+                  className={cn(
+                    'hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border',
+                    statusInfo.chip,
+                  )}
+                >
+                  <StatusIcon className="h-3 w-3" />
+                  {statusInfo.label}
+                </span>
                 <ChevronRight className="h-4 w-4 text-[#81572d]/70 mt-1 sm:mt-0" />
               </div>
             </button>
@@ -321,286 +347,175 @@ export default function DevisPage() {
         })}
       </div>
 
-      {/* Modal détail */}
-      {selected && (() => {
-        const statusInfo = DEVIS_STATUS[selected.statut] ?? DEVIS_STATUS.brouillon
-        const StatusIcon = statusInfo.icon
-        const lignes = Array.isArray(selected.lignes) ? selected.lignes : []
-        const paidLignes = lignes.filter((l) => (l.total ?? 0) > 0)
-        const offeredLignes = lignes.filter((l) => (l.total ?? 0) === 0)
-        const offerLabel = cleanPrestationLabel(
-          paidLignes.find((l) => l.description?.trim())?.description ||
-            lignes.find((l) => l.description?.trim())?.description ||
-            'Offre de soins personnalisée',
-        )
-        const sej = parseSejourMeta(selected.notesSejour)
-        const sejourCards = [
-          sej.cliniqueNom && { label: 'Clinique', value: sej.cliniqueNom },
-          sej.cliniqueNuits && { label: 'Nuits clinique', value: sej.cliniqueNuits },
-          sej.hotelNom && { label: 'Hôtel', value: sej.hotelNom },
-          sej.hotelNuits && { label: 'Nuits hôtel', value: sej.hotelNuits },
-          sej.dureeSejourTotale && { label: 'Séjour', value: `${sej.dureeSejourTotale} nuit(s)` },
-          sej.nbAdultes !== '' && { label: 'Adultes', value: sej.nbAdultes },
-          sej.nbEnfants !== '' && { label: 'Enfants', value: sej.nbEnfants },
-        ].filter(Boolean) as Array<{ label: string; value: string }>
+      {/* Modal — PDF uniquement (pas de détail chiffré à l’écran) */}
+      {selected &&
+        createPortal(
+          (() => {
+            const statusInfo = DEVIS_STATUS[selected.statut] ?? DEVIS_STATUS.brouillon
+            const StatusIcon = statusInfo.icon
 
-        return (
-          <div
-            className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="devis-modal-title"
-          >
-            <button
-              type="button"
-              className="absolute inset-0 bg-[#062a30]/60 backdrop-blur-sm"
-              onClick={closeModal}
-              aria-label="Fermer"
-            />
-            <div className="relative z-10 w-full sm:max-w-2xl max-h-[96dvh] sm:max-h-[92vh] overflow-hidden rounded-t-[1.75rem] sm:rounded-[1.75rem] bg-[#f7f1eb] shadow-[0_28px_80px_rgba(6,42,48,0.35)] flex flex-col">
-              {/* Header compact */}
-              <div className="shrink-0 relative overflow-hidden bg-[#062a30] px-5 sm:px-6 pt-5 pb-6">
-                <div className="absolute -right-8 -top-10 h-36 w-36 rounded-full bg-[#81572d]/25 blur-2xl" />
-                <div className="relative flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#e4c8bd]">
-                      Devis personnalisé
-                    </p>
-                    <h3
-                      id="devis-modal-title"
-                      className="mt-2 font-display text-[1.15rem] sm:text-xl font-semibold text-white leading-snug"
-                    >
-                      {devisTitle(selected)}
-                    </h3>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#81572d] text-white">
-                        <StatusIcon className="h-3 w-3" />
-                        {statusInfo.label}
-                      </span>
-                      <span className="text-[11px] text-white/65">
-                        v{selected.version} · {formatDate(selected.dateCreation)}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    disabled={submitting}
-                    className="h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center shrink-0 transition-colors"
-                    aria-label="Fermer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Montant flottant */}
-              <div className="shrink-0 px-5 sm:px-6 -mt-4 relative z-10">
-                <div className="rounded-2xl bg-white border border-[#e4c8bd]/80 px-5 py-4 shadow-md flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d]">
-                      Total
-                    </p>
-                    <p className="mt-0.5 text-sm text-[#282727]/75 truncate">{offerLabel}</p>
-                  </div>
-                  <p className="text-3xl font-bold tabular-nums tracking-tight text-[#062a30] shrink-0">
-                    {formatCurrency(selected.total)}
-                  </p>
-                </div>
-              </div>
-
-              {/* Body */}
-              <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5 space-y-4">
-                {lignes.length === 0 ? (
-                  <p className="text-sm text-muted-foreground italic text-center py-6">
-                    Détail des prestations non disponible.
-                  </p>
-                ) : (
-                  <div className="rounded-2xl bg-white border border-[#e4c8bd]/70 overflow-hidden shadow-sm">
-                    {paidLignes.length > 0 && (
-                      <div className="px-4 sm:px-5 py-4">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d] mb-2.5">
-                          Prestations
+            return (
+              <div
+                className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="devis-modal-title"
+              >
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-[#062a30]/60 backdrop-blur-sm"
+                  onClick={closeModal}
+                  aria-label="Fermer"
+                />
+                <div className="relative z-10 w-full sm:max-w-lg max-h-[96dvh] sm:max-h-[92vh] overflow-hidden rounded-t-[1.75rem] sm:rounded-[1.75rem] bg-[#f7f1eb] shadow-[0_28px_80px_rgba(6,42,48,0.35)] flex flex-col">
+                  <div className="shrink-0 relative overflow-hidden bg-[#062a30] px-5 sm:px-6 pt-5 pb-6">
+                    <div className="absolute -right-8 -top-10 h-36 w-36 rounded-full bg-[#81572d]/25 blur-2xl" />
+                    <div className="relative flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#e4c8bd]">
+                          Document officiel
                         </p>
-                        <ul className="divide-y divide-[#f0e6df]">
-                          {paidLignes.map((ligne, i) => (
-                            <li
-                              key={`p-${i}`}
-                              className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0"
-                            >
-                              <span className="text-sm text-[#282727]">
-                                {cleanPrestationLabel(ligne.description)}
-                              </span>
-                              <span className="text-sm font-semibold tabular-nums text-[#062a30] shrink-0">
-                                {formatCurrency(ligne.total)}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {offeredLignes.length > 0 && (
-                      <div
-                        className={cn(
-                          'px-4 sm:px-5 py-4 bg-[#fdeada]/40',
-                          paidLignes.length > 0 && 'border-t border-[#e4c8bd]/50',
-                        )}
-                      >
-                        <div className="flex items-center gap-2 mb-3">
-                          <Gift className="h-3.5 w-3.5 text-[#81572d]" />
-                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d]">
-                            Inclus
-                          </p>
-                        </div>
-                        <ul className="columns-1 sm:columns-2 gap-x-6 space-y-2">
-                          {offeredLignes.map((ligne, i) => (
-                            <li
-                              key={`o-${i}`}
-                              className="flex items-start gap-2 text-[13px] text-[#282727] break-inside-avoid"
-                            >
-                              <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#81572d] shrink-0" />
-                              <span className="leading-snug">{cleanPrestationLabel(ligne.description)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {selected.planningMedical && (
-                  <div className="rounded-2xl bg-white border border-[#e4c8bd]/70 px-4 sm:px-5 py-4 shadow-sm">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d] mb-2">
-                      Planning médical
-                    </p>
-                    <p className="text-sm text-[#282727] whitespace-pre-line leading-relaxed">
-                      {selected.planningMedical}
-                    </p>
-                  </div>
-                )}
-
-                {sejourCards.length > 0 && (
-                  <div className="rounded-2xl bg-white border border-[#e4c8bd]/70 px-4 sm:px-5 py-4 shadow-sm">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#81572d] mb-3">
-                      Séjour
-                    </p>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      {sejourCards.map((item) => (
-                        <div
-                          key={item.label}
-                          className="rounded-xl bg-[#f7f1eb] px-3 py-2.5 min-w-0"
+                        <h3
+                          id="devis-modal-title"
+                          className="mt-2 font-display text-[1.15rem] sm:text-xl font-semibold text-white leading-snug"
                         >
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#81572d]/80">
-                            {item.label}
-                          </p>
-                          <p className="mt-0.5 text-sm font-medium text-[#062a30] truncate" title={item.value}>
-                            {item.value}
-                          </p>
+                          {devisTitle(selected)}
+                        </h3>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#81572d] text-white">
+                            <StatusIcon className="h-3 w-3" />
+                            {statusInfo.label}
+                          </span>
+                          <span className="text-[11px] text-white/65">
+                            v{selected.version} · {formatDate(selected.dateCreation)}
+                          </span>
                         </div>
-                      ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closeModal}
+                        disabled={submitting}
+                        className="h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center shrink-0 transition-colors"
+                        aria-label="Fermer"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
-                    {sej.noteSejour && (
-                      <p className="mt-3 text-sm text-[#282727]/80 leading-relaxed">{sej.noteSejour}</p>
+                  </div>
+
+                  <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5 space-y-4">
+                    <div className="rounded-2xl bg-white border border-[#e4c8bd]/80 px-5 py-6 shadow-sm text-center">
+                      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#fdeada] border border-[#e4c8bd]">
+                        <FileText className="h-7 w-7 text-[#81572d]" />
+                      </div>
+                      <p className="text-sm font-semibold text-[#062a30]">
+                        Votre devis est disponible en PDF
+                      </p>
+                      <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Button
+                          className="gap-2 min-h-12 w-full font-semibold rounded-xl bg-[#062a30] hover:bg-[#0a3940] text-white"
+                          disabled={exporting || submitting}
+                          onClick={() => void handleOpenPdf(selected)}
+                        >
+                          {exporting ? (
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                          {exporting ? 'Ouverture…' : 'Voir le PDF'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="gap-2 min-h-12 w-full rounded-xl border-[#81572d]/40 text-[#062a30] hover:bg-[#fdeada] font-semibold"
+                          disabled={exporting || submitting}
+                          onClick={() => void handleDownloadPdf(selected)}
+                        >
+                          <Download className="h-4 w-4" />
+                          Télécharger
+                        </Button>
+                      </div>
+                    </div>
+
+                    {actionDone && (
+                      <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
+                        <CheckCircle2 className="h-4 w-4 shrink-0" />
+                        Votre réponse a bien été enregistrée.
+                      </div>
+                    )}
+
+                    {showRefuse && (
+                      <div className="rounded-2xl border border-rose-200 bg-white px-4 sm:px-5 py-4 space-y-3 shadow-sm">
+                        <p className="text-sm font-semibold text-[#062a30]">Motif du refus (optionnel)</p>
+                        <Textarea
+                          value={refusReason}
+                          onChange={(e) => setRefusReason(e.target.value)}
+                          placeholder="Ex. : le tarif ne correspond pas à mon budget…"
+                          className="min-h-[90px] bg-[#f7f1eb] border-[#e4c8bd]"
+                        />
+                        <div className="flex items-center gap-2 justify-end">
+                          <Button variant="ghost" size="sm" onClick={() => setShowRefuse(false)}>
+                            Annuler
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={submitting}
+                            onClick={() => void handleRepondre(selected.id, 'refuse')}
+                          >
+                            Confirmer le refus
+                          </Button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                )}
 
-                {actionDone && (
-                  <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
-                    <CheckCircle2 className="h-4 w-4 shrink-0" />
-                    Votre réponse a bien été enregistrée.
-                  </div>
-                )}
-
-                {showRefuse && (
-                  <div className="rounded-2xl border border-rose-200 bg-white px-4 sm:px-5 py-4 space-y-3 shadow-sm">
-                    <p className="text-sm font-semibold text-[#062a30]">Motif du refus (optionnel)</p>
-                    <Textarea
-                      value={refusReason}
-                      onChange={(e) => setRefusReason(e.target.value)}
-                      placeholder="Ex. : le tarif ne correspond pas à mon budget…"
-                      className="min-h-[90px] bg-[#f7f1eb] border-[#e4c8bd]"
-                    />
-                    <div className="flex items-center gap-2 justify-end">
-                      <Button variant="ghost" size="sm" onClick={() => setShowRefuse(false)}>
-                        Annuler
-                      </Button>
+                  <div className="shrink-0 px-5 sm:px-6 pt-4 bg-white border-t border-[#e4c8bd]/60 space-y-2.5 pb-safe">
+                    {selected.statut === 'envoye' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-2">
+                        <Button
+                          className="gap-2 min-h-12 w-full font-semibold rounded-xl bg-[#81572d] hover:bg-[#6b4825] text-white"
+                          disabled={submitting}
+                          onClick={() => void handleRepondre(selected.id, 'accepte')}
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          Accepter
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="gap-2 min-h-12 w-full rounded-xl border-[#e4c8bd] text-[#282727] hover:bg-[#f7f1eb]"
+                          disabled={submitting}
+                          onClick={() => setShowRefuse((v) => !v)}
+                        >
+                          Refuser
+                        </Button>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
                       <Button
-                        variant="destructive"
+                        variant="outline"
                         size="sm"
-                        disabled={submitting}
-                        onClick={() => void handleRepondre(selected.id, 'refuse')}
+                        className="gap-1.5 h-10 rounded-xl border-[#e4c8bd] text-[#81572d] hover:bg-[#fdeada]/50"
+                        onClick={() => navigate('/patient/chat')}
                       >
-                        Confirmer le refus
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        Contacter
                       </Button>
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-[#929292] hover:text-[#062a30] px-2 py-1"
+                        onClick={closeModal}
+                        disabled={submitting}
+                      >
+                        Fermer
+                      </button>
                     </div>
                   </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="shrink-0 px-5 sm:px-6 pt-4 bg-white border-t border-[#e4c8bd]/60 space-y-2.5 pb-safe">
-                {selected.statut === 'envoye' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-2">
-                    <Button
-                      className="gap-2 min-h-12 w-full font-semibold rounded-xl bg-[#81572d] hover:bg-[#6b4825] text-white"
-                      disabled={submitting}
-                      onClick={() => void handleRepondre(selected.id, 'accepte')}
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                      Accepter
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="gap-2 min-h-12 w-full rounded-xl border-[#e4c8bd] text-[#282727] hover:bg-[#f7f1eb]"
-                      disabled={submitting}
-                      onClick={() => setShowRefuse((v) => !v)}
-                    >
-                      Refuser
-                    </Button>
-                  </div>
-                )}
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5 h-10 rounded-xl border-[#e4c8bd] text-[#81572d] hover:bg-[#fdeada]/50"
-                      onClick={() => navigate('/patient/chat')}
-                    >
-                      <MessageSquare className="h-3.5 w-3.5" />
-                      Contacter
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5 h-10 rounded-xl border-[#81572d]/40 bg-[#fdeada]/40 text-[#062a30] hover:bg-[#fdeada] font-semibold"
-                      disabled={exporting || submitting}
-                      onClick={() => void handleDownloadPdf(selected)}
-                    >
-                      {exporting ? (
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Download className="h-3.5 w-3.5" />
-                      )}
-                      {exporting ? 'Téléchargement…' : 'Télécharger le PDF'}
-                    </Button>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-[#929292] hover:text-[#062a30] px-2 py-1"
-                    onClick={closeModal}
-                    disabled={submitting}
-                  >
-                    Fermer
-                  </button>
                 </div>
               </div>
-            </div>
-          </div>
-        )
-      })()}
+            )
+          })(),
+          document.body,
+        )}
     </div>
   )
 }

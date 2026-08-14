@@ -315,7 +315,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-[min(16rem,85vw)] flex-col bg-brand-50 border-r border-brand-200 shadow-lg transition-transform duration-300 lg:translate-x-0 lg:relative lg:w-64 lg:shadow-none',
+          'fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-[min(16rem,85vw)] flex-col bg-brand-50 border-r border-brand-200 shadow-lg transition-transform duration-300 lg:translate-x-0 lg:relative lg:h-full lg:w-64 lg:shrink-0 lg:shadow-none',
           'pb-app-nav lg:pb-0',
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
@@ -372,7 +372,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4 pl-4 space-y-1 bg-brand-50/60">
+        <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 pl-4 space-y-1 bg-brand-50">
           {user.role === 'gestionnaire' ? (
             <>
               {GESTIONNAIRE_TOP.map((item) => (

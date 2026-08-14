@@ -1,4 +1,8 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import puppeteer from 'puppeteer'
+import { AppError } from '../middleware/errorHandler.js'
 
 /** Hauteur d'une page A4 en px CSS @96dpi, marges 0 (cohérent avec @page + page.pdf() ci-dessous). */
 const PAGE_HEIGHT_PX = 1123
@@ -151,23 +155,73 @@ const LAYOUT_3_PAGES_BODY = `
 const waitImagesFn = new Function('return (async () => {' + WAIT_IMAGES_BODY + '})()') as () => Promise<void>
 const layout3PagesFn = new Function('pageHeight', LAYOUT_3_PAGES_BODY) as (pageHeight: number) => void
 
+/** Chrome / Edge système (dev Windows) si le binaire Puppeteer n’est pas installé. */
+async function resolveChromeExecutable(): Promise<string | undefined> {
+  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH?.trim()
+  if (envPath) return envPath
+
+  try {
+    const bundled = await Promise.resolve(puppeteer.executablePath())
+    if (bundled && fs.existsSync(bundled)) return bundled
+  } catch {
+    /* Chrome Puppeteer non installé — fallback système */
+  }
+
+  const candidates =
+    os.platform() === 'win32'
+      ? [
+          path.join(process.env['PROGRAMFILES'] ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env.LOCALAPPDATA ?? '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env['PROGRAMFILES'] ?? 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+          path.join(process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ]
+      : os.platform() === 'darwin'
+        ? [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+          ]
+        : [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/microsoft-edge',
+          ]
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) return candidate
+  }
+  return undefined
+}
+
 /**
  * Rend un HTML complet en PDF A4 via Chromium.
  * Force 3 pages : corps 1–2, offre page 3 avec footer fixé en bas.
  */
 export async function renderHtmlToPdf(html: string): Promise<Buffer> {
-  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+  const executablePath = await resolveChromeExecutable()
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--font-render-hinting=none',
-    ],
-  })
+  let browser
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      ...(executablePath ? { executablePath } : {}),
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--font-render-hinting=none',
+      ],
+    })
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    throw new AppError(
+      503,
+      'PDF_ENGINE_UNAVAILABLE',
+      `Génération PDF indisponible (Chrome introuvable). Installez Chrome ou définissez PUPPETEER_EXECUTABLE_PATH. (${detail.slice(0, 180)})`,
+    )
+  }
 
   try {
     const page = await browser.newPage()
@@ -186,6 +240,9 @@ export async function renderHtmlToPdf(html: string): Promise<Buffer> {
     })
 
     return Buffer.from(pdf)
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    throw new AppError(500, 'PDF_RENDER_FAILED', `Échec génération PDF : ${detail.slice(0, 200)}`)
   } finally {
     await browser.close().catch(() => undefined)
   }

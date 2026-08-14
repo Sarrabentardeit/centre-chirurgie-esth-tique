@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -85,7 +86,7 @@ const GLOBAL_CSS = `
   line-height: 1.7;
   color: ${DEVIS_CHARTE.charcoal};
   outline: none;
-  min-height: 20px;
+  min-height: 420px;
 }
 .ProseMirror p { margin: 0 0 8px; }
 .ProseMirror ul,
@@ -99,7 +100,9 @@ const GLOBAL_CSS = `
 .ProseMirror em { font-style: italic; color: ${DEVIS_CHARTE.gray}; }
 .ProseMirror u { text-decoration: none; border-bottom: 1px solid ${DEVIS_CHARTE.rose}; }
 .ProseMirror mark { background: ${DEVIS_CHARTE.cream}; padding: 0 1px; }
-.doc-shell .tiptap { min-height: 0; }
+.doc-shell .tiptap { min-height: 420px; }
+.doc-section-bottom .ProseMirror,
+.doc-section-bottom .tiptap { min-height: 180px; }
 
 /* Sous-titres : brun, sans fond ni barre */
 .ProseMirror .devis-heading,
@@ -178,6 +181,7 @@ const GLOBAL_CSS = `
 .doc-shell {
   border: 1px solid rgba(40,39,39,0.06);
   border-radius: 4px;
+  min-height: 1123px; /* hauteur A4 à 96dpi — zone éditeur lisible */
 }
 ${DEVIS_OFFER_PREVIEW_CSS}
 
@@ -186,9 +190,13 @@ ${DEVIS_OFFER_PREVIEW_CSS}
   .doc-shell {
     width: 100% !important;
     max-width: 100% !important;
+    min-width: 0 !important;
+    min-height: 70vh !important;
     padding: 22px 18px 28px !important;
     box-shadow: 0 8px 28px rgba(15,23,42,0.08) !important;
   }
+  .ProseMirror,
+  .doc-shell .tiptap { min-height: 280px; }
   .ProseMirror { font-size: 14px; line-height: 1.75; }
 }
 
@@ -320,25 +328,58 @@ export default function DevisEditorPage() {
 
   useEffect(() => { void load() }, [load])
 
-  /* Auto-save (debounce 1.8s) */
+  const flushSave = useCallback(async () => {
+    const id = devisIdRef.current
+    if (!id) return false
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = undefined
+    }
+    const topHtml = editorTopRef.current?.getHTML() ?? ''
+    const botHtml = editorBotRef.current?.getHTML() ?? ''
+    if (!topHtml.trim() && !botHtml.trim()) return false
+    setSaving(true)
+    try {
+      await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
+      setSaved(true)
+      return true
+    } catch {
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }, [])
+
+  /* Auto-save rapide (dès qu’on tape, sans cliquer Sauvegarder) */
   const triggerSave = useCallback(() => {
     setSaved(false)
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
-      const id = devisIdRef.current
-      if (!id) return
-      const topHtml = editorTopRef.current?.getHTML() ?? ''
-      const botHtml = editorBotRef.current?.getHTML() ?? ''
-      setSaving(true)
-      try {
-        await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
-        setSaved(true)
-      } catch { /* silencieux */ }
-      finally { setSaving(false) }
-    }, 1800)
-  }, [])
+    saveTimerRef.current = setTimeout(() => {
+      void flushSave()
+    }, 600)
+  }, [flushSave])
+
+  // Sauvegarde à la fermeture / changement d’onglet
+  useEffect(() => {
+    const onLeave = () => {
+      void flushSave()
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') void flushSave()
+    }
+    window.addEventListener('pagehide', onLeave)
+    window.addEventListener('beforeunload', onLeave)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', onLeave)
+      window.removeEventListener('beforeunload', onLeave)
+      document.removeEventListener('visibilitychange', onVisibility)
+      void flushSave()
+    }
+  }, [flushSave])
 
   const editorTop = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
@@ -352,11 +393,12 @@ export default function DevisEditorPage() {
       Color,
       Highlight.configure({ multicolor: true }),
     ],
-    content: initialTopHtml,
+    content: initialTopHtml || '<p></p>',
     onFocus: () => setActiveZone('top'),
     onUpdate: triggerSave,
   })
   const editorBot = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] }, paragraph: false }),
       DevisParagraph,
@@ -366,7 +408,7 @@ export default function DevisEditorPage() {
       Color,
       Highlight.configure({ multicolor: true }),
     ],
-    content: initialBottomHtml,
+    content: initialBottomHtml || '<p></p>',
     onFocus: () => setActiveZone('bottom'),
     onUpdate: triggerSave,
   })
@@ -375,31 +417,23 @@ export default function DevisEditorPage() {
 
   /* Appliquer le HTML chargé (examens rafraîchis inclus) dans l’éditeur */
   useEffect(() => {
-    if (editorTop && initialTopHtml) {
-      editorTop.commands.setContent(initialTopHtml)
+    if (!editorTop || !initialTopHtml) return
+    if (editorTop.getHTML() !== initialTopHtml) {
+      editorTop.commands.setContent(initialTopHtml, { emitUpdate: false })
     }
   }, [editorTop, initialTopHtml])
   useEffect(() => {
-    if (editorBot && initialBottomHtml) {
-      editorBot.commands.setContent(initialBottomHtml)
+    if (!editorBot || !initialBottomHtml) return
+    if (editorBot.getHTML() !== initialBottomHtml) {
+      editorBot.commands.setContent(initialBottomHtml, { emitUpdate: false })
     }
   }, [editorBot, initialBottomHtml])
 
   /* Sauvegarde manuelle */
   const handleManualSave = async () => {
-    const id = devisIdRef.current
-    if (!id) return
-    const topHtml = editorTopRef.current?.getHTML() ?? ''
-    const botHtml = editorBotRef.current?.getHTML() ?? ''
-    setSaving(true)
-    try {
-      await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
-      setSaved(true)
-      toast({ title: 'Devis sauvegardé', variant: 'success' })
-    } catch {
-      toast({ title: 'Sauvegarde impossible', variant: 'error' })
-    }
-    finally { setSaving(false) }
+    const ok = await flushSave()
+    if (ok) toast({ title: 'Devis sauvegardé', variant: 'success' })
+    else toast({ title: 'Sauvegarde impossible', variant: 'error' })
   }
 
   /** Valider + envoyer au patient — reste sur cette page (pas de retour liste). */
@@ -409,20 +443,21 @@ export default function DevisEditorPage() {
       setSendError('Aucun devis à envoyer. Créez d’abord un brouillon.')
       return
     }
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     setSending(true)
     setSendError(null)
     setSentOk(false)
     try {
-      // 1) Rafraîchir le modèle (examens, fluo, titre…) puis sauvegarder CE contenu en base
-      //    → patient / médecin relisent le même modèle que le PDF chat
+      // Toujours persister la version écran actuelle avant PDF / chat
+      await flushSave()
+
+      // PDF chat = HTML courant de l’éditeur (version sélectionnée + à jour)
       const fullHtml = await inlineHtmlImages(buildDevisFullHtml())
+      // Re-sauve après refresh éventuel des champs dossier dans le HTML
       const topHtml = editorTopRef.current?.getHTML() ?? ''
       const botHtml = editorBotRef.current?.getHTML() ?? ''
       await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
       setSaved(true)
 
-      // 2) Envoi chat avec le même HTML Chromium
       await gestionnaireApi.sendDevis(id, { html: fullHtml })
       setSentOk(true)
       toast({
@@ -501,7 +536,17 @@ export default function DevisEditorPage() {
 
     setExporting(true)
     try {
+      // Persister avant export → patient / chat voient la même version
+      await flushSave()
       const html = await inlineHtmlImages(buildDevisFullHtml())
+      // Sauve aussi après éventuel refresh des champs dossier
+      const top = editorTopRef.current?.getHTML() ?? ''
+      const bot = editorBotRef.current?.getHTML() ?? ''
+      const id = devisIdRef.current
+      if (id) {
+        await gestionnaireApi.saveDevisCustomContent(id, top + CONTENT_BREAK + bot)
+        setSaved(true)
+      }
       const blob = await gestionnaireApi.renderDevisPdf(html)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -542,13 +587,18 @@ export default function DevisEditorPage() {
     ?? null
   const showStaleLetterHint = Boolean(draftForLetter?.customContent?.trim())
 
-  return (
-    <div className="editor-root fixed inset-0 bg-white z-50 flex flex-col">
+  return createPortal(
+    <div className="editor-root fixed inset-0 bg-white z-[100] flex flex-col">
 
       {/* ══ Barre de navigation ══ */}
       <div className="no-print shrink-0 bg-white border-b border-slate-200 shadow-sm flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => {
+            void (async () => {
+              await flushSave()
+              navigate(-1)
+            })()
+          }}
           className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors shrink-0 min-h-10"
         >
           <ArrowLeft className="h-4 w-4" /> <span className="hidden xs:inline sm:inline">Retour</span>
@@ -613,6 +663,7 @@ export default function DevisEditorPage() {
           style={{
             width: 794,
             minWidth: 794,
+            minHeight: 1123,
             padding: '36px 44px 40px',
             fontFamily: 'Arial, Helvetica, sans-serif',
             fontSize: 13,
@@ -744,6 +795,7 @@ export default function DevisEditorPage() {
           </div>
         }
       />
-    </div>
+    </div>,
+    document.body,
   )
 }

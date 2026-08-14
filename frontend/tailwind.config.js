@@ -92,9 +92,10 @@ export default {
           from: { opacity: '0', transform: 'translateY(8px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        /* Opacity only — transform creates a containing block and traps position:fixed modals */
         'page-enter': {
-          from: { opacity: '0', transform: 'translateY(10px)' },
-          to: { opacity: '1', transform: 'translateY(0)' },
+          from: { opacity: '0' },
+          to: { opacity: '1' },
         },
         'badge-pop': {
           '0%': { transform: 'scale(0.4)', opacity: '0' },

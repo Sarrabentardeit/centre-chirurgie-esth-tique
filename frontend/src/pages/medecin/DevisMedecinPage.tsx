@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Search, FileCheck, ChevronRight, Printer, RefreshCw,
   CheckCircle2, XCircle, Clock, X,
@@ -255,8 +256,8 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
     },
   ].filter((row) => row.value)
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <style>{DEVIS_OFFER_PREVIEW_CSS}</style>
       <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" onClick={onClose} />
 
@@ -265,9 +266,8 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
         aria-modal="true"
         aria-labelledby="devis-modal-title"
         className="relative z-10 flex flex-col w-full sm:max-w-3xl lg:max-w-4xl
-          max-h-[min(92dvh,92vh)] sm:max-h-[min(88dvh,88vh)]
-          bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-border overflow-hidden
-          pt-safe"
+          max-h-[min(90dvh,90vh)]
+          bg-white rounded-2xl shadow-2xl border border-border overflow-hidden"
         style={{
           transform: offset ? `translateY(${offset}px)` : undefined,
           transition: dragging ? 'none' : 'transform 0.22s ease-out',
@@ -513,7 +513,8 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

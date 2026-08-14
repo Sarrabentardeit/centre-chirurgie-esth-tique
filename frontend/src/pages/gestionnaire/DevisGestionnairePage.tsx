@@ -1461,9 +1461,11 @@ export default function DevisGestionnairePage() {
     setActionLoading(true); setModalError(null); setPageError(null)
     try {
       // Sauvegarder d'abord le brouillon pour s'assurer que le devisId existe
-      await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
+      const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
       setShowModal(false)
-      navigate(`/gestionnaire/devis/${selectedPatient}/personnaliser`)
+      navigate(
+        `/gestionnaire/devis/${selectedPatient}/personnaliser?devisId=${encodeURIComponent(r.devis.id)}`,
+      )
     } catch (e) {
       setModalError(e instanceof Error ? e.message : 'Erreur.')
     } finally {

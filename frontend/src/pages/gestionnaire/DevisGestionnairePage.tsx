@@ -237,7 +237,7 @@ const DEVIS_RAPPEL_MESSAGE_FALLBACK = `Bonjour Madame,
 Je me permets de revenir vers vous suite à l’envoi du devis concernant votre projet chirurgical avec le Dr Chennoufi.
 N’ayant pas encore eu de retour de votre part, je souhaitais savoir si le diagnostic proposé, l’intervention envisagée ainsi que le devis transmis correspondent à vos attentes, ou si certains points mériteraient d’être clarifiés.
 Nous restons bien entendu entièrement disponibles pour répondre à vos questions, vous apporter des informations complémentaires et, si vous le souhaitez, organiser un échange téléphonique afin de discuter plus sereinement de votre projet et de l’organisation de votre séjour médical.
-N’hésitez pas à me faire part de votre retour, même bref ; il nous est précieux pour vous accompagner au mieux.
+N’hésitez pas à me faire part de votre retour, même bref; il nous est précieux pour vous accompagner au mieux.
 Horaires de travail : Mardi, Mercredi & Jeudi de 09 à 15h (heure locale)
 Au plaisir de vous lire,
 Bien cordialement,

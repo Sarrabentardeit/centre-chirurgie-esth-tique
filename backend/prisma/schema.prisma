@@ -247,6 +247,10 @@ model Devis {
   customContent  String?     @map("custom_content")
   dateValidite   DateTime?   @map("date_validite")
   dateCreation   DateTime    @default(now()) @map("date_creation")
+  /** Moment d’envoi au patient (notification « devis prêt »). */
+  envoyeAt       DateTime?   @map("envoye_at")
+  /** Rappel automatique 72 h déjà envoyé (une seule fois). */
+  rappelAutoEnvoyeAt DateTime? @map("rappel_auto_envoye_at")
   vuParPatientAt DateTime?   @map("vu_par_patient_at")
   /// Soft-delete : masqué patient + listes actives, visible dans « Devis supprimés »
   deletedAt      DateTime?   @map("deleted_at")

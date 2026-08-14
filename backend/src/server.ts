@@ -18,6 +18,7 @@ import { publicRouter } from './modules/public/public.routes.js'
 import { chatRouter } from './modules/chat/chat.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { startGoogleCalendarScheduler } from './modules/google-calendar/google-calendar.scheduler.js'
+import { startDevisRappelScheduler } from './modules/gestionnaire/devis-rappel.scheduler.js'
 import { logMailerStatus } from './lib/mailer.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -139,6 +140,7 @@ app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, '🚀 Serveur démarré')
   logMailerStatus()
   startGoogleCalendarScheduler()
+  startDevisRappelScheduler()
 })
 
 export default app

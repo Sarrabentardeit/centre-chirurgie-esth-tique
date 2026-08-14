@@ -108,7 +108,7 @@ SCULPTURE, SMOOTH & SMILE`,
 Je me permets de revenir vers vous suite à l’envoi du devis concernant votre projet chirurgical avec le Dr Chennoufi.
 N’ayant pas encore eu de retour de votre part, je souhaitais savoir si le diagnostic proposé, l’intervention envisagée ainsi que le devis transmis correspondent à vos attentes, ou si certains points mériteraient d’être clarifiés.
 Nous restons bien entendu entièrement disponibles pour répondre à vos questions, vous apporter des informations complémentaires et, si vous le souhaitez, organiser un échange téléphonique afin de discuter plus sereinement de votre projet et de l’organisation de votre séjour médical.
-N’hésitez pas à me faire part de votre retour, même bref ; il nous est précieux pour vous accompagner au mieux.
+N’hésitez pas à me faire part de votre retour, même bref; il nous est précieux pour vous accompagner au mieux.
 Horaires de travail : Mardi, Mercredi & Jeudi de 09 à 15h (heure locale)
 Au plaisir de vous lire,
 Bien cordialement,
@@ -672,7 +672,7 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
 
   const updated = await prisma.devis.update({
     where: { id: devisId },
-    data: { statut: 'envoye' },
+    data: { statut: 'envoye', envoyeAt: new Date(), rappelAutoEnvoyeAt: null },
   })
 
   await prisma.patient.update({
@@ -794,6 +794,56 @@ export async function sendDevisRappel(
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
+  const pdfAttached = await deliverDevisRappel({
+    gestionnaireId,
+    patient: {
+      id: patient.id,
+      dossierNumber: patient.dossierNumber,
+      userId: patient.userId,
+      email: patient.user.email,
+      fullName: patient.user.fullName,
+    },
+    devis: {
+      id: devis.id,
+      numeroDevis: devis.numeroDevis,
+      version: devis.version,
+    },
+    contenu,
+    html: input.html,
+  })
+
+  return {
+    ok: true as const,
+    devisId: devis.id,
+    numeroDevis: devis.numeroDevis,
+    version: devis.version,
+    pdfAttached,
+  }
+}
+
+/**
+ * Envoie rappel (message + PDF + notif + email) — partagé manuel / auto 72 h.
+ * PDF : régénéré depuis `html` si fourni, sinon réutilise la dernière PJ devis du chat.
+ */
+async function deliverDevisRappel(input: {
+  gestionnaireId: string
+  patient: {
+    id: string
+    dossierNumber: string
+    userId: string
+    email: string | null
+    fullName: string
+  }
+  devis: {
+    id: string
+    numeroDevis: string | null
+    version: number
+  }
+  contenu: string
+  html?: string
+}): Promise<boolean> {
+  const { gestionnaireId, patient, devis, contenu } = input
+
   await prisma.message.create({
     data: {
       patientId: patient.id,
@@ -804,15 +854,16 @@ export async function sendDevisRappel(
     },
   })
 
+  const pieceJointeNom = formatDevisPdfFileName(
+    devis.numeroDevis ?? patient.dossierNumber,
+    patient.fullName,
+    devis.version,
+  )
+
   let pdfAttached = false
   if (input.html?.trim()) {
     try {
       const pdfBuffer = await renderHtmlToPdf(input.html)
-      const pieceJointeNom = formatDevisPdfFileName(
-        devis.numeroDevis ?? patient.dossierNumber,
-        patient.user.fullName,
-        devis.version,
-      )
       const diskSlug = pieceJointeNom
         .replace(/\.pdf$/i, '')
         .replace(/[^\w.-]+/g, '_')
@@ -837,7 +888,40 @@ export async function sendDevisRappel(
       })
       pdfAttached = true
     } catch (err) {
-      console.error('[sendDevisRappel] Échec génération PDF:', err)
+      console.error('[deliverDevisRappel] Échec génération PDF:', err)
+    }
+  }
+
+  if (!pdfAttached) {
+    const existing = await prisma.message.findFirst({
+      where: {
+        patientId: patient.id,
+        staffOnly: false,
+        pieceJointeUrl: { not: null },
+        OR: [
+          { pieceJointeNom },
+          {
+            pieceJointeNom: { endsWith: '.pdf' },
+            contenu: { startsWith: 'Pièce jointe' },
+          },
+        ],
+      },
+      orderBy: { dateEnvoi: 'desc' },
+      select: { pieceJointeUrl: true, pieceJointeNom: true },
+    })
+    if (existing?.pieceJointeUrl) {
+      await prisma.message.create({
+        data: {
+          patientId: patient.id,
+          expediteurId: gestionnaireId,
+          expediteurRole: 'gestionnaire',
+          contenu: `Pièce jointe : ${existing.pieceJointeNom ?? pieceJointeNom}`,
+          pieceJointeUrl: existing.pieceJointeUrl,
+          pieceJointeNom: existing.pieceJointeNom ?? pieceJointeNom,
+          lu: false,
+        },
+      })
+      pdfAttached = true
     }
   }
 
@@ -849,24 +933,125 @@ export async function sendDevisRappel(
     lienAction: '/patient/chat',
   }).catch(() => undefined)
 
-  if (patient.user.email?.trim()) {
+  if (patient.email?.trim()) {
     await sendDevisRappelEmail({
-      to: patient.user.email,
-      patientFullName: patient.user.fullName,
+      to: patient.email,
+      patientFullName: patient.fullName,
     })
   } else {
-    console.warn('[sendDevisRappel] Pas d’email patient — notification email ignorée', {
+    console.warn('[deliverDevisRappel] Pas d’email patient — notification email ignorée', {
       patientId: patient.id,
     })
   }
 
-  return {
-    ok: true as const,
-    devisId: devis.id,
-    numeroDevis: devis.numeroDevis,
-    version: devis.version,
-    pdfAttached,
+  return pdfAttached
+}
+
+const DEVIS_RAPPEL_AUTO_MS = 72 * 60 * 60 * 1000
+
+/**
+ * Job : 72 h après envoi du devis → rappel chat + PDF + email (une seule fois).
+ * Le bouton manuel reste disponible pour d’autres rappels.
+ */
+export async function processDevisRappelsAuto(): Promise<{ checked: number; sent: number }> {
+  const cutoff = new Date(Date.now() - DEVIS_RAPPEL_AUTO_MS)
+  const candidates = await prisma.devis.findMany({
+    where: {
+      deletedAt: null,
+      statut: 'envoye',
+      envoyeAt: { lte: cutoff },
+      rappelAutoEnvoyeAt: null,
+      patient: { status: 'devis_envoye' },
+    },
+    include: {
+      patient: {
+        include: { user: { select: { fullName: true, id: true, email: true } } },
+      },
+    },
+    take: 40,
+    orderBy: { envoyeAt: 'asc' },
+  })
+
+  let sent = 0
+  if (candidates.length === 0) return { checked: 0, sent: 0 }
+
+  const templates = await getTemplateMap()
+  const template = templates.devisRappel
+  if (!template.active) {
+    return { checked: candidates.length, sent: 0 }
   }
+
+  for (const devis of candidates) {
+    const claimed = await prisma.devis.updateMany({
+      where: {
+        id: devis.id,
+        rappelAutoEnvoyeAt: null,
+        statut: 'envoye',
+        deletedAt: null,
+      },
+      data: { rappelAutoEnvoyeAt: new Date() },
+    })
+    if (claimed.count === 0) continue
+
+    try {
+      const fullName = devis.patient.user.fullName
+      const parts = fullName.trim().split(/\s+/)
+      const contenu = applyTemplate(template.content, {
+        prenom: parts[0] ?? '',
+        nom: parts.slice(1).join(' '),
+        reason: '',
+      }).trim()
+      if (!contenu) {
+        await prisma.devis.update({
+          where: { id: devis.id },
+          data: { rappelAutoEnvoyeAt: null },
+        })
+        continue
+      }
+
+      await deliverDevisRappel({
+        gestionnaireId: devis.gestionnaireId,
+        patient: {
+          id: devis.patient.id,
+          dossierNumber: devis.patient.dossierNumber,
+          userId: devis.patient.userId,
+          email: devis.patient.user.email,
+          fullName,
+        },
+        devis: {
+          id: devis.id,
+          numeroDevis: devis.numeroDevis,
+          version: devis.version,
+        },
+        contenu,
+      })
+
+      await prisma.auditLog.create({
+        data: {
+          actorId: devis.gestionnaireId,
+          actorRole: 'gestionnaire',
+          action: 'create',
+          entity: 'devis_rappel_auto',
+          entityId: devis.id,
+          after: {
+            patientId: devis.patientId,
+            envoyeAt: devis.envoyeAt?.toISOString() ?? null,
+            pdfFromChat: true,
+          } as never,
+        },
+      }).catch(() => undefined)
+
+      sent += 1
+    } catch (err) {
+      console.error('[processDevisRappelsAuto] échec', devis.id, err)
+      await prisma.devis.update({
+        where: { id: devis.id },
+        data: { rappelAutoEnvoyeAt: null },
+      }).catch(() => undefined)
+    }
+  }
+
+  return { checked: candidates.length, sent }
 }
 
 /**

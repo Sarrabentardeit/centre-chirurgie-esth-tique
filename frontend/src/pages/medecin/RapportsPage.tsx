@@ -67,7 +67,7 @@ function getInitials(name: string) {
 
 /** Rapport présent en base, ou statut déjà passé à « rapport généré » (et suites). */
 const STATUSES_WITH_RAPPORT = new Set([
-  'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
+  'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte',
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
 ])
 
@@ -213,7 +213,7 @@ export default function RapportsPage() {
     try {
       const res = await cachedFetch(key, () => medecinApi.getPatients(), { force })
       const eligible = res.patients.filter((p) =>
-        ['formulaire_complete', 'en_analyse', 'rapport_genere', 'devis_preparation',
+        ['formulaire_complete', 'en_analyse', 'rapport_genere', 'rapport_modifie', 'devis_preparation',
           'devis_envoye', 'devis_accepte', 'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine'].includes(p.status)
       )
       const sorted: PatientWithRapport[] = eligible

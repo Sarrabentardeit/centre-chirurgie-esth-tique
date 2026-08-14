@@ -512,6 +512,11 @@ function refreshDevisTitleInTopHtml(html: string, title: string): string {
 
 /**
  * Applique toutes les règles lettre devis sur le HTML haut (éditeur + PDF partout).
+ *
+ * Important : la section « Votre devis inclut / Notre forfait exclut » n’est PAS
+ * régénérée ici. Une fois saisie/modifiée dans TipTap, le HTML édité est la source
+ * de vérité (sinon chaque refresh écrase les ajouts/suppressions de phrases).
+ * La génération initiale reste dans buildDevisLetterTopHtml / buildOffreInclutExclutHtml.
  */
 export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext): string {
   const sv = sejourPdfFromContext(ctx)
@@ -520,7 +525,6 @@ export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext)
   let out = refreshConvalescenceInTopHtml(html, ctx)
   out = stripDureeInterventionLine(out)
   out = refreshExamensInTopHtml(out, ctx)
-  out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = normalizeInclutExclutLabels(out)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
   out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
@@ -689,12 +693,16 @@ ${ulFromLabels(exclut)}
 ${OFFRE_EXCLUT_END}`
 }
 
-function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetterContext): string {
+/**
+ * Resynchronise uniquement la section inclut/exclut depuis les cases du modal.
+ * Utilisé au « Réinitialiser » — pas au refresh courant (qui doit respecter TipTap).
+ */
+export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetterContext): string {
   const fresh = buildOffreInclutExclutHtml(ctx)
   const marked = new RegExp(`${OFFRE_INCLUT_START}[\\s\\S]*?${OFFRE_EXCLUT_END}`)
   if (marked.test(html)) return html.replace(marked, fresh)
 
-  // Sans marqueurs : remplacer tout ce qui suit le titre « Offre de prix »
+  // Sans marqueurs (TipTap les retire souvent) : remplacer après « Offre de prix »
   const offreIdx = html.search(/Offre de prix\s*:/i)
   if (offreIdx < 0) return html
   const close = html.indexOf('</p>', offreIdx)

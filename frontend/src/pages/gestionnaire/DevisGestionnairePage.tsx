@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import {
   Plus, Minus, Trash2, Save, Send, CheckCircle2, FileText, AlertCircle,
   RefreshCw, Search, Eye, EyeOff, ChevronDown, ChevronRight,
   Stethoscope, ClipboardList, Scissors, Heart, ArrowLeft, X, FilePenLine,
-  User, Mail, Phone, MapPin, Calendar, MessageSquare, Ban,
+  User, Mail, Phone, MapPin, Calendar, MessageSquare, Ban, Bell,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -71,7 +71,7 @@ type PageView = 'list' | 'detail'
 
 const DOSSIER_STATUSES: DossierStatus[] = [
   'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
-  'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
+  'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte',
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
   'abstention',
 ]
@@ -125,10 +125,6 @@ const LIGNE_SUPP_HOTEL_ACCOMP = 'Supp Hôtel Accompagnateur'
 const LIGNE_HOTEL_NUITEES = 'Hôtel (nbr de nuitées)'
 const LIGNE_DRAINAGE = 'Drainage (nbr de séances)'
 
-function isLigneDesc(desc: string, target: string) {
-  return desc.trim().toLowerCase() === target.trim().toLowerCase()
-}
-
 /** Qté drainage depuis le rapport médecin (0 si drainage non prescrit). */
 function drainageQtyFromRapport(rap?: {
   drainage?: boolean | null
@@ -140,30 +136,6 @@ function drainageQtyFromRapport(rap?: {
     return Math.max(0, Math.floor(Number(rap.nbSeancesDrainage)))
   }
   return null
-}
-
-/** Applique les qté rapport/formulaire sur les lignes concernées (modifiable ensuite). */
-function applyRapportQtysToLignes(
-  lignes: LigneDevisForm[],
-  opts: {
-    qteAccompagnants: number
-    qteHotelNuits: number | null
-    qteDrainage: number | null
-  },
-): LigneDevisForm[] {
-  return lignes.map((l) => {
-    const desc = l.description.trim()
-    if (isLigneDesc(desc, LIGNE_SUPP_CLINIQUE_ACCOMP) || isLigneDesc(desc, LIGNE_SUPP_HOTEL_ACCOMP)) {
-      return { ...l, quantite: Math.max(0, opts.qteAccompagnants) }
-    }
-    if (isLigneDesc(desc, LIGNE_HOTEL_NUITEES) && opts.qteHotelNuits != null) {
-      return { ...l, quantite: Math.max(0, opts.qteHotelNuits) }
-    }
-    if (isLigneDesc(desc, LIGNE_DRAINAGE) && opts.qteDrainage != null) {
-      return { ...l, quantite: Math.max(0, opts.qteDrainage) }
-    }
-    return l
-  })
 }
 
 /** P.U. 1re ligne = forfait médecin ; Qté hôtel / supp / drainage = rapport + formulaire. */
@@ -207,8 +179,44 @@ function buildDefaultLignes(opts?: {
   })
 }
 
+/** Applique les données rapport sur les lignes existantes (conserve descriptions / PU hors forfait). */
+function applyRapportToExistingLignes(
+  lignes: LigneDevisForm[],
+  opts: {
+    honorairesChirCliniquePu?: number
+    qteSuppCliniqueAccomp?: number
+    qteHotelNuits?: number | null
+    qteDrainage?: number | null
+  },
+): LigneDevisForm[] {
+  return lignes.map((l, i) => {
+    let quantite = l.quantite
+    let prixUnitaire = l.prixUnitaire
+    if (
+      i === 0 &&
+      typeof opts.honorairesChirCliniquePu === 'number' &&
+      Number.isFinite(opts.honorairesChirCliniquePu) &&
+      opts.honorairesChirCliniquePu > 0
+    ) {
+      prixUnitaire = normalizeTndDinars(opts.honorairesChirCliniquePu)
+    }
+    if (l.description === LIGNE_SUPP_CLINIQUE_ACCOMP || l.description === LIGNE_SUPP_HOTEL_ACCOMP) {
+      if (typeof opts.qteSuppCliniqueAccomp === 'number' && Number.isFinite(opts.qteSuppCliniqueAccomp)) {
+        quantite = Math.max(0, Math.floor(opts.qteSuppCliniqueAccomp))
+      }
+    }
+    if (l.description === LIGNE_HOTEL_NUITEES && opts.qteHotelNuits != null && Number.isFinite(opts.qteHotelNuits)) {
+      quantite = Math.max(0, Math.floor(opts.qteHotelNuits))
+    }
+    if (l.description === LIGNE_DRAINAGE && opts.qteDrainage != null && Number.isFinite(opts.qteDrainage)) {
+      quantite = Math.max(0, Math.floor(opts.qteDrainage))
+    }
+    return { ...l, quantite, prixUnitaire }
+  })
+}
+
 const STATUTS_DEVIS = [
-  'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
+  'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte',
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
 ]
 
@@ -221,6 +229,20 @@ Nous vous remercions de votre compréhension et vous souhaitons le meilleur dans
 Je vous souhaite une excellente journée.
 Bien cordialement,
 Houda Chennoufi
+Conciergerie & coordination patients
+Cabinet du Dr Mehdi Chennoufi
+Chirurgie Esthétique, Plastique et Réparatrice
+SCULPTURE, SMOOTH & SMILE`
+
+const DEVIS_RAPPEL_MESSAGE_FALLBACK = `Bonjour Madame,
+Je me permets de revenir vers vous suite à l’envoi du devis concernant votre projet chirurgical avec le Dr Chennoufi.
+N’ayant pas encore eu de retour de votre part, je souhaitais savoir si le diagnostic proposé, l’intervention envisagée ainsi que le devis transmis correspondent à vos attentes, ou si certains points mériteraient d’être clarifiés.
+Nous restons bien entendu entièrement disponibles pour répondre à vos questions, vous apporter des informations complémentaires et, si vous le souhaitez, organiser un échange téléphonique afin de discuter plus sereinement de votre projet et de l’organisation de votre séjour médical.
+N’hésitez pas à me faire part de votre retour, même bref ; il nous est précieux pour vous accompagner au mieux.
+Horaires de travail : Mardi, Mercredi & Jeudi de 09 à 15h (heure locale)
+Au plaisir de vous lire,
+Bien cordialement,
+Houda CHENNOUFI
 Conciergerie & coordination patients
 Cabinet du Dr Mehdi Chennoufi
 Chirurgie Esthétique, Plastique et Réparatrice
@@ -239,6 +261,7 @@ function applyTemplateVars(content: string, fullName: string) {
 /** Aligné sur `assertPatientReadyForDevis` (backend). */
 const DEVIS_READY_STATUSES = [
   'rapport_genere',
+  'rapport_modifie',
   'devis_preparation',
   'devis_envoye',
   'devis_accepte',
@@ -454,7 +477,7 @@ interface DevisModalProps {
   inclutIds: string[]; setInclutIds: (v: string[] | ((prev: string[]) => string[])) => void
   exclutIds: string[]; setExclutIds: (v: string[] | ((prev: string[]) => string[])) => void
   drainageNb: number; setDrainageNb: (v: number | ((prev: number) => number)) => void
-  sent: boolean; savedDraft: boolean; actionLoading: boolean
+  sent: boolean; savedDraft: boolean; autoSaving?: boolean; actionLoading: boolean
   onSend: () => void; onSaveDraft: () => void
   onDelete: () => void
   canDelete: boolean
@@ -480,7 +503,7 @@ function DevisModal({
   inclutIds, setInclutIds,
   exclutIds, setExclutIds,
   drainageNb, setDrainageNb,
-  sent, savedDraft, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
+  sent, savedDraft, autoSaving = false, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
   tauxEur,
   formError = null,
   cliniqueNomInvalid = false,
@@ -516,6 +539,11 @@ function DevisModal({
               {existingDevis?.statut === 'brouillon' || isEditing ? 'Modifier le devis' : 'Nouveau devis'}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">{patientName}</p>
+            {(autoSaving || savedDraft) && (
+              <p className={`text-[11px] mt-1 font-medium ${savedDraft && !autoSaving ? 'text-emerald-600' : 'text-slate-400'}`}>
+                {autoSaving ? 'Enregistrement automatique…' : 'Brouillon enregistré automatiquement'}
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -943,10 +971,10 @@ function DevisModal({
             variant="outline"
             className="sm:w-auto h-10 gap-2 border-slate-200"
             onClick={onSaveDraft}
-            disabled={actionLoading}
+            disabled={actionLoading || autoSaving}
           >
-            <Save className="h-4 w-4 text-slate-400" />
-            {savedDraft ? 'Sauvegardé !' : 'Brouillon'}
+            <Save className={`h-4 w-4 ${autoSaving ? 'animate-pulse text-brand-600' : 'text-slate-400'}`} />
+            {autoSaving ? 'Enregistrement…' : savedDraft ? 'Enregistré !' : 'Brouillon'}
           </Button>
           {canDelete && (
             <Button
@@ -1007,13 +1035,25 @@ export default function DevisGestionnairePage() {
   const [cliniqueNomInvalid, setCliniqueNomInvalid] = useState(false)
   const [hotelNomInvalid, setHotelNomInvalid] = useState(false)
   const [search, setSearch]               = useState('')
-  const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'accepte' | 'refuse'>('all')
+  const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'supprime'>('all')
   const [page, setPage]                   = useState(1)
   const [view, setView]                   = useState<PageView>('list')
   const [selectedPatient, setSelectedPatient] = useState('')
   const [patientDetail, setPatientDetail] = useState<GestionnairePatientDetail | null>(null)
   const [showModal, setShowModal]         = useState(false)
   const [tauxEur, setTauxEur]             = useState<TndEurRateResponse | null>(null)
+  const [deletedDevis, setDeletedDevis]   = useState<Array<{
+    id: string
+    numeroDevis: string | null
+    statut: string
+    version: number
+    total: number
+    currency: string
+    dateCreation: string
+    deletedAt: string
+    patient: { id: string; dossierNumber: string; fullName: string; email: string }
+  }>>([])
+  const [deletedLoading, setDeletedLoading] = useState(false)
 
   /* State devis form */
   const [lignes, setLignes]                   = useState<LigneDevisForm[]>(buildDefaultLignes())
@@ -1033,6 +1073,7 @@ export default function DevisGestionnairePage() {
   const [isEditingExisting, setIsEditingExisting] = useState(false)
   const [sent, setSent]                       = useState(false)
   const [savedDraft, setSavedDraft]           = useState(false)
+  const [autoSaving, setAutoSaving]           = useState(false)
   const [actionLoading, setActionLoading]     = useState(false)
   const [pendingDelete, setPendingDelete] = useState<
     | { kind: 'devis'; devisId: string }
@@ -1044,11 +1085,35 @@ export default function DevisGestionnairePage() {
   const [abstentionMsgOpen, setAbstentionMsgOpen] = useState(false)
   const [abstentionMsg, setAbstentionMsg] = useState(ABSTENTION_MESSAGE_FALLBACK)
   const [abstentionMsgSending, setAbstentionMsgSending] = useState(false)
+  const [rappelOpen, setRappelOpen] = useState(false)
+  const [rappelMsg, setRappelMsg] = useState(DEVIS_RAPPEL_MESSAGE_FALLBACK)
+  const [rappelSending, setRappelSending] = useState(false)
+  const [rappelError, setRappelError] = useState<string | null>(null)
+  const [rappelTarget, setRappelTarget] = useState<{
+    patientId: string
+    patientName: string
+    devisId: string
+    numeroDevis?: string | null
+    version?: number
+  } | null>(null)
   const [consultVersionsOpen, setConsultVersionsOpen] = useState(false)
+  const [deletePicker, setDeletePicker] = useState<{
+    patientId: string
+    patientName: string
+    versions: Devis[]
+    selectedId: string
+    loading: boolean
+  } | null>(null)
   const [abstentionMsgError, setAbstentionMsgError] = useState<string | null>(null)
   const [dossierStatusDraft, setDossierStatusDraft] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
+
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const draftSaveInFlightRef = useRef(false)
+  const draftSavePendingRef = useRef(false)
+  const persistDraftSilentRef = useRef<() => Promise<boolean>>(async () => false)
+  const [modalReady, setModalReady] = useState(false)
 
   // Séjour total (nuits) = nuits clinique + nuits hôtel
   useEffect(() => {
@@ -1056,6 +1121,7 @@ export default function DevisGestionnairePage() {
   }, [cliniqueNuits, hotelNuits])
 
   const patientsFiltered = useMemo(() => {
+    if (devisFilter === 'supprime') return []
     const all = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
     const q = search.trim().toLowerCase()
     const bySearch = !q ? all : all.filter((p) =>
@@ -1069,14 +1135,49 @@ export default function DevisGestionnairePage() {
     })
   }, [patients, search, devisFilter])
 
+  const deletedFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return deletedDevis
+    return deletedDevis.filter((d) =>
+      d.patient.fullName.toLowerCase().includes(q)
+      || d.patient.dossierNumber.toLowerCase().includes(q)
+      || (d.numeroDevis ?? '').toLowerCase().includes(q),
+    )
+  }, [deletedDevis, search])
+
+  const loadDeletedDevis = useCallback(async () => {
+    setDeletedLoading(true)
+    try {
+      const r = await gestionnaireApi.getDeletedDevis()
+      setDeletedDevis(r.devis)
+    } catch {
+      setDeletedDevis([])
+    } finally {
+      setDeletedLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadDeletedDevis()
+  }, [loadDeletedDevis])
+
   useEffect(() => {
     setPage(1)
   }, [search, devisFilter])
 
-  const { slice: pagePatients, totalPages, page: safePage, total: listTotal } = useMemo(
+  const { slice: pagePatients, totalPages: patientTotalPages, page: patientSafePage, total: patientListTotal } = useMemo(
     () => paginateSlice(patientsFiltered, page, LIST_PAGE_SIZE),
     [patientsFiltered, page],
   )
+
+  const { slice: pageDeleted, totalPages: deletedTotalPages, page: deletedSafePage, total: deletedListTotal } = useMemo(
+    () => paginateSlice(deletedFiltered, page, LIST_PAGE_SIZE),
+    [deletedFiltered, page],
+  )
+
+  const totalPages = devisFilter === 'supprime' ? deletedTotalPages : patientTotalPages
+  const safePage = devisFilter === 'supprime' ? deletedSafePage : patientSafePage
+  const listTotal = devisFilter === 'supprime' ? deletedListTotal : patientListTotal
 
   const loadTauxEur = useCallback(async () => {
     try {
@@ -1158,12 +1259,17 @@ export default function DevisGestionnairePage() {
   }, [view, selectedPatient, loadPatientDetail])
 
   const existingDevis: Devis | null = useMemo(() => {
-    const list = patientDetail?.devis ?? []
-    return (
-      list.find((d) => d.statut === 'brouillon') ??
-      list.find((d) => d.statut === 'envoye' || d.statut === 'accepte') ??
-      null
+    const list = [...(patientDetail?.devis ?? [])]
+    const editable = list.filter(
+      (d) => d.statut === 'brouillon' || d.statut === 'envoye' || d.statut === 'accepte',
     )
+    if (editable.length === 0) return null
+    // Toujours la dernière version remplie (pas la première / un vieux brouillon).
+    return editable.sort(
+      (a, b) =>
+        b.version - a.version ||
+        +new Date(b.dateCreation) - +new Date(a.dateCreation),
+    )[0]!
   }, [patientDetail])
 
   const devisVersions = useMemo(() => {
@@ -1237,6 +1343,11 @@ export default function DevisGestionnairePage() {
     const qteHotelRaw = Number(fromRapport.hotelNuits)
     const qteHotel = Number.isFinite(qteHotelRaw) ? Math.max(0, Math.floor(qteHotelRaw)) : null
     const qteDrainage = drainageQtyFromRapport(rap)
+    const fp = rap?.forfaitPropose ?? rapportsList[0]?.forfaitPropose
+    const honoraires =
+      typeof fp === 'number' && Number.isFinite(fp) && fp > 0 ? fp : undefined
+    /** Rapport modifié : on garde la même fiche devis mais on injecte les nouvelles données médecin. */
+    const syncFromRapport = status === 'rapport_modifie'
 
     if (editing && existingDevis) {
       const baseLignes = existingDevis.lignes.map((l) => ({
@@ -1245,34 +1356,33 @@ export default function DevisGestionnairePage() {
         prixUnitaire: normalizeTndDinars(l.prixUnitaire),
       }))
       setLignes(
-        applyRapportQtysToLignes(baseLignes, {
-          qteAccompagnants: qteAccomp,
-          qteHotelNuits: qteHotel,
-          qteDrainage,
-        }),
+        syncFromRapport
+          ? applyRapportToExistingLignes(baseLignes, {
+              honorairesChirCliniquePu: honoraires,
+              qteSuppCliniqueAccomp: qteAccomp,
+              qteHotelNuits: qteHotel,
+              qteDrainage,
+            })
+          : baseLignes,
       )
       const p = parseSejourMeta(existingDevis.notesSejour ?? existingDevis.planningMedical ?? '')
       const clinique = resolveCliniqueFromNom(p.cliniqueNom)
       const hotel = resolveHotelFromNom(p.hotelNom)
       setCliniqueChoice(clinique.choice)
       setCliniqueAutre(clinique.autre)
-      setCliniqueNuits(p.cliniqueNuits !== '' ? p.cliniqueNuits : fromRapport.cliniqueNuits)
+      setCliniqueNuits(syncFromRapport ? fromRapport.cliniqueNuits : (p.cliniqueNuits !== '' ? p.cliniqueNuits : fromRapport.cliniqueNuits))
       setHotelChoice(hotel.choice)
       setHotelAutre(hotel.autre)
-      // Priorité rapport / formulaire (comme hôtel & accompagnants)
-      setHotelNuits(fromRapport.hotelNuits !== '' ? fromRapport.hotelNuits : p.hotelNuits)
-      setNbAdultes(fromRapport.nbAdultes !== '' ? fromRapport.nbAdultes : p.nbAdultes)
-      setNbEnfants(fromRapport.nbEnfants !== '' ? fromRapport.nbEnfants : p.nbEnfants)
-      setDureeSejourTotale(p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale)
+      setHotelNuits(syncFromRapport ? fromRapport.hotelNuits : (p.hotelNuits !== '' ? p.hotelNuits : fromRapport.hotelNuits))
+      setNbAdultes(syncFromRapport ? fromRapport.nbAdultes : (p.nbAdultes !== '' ? p.nbAdultes : fromRapport.nbAdultes))
+      setNbEnfants(syncFromRapport ? fromRapport.nbEnfants : (p.nbEnfants !== '' ? p.nbEnfants : fromRapport.nbEnfants))
+      setDureeSejourTotale(syncFromRapport ? fromRapport.dureeSejourTotale : (p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale))
       setNotesSejour(p.noteSejour)
       setInclutIds(p.inclutIds ?? defaultInclutIds())
       setExclutIds(p.exclutIds ?? defaultExclutIds())
-      setDrainageNb(p.drainageNb ?? defaultDrainageNbFromRapport(rap))
+      setDrainageNb(syncFromRapport ? defaultDrainageNbFromRapport(rap) : (p.drainageNb ?? defaultDrainageNbFromRapport(rap)))
       setIsEditingExisting(true)
     } else {
-      const fp = rap?.forfaitPropose ?? rapportsList[0]?.forfaitPropose
-      const honoraires =
-        typeof fp === 'number' && Number.isFinite(fp) && fp > 0 ? fp : undefined
       setLignes(
         buildDefaultLignes({
           honorairesChirCliniquePu: honoraires,
@@ -1352,31 +1462,213 @@ export default function DevisGestionnairePage() {
     return true
   }
 
-  const handleSaveDraft = async () => {
-    if (!selectedPatient) return
+  /** Persiste le brouillon (manuel ou auto). Silent = pas de validation noms / pas de reload complet. */
+  const persistDraft = useCallback(async (opts?: {
+    silent?: boolean
+    requireNoms?: boolean
+  }): Promise<boolean> => {
+    const silent = opts?.silent ?? false
+    const requireNoms = opts?.requireNoms ?? !silent
+    if (!selectedPatient) return false
     const status = patientRow?.status ?? patientDetail?.status
     if (!status || !canPatientHaveDevis(status)) {
-      setModalError(
-        'Impossible d’enregistrer : le rapport médical du médecin doit d’abord être généré.',
-      )
-      return
+      if (!silent) {
+        setModalError(
+          'Impossible d’enregistrer : le rapport médical du médecin doit d’abord être généré.',
+        )
+      }
+      return false
     }
-    if (!validateSejourNoms()) return
-    if (buildPayload().lignes.length === 0) {
-      setModalError('Ajoutez au moins une prestation avec une désignation.')
-      return
+    if (requireNoms && !validateSejourNoms()) return false
+
+    const payload = buildPayload()
+    if (payload.lignes.length === 0) {
+      if (!silent) setModalError('Ajoutez au moins une prestation avec une désignation.')
+      return false
     }
-    setActionLoading(true); setModalError(null); setPageError(null)
+
+    if (draftSaveInFlightRef.current) {
+      if (silent) draftSavePendingRef.current = true
+      return false
+    }
+    draftSaveInFlightRef.current = true
+    if (silent) setAutoSaving(true)
+    else {
+      setActionLoading(true)
+      setModalError(null)
+      setPageError(null)
+    }
+
     try {
-      await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
-      setSavedDraft(true); setTimeout(() => setSavedDraft(false), 2000)
-      await loadPatientDetail(selectedPatient); await loadPatients()
-    } catch (e) { setModalError(apiErrorMessage(e)) }
-    finally { setActionLoading(false) }
+      const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, payload)
+      let savedDevis = r.devis
+      const existingContent =
+        r.devis.customContent
+        ?? patientDetail?.devis?.find((d) => d.id === r.devis.id)?.customContent
+        ?? null
+      if (existingContent?.trim()) {
+        const detail = patientDetail?.id === selectedPatient
+          ? patientDetail
+          : (await gestionnaireApi.getPatient(selectedPatient)).patient
+        const devisForSync: Devis = {
+          ...r.devis,
+          lignes: payload.lignes,
+          total: payload.total,
+          notesSejour: payload.notesSejour,
+          currency: payload.currency,
+          dateValidite: payload.dateValidite,
+          planningMedical: payload.planningMedical,
+          customContent: existingContent,
+        }
+        const letterCtx = letterContextFromGestionnairePatient(
+          {
+            ...detail,
+            devis: detail.devis?.some((d) => d.id === r.devis.id)
+              ? detail.devis.map((d) => (d.id === r.devis.id ? devisForSync : d))
+              : [...(detail.devis ?? []), devisForSync],
+          },
+          devisForSync,
+        )
+        const { contentToSave } = refreshDevisCustomContentParts({
+          customContent: existingContent,
+          devis: devisForSync,
+          letterContext: letterCtx,
+          tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
+        })
+        await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
+        savedDevis = { ...r.devis, customContent: contentToSave }
+      }
+
+      setPatientDetail((prev) => {
+        if (!prev || prev.id !== selectedPatient) return prev
+        const rest = (prev.devis ?? []).filter((d) => d.id !== savedDevis.id)
+        return { ...prev, devis: [savedDevis, ...rest] }
+      })
+      setSavedDraft(true)
+      window.setTimeout(() => setSavedDraft(false), 2200)
+
+      if (!silent) {
+        await loadPatientDetail(selectedPatient)
+        await loadPatients()
+      }
+      return true
+    } catch (e) {
+      if (!silent) setModalError(apiErrorMessage(e))
+      else console.error('[devis] auto-save échoué', e)
+      return false
+    } finally {
+      draftSaveInFlightRef.current = false
+      if (silent) setAutoSaving(false)
+      else setActionLoading(false)
+      if (silent && draftSavePendingRef.current) {
+        draftSavePendingRef.current = false
+        window.setTimeout(() => { void persistDraftSilentRef.current() }, 200)
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- buildPayload/validate lisent l’état courant
+  }, [
+    selectedPatient,
+    patientRow?.status,
+    patientDetail,
+    tauxEur?.tndPerEur,
+    loadPatientDetail,
+    loadPatients,
+    lignes,
+    cliniqueChoice,
+    cliniqueAutre,
+    cliniqueNuits,
+    hotelChoice,
+    hotelAutre,
+    hotelNuits,
+    nbAdultes,
+    nbEnfants,
+    dureeSejourTotale,
+    notesSejour,
+    inclutIds,
+    exclutIds,
+    drainageNb,
+    currency,
+  ])
+
+  persistDraftSilentRef.current = () => persistDraft({ silent: true, requireNoms: false })
+
+  const draftFormSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        lignes,
+        cliniqueChoice,
+        cliniqueAutre,
+        cliniqueNuits,
+        hotelChoice,
+        hotelAutre,
+        hotelNuits,
+        nbAdultes,
+        nbEnfants,
+        dureeSejourTotale,
+        notesSejour,
+        inclutIds,
+        exclutIds,
+        drainageNb,
+      }),
+    [
+      lignes,
+      cliniqueChoice,
+      cliniqueAutre,
+      cliniqueNuits,
+      hotelChoice,
+      hotelAutre,
+      hotelNuits,
+      nbAdultes,
+      nbEnfants,
+      dureeSejourTotale,
+      notesSejour,
+      inclutIds,
+      exclutIds,
+      drainageNb,
+    ],
+  )
+
+  // Après ouverture du modal : ignorer le premier snapshot (hydratation), puis auto-save
+  useEffect(() => {
+    if (!showModal) {
+      setModalReady(false)
+      if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+      setAutoSaving(false)
+      return
+    }
+    setModalReady(false)
+    const ready = window.setTimeout(() => setModalReady(true), 600)
+    return () => clearTimeout(ready)
+  }, [showModal])
+
+  useEffect(() => {
+    if (!showModal || !modalReady) return
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+    draftSaveTimerRef.current = setTimeout(() => {
+      void persistDraftSilentRef.current()
+    }, 900)
+    return () => {
+      if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+    }
+  }, [showModal, modalReady, draftFormSnapshot])
+
+  const flushDraftAndCloseModal = useCallback(() => {
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+    void (async () => {
+      if (modalReady) await persistDraftSilentRef.current()
+      setShowModal(false)
+      setModalReady(false)
+    })()
+  }, [modalReady])
+
+  const handleSaveDraft = async () => {
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+    await persistDraft({ silent: false, requireNoms: true })
   }
 
   const handleSend = async () => {
     if (!selectedPatient) return
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     const status = patientRow?.status ?? patientDetail?.status
     if (!status || !canPatientHaveDevis(status)) {
       setModalError(
@@ -1458,11 +1750,13 @@ export default function DevisGestionnairePage() {
   const handleCustomize = async () => {
     if (!selectedPatient) return
     if (!validateSejourNoms()) return
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     setActionLoading(true); setModalError(null); setPageError(null)
     try {
       // Sauvegarder d'abord le brouillon pour s'assurer que le devisId existe
       const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
       setShowModal(false)
+      setModalReady(false)
       navigate(
         `/gestionnaire/devis/${selectedPatient}/personnaliser?devisId=${encodeURIComponent(r.devis.id)}`,
       )
@@ -1489,6 +1783,60 @@ export default function DevisGestionnairePage() {
     setPendingDelete({ kind: 'dossier', patientId, patientName })
   }
 
+  /** Ouvre la popup de choix de version à supprimer. */
+  const openDeleteVersionPicker = async (
+    e: MouseEvent | null,
+    patientId: string,
+    patientName: string,
+    preferredDevisId?: string,
+  ) => {
+    e?.stopPropagation()
+    setDeleteError(null)
+    setDeletePicker({
+      patientId,
+      patientName,
+      versions: [],
+      selectedId: preferredDevisId ?? '',
+      loading: true,
+    })
+    try {
+      const r = await gestionnaireApi.getPatient(patientId)
+      const versions = [...(r.patient.devis ?? [])]
+        .sort((a, b) => b.version - a.version || +new Date(b.dateCreation) - +new Date(a.dateCreation))
+      if (versions.length === 0) {
+        setDeletePicker(null)
+        requestRemoveFromDevisList(patientId, patientName)
+        return
+      }
+      if (versions.length === 1) {
+        setDeletePicker(null)
+        requestDeleteDevis(versions[0]!.id)
+        return
+      }
+      const selectedId =
+        (preferredDevisId && versions.some((d) => d.id === preferredDevisId))
+          ? preferredDevisId
+          : versions[0]!.id
+      setDeletePicker({
+        patientId,
+        patientName,
+        versions,
+        selectedId,
+        loading: false,
+      })
+    } catch (err) {
+      setDeletePicker(null)
+      setPageError(err instanceof Error ? err.message : 'Impossible de charger les versions.')
+    }
+  }
+
+  const confirmDeletePickerSelection = () => {
+    if (!deletePicker?.selectedId) return
+    const id = deletePicker.selectedId
+    setDeletePicker(null)
+    requestDeleteDevis(id)
+  }
+
   const confirmPendingDelete = async () => {
     if (!pendingDelete) return
     setDeleteLoading(true)
@@ -1501,8 +1849,13 @@ export default function DevisGestionnairePage() {
         setShowModal(false)
         setIsEditingExisting(false)
         if (selectedPatient) await loadPatientDetail(selectedPatient)
+        toast({
+          title: 'Devis déplacé dans « Supprimés »',
+          description: 'Cette version est retirée de l’espace patient et du chat.',
+          variant: 'success',
+        })
+        await loadDeletedDevis()
       } else {
-        // Retire le dossier de la file devis (historique conservé, réouverture possible)
         await gestionnaireApi.updatePatientStatus(pendingDelete.patientId, 'abstention')
         if (selectedPatient === pendingDelete.patientId) goBackToList()
         toast({ title: 'Dossier retiré de la liste des devis.', variant: 'success' })
@@ -1518,13 +1871,17 @@ export default function DevisGestionnairePage() {
   }
 
   const handleDeleteDevis = () => {
-    if (!existingDevis) return
-    requestDeleteDevis(existingDevis.id)
+    if (!selectedPatient || !patientRow) return
+    void openDeleteVersionPicker(
+      null,
+      selectedPatient,
+      patientRow.user.fullName,
+      existingDevis?.id,
+    )
   }
 
-  const handleDeleteDevisFromList = (e: MouseEvent, devisId: string) => {
-    e.stopPropagation()
-    requestDeleteDevis(devisId)
+  const handleDeleteDevisFromList = (e: MouseEvent, patientId: string, patientName: string, devisId?: string) => {
+    void openDeleteVersionPicker(e, patientId, patientName, devisId)
   }
 
   const handleRemoveDossierFromList = (e: MouseEvent, patientId: string, patientName: string) => {
@@ -1569,6 +1926,94 @@ export default function DevisGestionnairePage() {
     }
   }
 
+  const openRappelDevis = (
+    e: MouseEvent | null,
+    patientId: string,
+    patientName: string,
+    devis: { id: string; numeroDevis?: string | null; version?: number },
+  ) => {
+    e?.stopPropagation()
+    setRappelError(null)
+    setRappelTarget({
+      patientId,
+      patientName,
+      devisId: devis.id,
+      numeroDevis: devis.numeroDevis,
+      version: devis.version,
+    })
+    setRappelMsg(applyTemplateVars(DEVIS_RAPPEL_MESSAGE_FALLBACK, patientName))
+    setRappelOpen(true)
+    void gestionnaireApi
+      .getCommunicationTemplates()
+      .then((res) => {
+        const tpl = res.templates.find((t) => t.key === 'devisRappel')
+        if (!tpl?.active || !tpl.content.trim()) return
+        setRappelMsg(applyTemplateVars(tpl.content, patientName))
+      })
+      .catch(() => {
+        /* repli déjà appliqué */
+      })
+  }
+
+  const sendRappelDevis = async () => {
+    if (!rappelTarget) return
+    const contenu = rappelMsg.trim()
+    if (!contenu) {
+      setRappelError('Le message ne peut pas être vide.')
+      return
+    }
+    setRappelSending(true)
+    setRappelError(null)
+    try {
+      const detail =
+        patientDetail?.id === rappelTarget.patientId
+          ? patientDetail
+          : (await gestionnaireApi.getPatient(rappelTarget.patientId)).patient
+      const devisForPdf =
+        detail.devis?.find((d) => d.id === rappelTarget.devisId)
+        ?? detail.devis?.find((d) => d.statut === 'envoye')
+        ?? null
+      if (!devisForPdf) {
+        setRappelError('Aucun devis envoyé trouvé pour cette patiente.')
+        return
+      }
+      const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
+      const letterCtx = letterContextFromGestionnairePatient(detail, devisForPdf)
+      const { topHtml, botHtml, contentToSave } = refreshDevisCustomContentParts({
+        customContent: devisForPdf.customContent,
+        devis: devisForPdf,
+        letterContext: letterCtx,
+        tndPerEur: rate,
+      })
+      const fullHtml = await inlineHtmlImages(
+        buildGestionnaireDevisExportHtml({
+          devis: { ...devisForPdf, customContent: contentToSave },
+          patient: detail,
+          topHtml,
+          botHtml,
+          tndPerEur: rate,
+        }),
+      )
+      const r = await gestionnaireApi.sendDevisRappel(devisForPdf.id, {
+        contenu,
+        html: fullHtml,
+      })
+      setRappelOpen(false)
+      setRappelTarget(null)
+      toast({
+        title: 'Rappel envoyé',
+        description: r.pdfAttached
+          ? 'Message + PDF dans le chat, email envoyé à la patiente.'
+          : 'Message envoyé (PDF non joint), email envoyé à la patiente.',
+        variant: 'success',
+      })
+    } catch (e) {
+      setRappelError(e instanceof Error ? e.message : 'Envoi impossible.')
+    } finally {
+      setRappelSending(false)
+    }
+  }
+
   /* ══════ RENDER : Vue liste ══════ */
   const renderList = () => {
     const allDevisPatients = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
@@ -1579,19 +2024,29 @@ export default function DevisGestionnairePage() {
       envoye:    allDevisPatients.filter((p) => p.devis[0]?.statut === 'envoye').length,
       accepte:   allDevisPatients.filter((p) => p.devis[0]?.statut === 'accepte').length,
       refuse:    allDevisPatients.filter((p) => p.devis[0]?.statut === 'refuse').length,
+      supprime:  deletedDevis.length,
+    }
+    const listBusy = devisFilter === 'supprime' ? deletedLoading : listLoading
+    const showingDeleted = devisFilter === 'supprime'
+    const refreshList = () => {
+      if (showingDeleted) void loadDeletedDevis()
+      else void loadPatients()
     }
 
     return (
     <div className="flex-1 overflow-y-auto">
-      <PullToRefresh onRefresh={() => loadPatients({ silent: true })}>
+      <PullToRefresh onRefresh={async () => {
+        if (showingDeleted) await loadDeletedDevis()
+        else await loadPatients({ silent: true })
+      }}>
       <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 space-y-5">
 
         <PageHeader
           title="Gestion des devis"
           description="Préparez, personnalisez et envoyez les devis patients."
           actions={
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void loadPatients()} disabled={listLoading}>
-              <RefreshCw className={`h-3.5 w-3.5 ${listLoading ? 'animate-spin' : ''}`} /> Actualiser
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={refreshList} disabled={listBusy}>
+              <RefreshCw className={`h-3.5 w-3.5 ${listBusy ? 'animate-spin' : ''}`} /> Actualiser
             </Button>
           }
         />
@@ -1604,6 +2059,7 @@ export default function DevisGestionnairePage() {
             { key: 'envoye', label: 'Envoyé', value: listLoading ? '—' : kpi.envoye, tone: 'sky', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
             { key: 'accepte', label: 'Accepté', value: listLoading ? '—' : kpi.accepte, tone: 'emerald', active: devisFilter === 'accepte', onClick: () => setDevisFilter('accepte') },
             { key: 'refuse', label: 'Refusé', value: listLoading ? '—' : kpi.refuse, tone: 'rose', active: devisFilter === 'refuse', onClick: () => setDevisFilter('refuse') },
+            { key: 'supprime', label: 'Supprimés', value: deletedLoading && deletedDevis.length === 0 ? '—' : kpi.supprime, tone: 'default', active: devisFilter === 'supprime', onClick: () => setDevisFilter('supprime') },
           ]}
         />
 
@@ -1614,7 +2070,7 @@ export default function DevisGestionnairePage() {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
               <input
                 className="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl border border-slate-200 bg-muted/20 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400/30 focus:border-brand-400 transition"
-                placeholder="Rechercher nom, n° dossier…"
+                placeholder={showingDeleted ? 'Rechercher nom, n° dossier, n° devis…' : 'Rechercher nom, n° dossier…'}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -1632,6 +2088,7 @@ export default function DevisGestionnairePage() {
                 { key: 'envoye'    as const, label: 'Envoyé' },
                 { key: 'accepte'   as const, label: 'Accepté' },
                 { key: 'refuse'    as const, label: 'Refusé' },
+                { key: 'supprime'  as const, label: 'Supprimés' },
               ]).map(({ key, label }) => (
                 <button key={key} type="button"
                   onClick={() => setDevisFilter(key)}
@@ -1646,16 +2103,26 @@ export default function DevisGestionnairePage() {
 
           <div className="flex items-center justify-between px-4 py-2 bg-muted/10">
             <p className="text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">{patientsFiltered.length}</span> patient{patientsFiltered.length > 1 ? 's' : ''}
-              {devisFilter !== 'all' || search ? ' (filtrés)' : ''}
+              {showingDeleted ? (
+                <>
+                  <span className="font-semibold text-foreground">{deletedFiltered.length}</span>
+                  {' '}devis supprimé{deletedFiltered.length > 1 ? 's' : ''}
+                  {search ? ' (filtrés)' : ''}
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-foreground">{patientsFiltered.length}</span> patient{patientsFiltered.length > 1 ? 's' : ''}
+                  {devisFilter !== 'all' || search ? ' (filtrés)' : ''}
+                </>
+              )}
             </p>
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => void loadPatients()} disabled={listLoading}>
-              <RefreshCw className={`h-3.5 w-3.5 ${listLoading ? 'animate-spin' : ''}`} /> Actualiser
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={refreshList} disabled={listBusy}>
+              <RefreshCw className={`h-3.5 w-3.5 ${listBusy ? 'animate-spin' : ''}`} /> Actualiser
             </Button>
           </div>
 
           {/* Skeleton loading */}
-          {listLoading && (
+          {listBusy && (
             <div className="divide-y divide-border/40">
               {Array.from({ length: 5 }).map((_, k) => (
                 <div key={k} className="px-5 py-4 flex items-center gap-4">
@@ -1670,8 +2137,23 @@ export default function DevisGestionnairePage() {
             </div>
           )}
 
-          {/* Vide */}
-          {!listLoading && patientsFiltered.length === 0 && (
+          {/* Vide — devis supprimés */}
+          {!listBusy && showingDeleted && deletedFiltered.length === 0 && (
+            <EmptyState
+              icon={Trash2}
+              title="Aucun devis supprimé"
+              description={
+                search
+                  ? `Aucun résultat pour « ${search} »`
+                  : 'Les devis supprimés apparaissent ici. Ils sont retirés automatiquement de l’espace patient.'
+              }
+              actionLabel={search ? 'Effacer la recherche' : undefined}
+              onAction={search ? () => setSearch('') : undefined}
+            />
+          )}
+
+          {/* Vide — patients */}
+          {!listBusy && !showingDeleted && patientsFiltered.length === 0 && (
             <EmptyState
               icon={FileText}
               title="Aucun patient trouvé"
@@ -1691,8 +2173,68 @@ export default function DevisGestionnairePage() {
             />
           )}
 
+          {/* Liste — devis supprimés */}
+          {!listBusy && showingDeleted && deletedFiltered.length > 0 && (
+            <>
+            <div className="divide-y divide-border/40">
+              {(pageDeleted).map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-muted/20 transition-colors"
+                >
+                  <Avatar className="h-9 w-9 sm:h-10 sm:w-10 shrink-0">
+                    <AvatarFallback className="bg-slate-100 text-slate-600 font-bold text-xs rounded-xl">
+                      {initials(d.patient.fullName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{d.patient.fullName}</p>
+                      <span className="text-[10px] font-mono text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">
+                        {d.patient.dossierNumber}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[11px] text-slate-400">
+                      <span>{d.numeroDevis || 'Sans n°'}</span>
+                      <span>·</span>
+                      <span>v{d.version}</span>
+                      <span>·</span>
+                      <span>{formatCurrency(d.total, (d.currency as CurrencyUnit) || 'TND')}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className="inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-200">
+                      Supprimé
+                    </span>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {formatDateTime(d.deletedAt)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => openDetail(d.patient.id)}
+                  >
+                    Dossier
+                    <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <PaginationBar
+              page={safePage}
+              totalPages={totalPages}
+              total={listTotal}
+              pageSize={LIST_PAGE_SIZE}
+              onPageChange={setPage}
+            />
+            </>
+          )}
+
           {/* Liste */}
-          {!listLoading && patientsFiltered.length > 0 && (
+          {!listBusy && !showingDeleted && patientsFiltered.length > 0 && (
             <>
             <div className="divide-y divide-border/40">
               {pagePatients.map((p) => {
@@ -1776,6 +2318,23 @@ export default function DevisGestionnairePage() {
                   <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 shrink-0 transition-colors" />
                   </button>
 
+                  {devisStatut === 'envoye' && lastDevis && (
+                    <button
+                      type="button"
+                      title="Envoyer un rappel devis"
+                      disabled={actionLoading || rappelSending}
+                      onClick={(e) =>
+                        openRappelDevis(e, p.id, p.user.fullName, {
+                          id: lastDevis.id,
+                          numeroDevis: lastDevis.numeroDevis,
+                        })
+                      }
+                      className="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-sky-500 hover:text-sky-700 hover:bg-sky-50 transition-colors disabled:opacity-50"
+                    >
+                      <Bell className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+
                   {/* Supprimer devis OU retirer le dossier sans devis */}
                   <button
                     type="button"
@@ -1783,7 +2342,7 @@ export default function DevisGestionnairePage() {
                     disabled={actionLoading}
                     onClick={(e) =>
                       lastDevis
-                        ? handleDeleteDevisFromList(e, lastDevis.id)
+                        ? handleDeleteDevisFromList(e, p.id, p.user.fullName, lastDevis.id)
                         : handleRemoveDossierFromList(e, p.id, p.user.fullName)
                     }
                     className="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
@@ -1940,6 +2499,24 @@ export default function DevisGestionnairePage() {
                             <FileText className="h-4 w-4" />
                             {devisActionLabel}
                           </Button>
+                          {existingDevis && existingDevis.statut === 'envoye' && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="gap-1.5 w-full sm:w-auto h-10 text-sm border-sky-200 text-sky-700 hover:bg-sky-50 justify-center bg-white/80"
+                              disabled={detailLoading || rappelSending}
+                              onClick={() =>
+                                openRappelDevis(null, patientRow.id, patientRow.user.fullName, {
+                                  id: existingDevis.id,
+                                  numeroDevis: existingDevis.numeroDevis,
+                                  version: existingDevis.version,
+                                })
+                              }
+                            >
+                              <Bell className="h-4 w-4" />
+                              Rappel devis
+                            </Button>
+                          )}
                           {existingDevis && (
                             <Button
                               type="button"
@@ -2006,6 +2583,15 @@ export default function DevisGestionnairePage() {
                   </div>
                 </div>
               </div>
+
+              {patientRow.status === 'rapport_modifie' && (
+                <div className="border-t border-amber-100 bg-amber-50/90 px-4 sm:px-6 py-3">
+                  <p className="text-sm font-semibold text-amber-950">Rapport modifié par le médecin</p>
+                  <p className="mt-0.5 text-[13px] text-amber-900/90">
+                    Reprenez la même fiche devis : forfait, nuits, drainage et examens sont mis à jour dans le tableau, le PDF et l’éditeur.
+                  </p>
+                </div>
+              )}
 
               {/* Barre statut — comme médecin : badge actuel + classement */}
               <div className="border-t border-slate-200/80 px-4 sm:px-6 py-3 bg-white space-y-2">
@@ -2122,37 +2708,62 @@ export default function DevisGestionnairePage() {
                 <Section
                   icon={<ClipboardList className="h-4 w-4" />}
                   title="Formulaires médicaux"
-                  count={patientDetail?.formulaires.length ?? 0}
+                  count={
+                    patientDetail?.formulaires?.length
+                      ? 1
+                      : 0
+                  }
                   defaultOpen
                 >
                   {!patientDetail?.formulaires.length ? (
                     <p className="text-sm text-slate-400 text-center py-4">Aucun formulaire soumis.</p>
                   ) : (
                     <div className="space-y-6">
-                      {patientDetail.formulaires.map((f, idx) => (
-                        <div key={f.id}>
-                          {idx > 0 && <hr className="border-slate-100 mb-6" />}
-                          <div className="flex items-center gap-3 mb-4">
-                            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${f.status === 'submitted' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-                            <p className="text-sm font-semibold text-slate-700">
-                              Formulaire {idx + 1}
-                              <span className="font-normal text-slate-400 ml-2">· {formatDate(f.createdAt)}</span>
-                            </p>
-                            <span className={`ml-auto text-xs font-semibold px-2.5 py-1 rounded-full ${
-                              f.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                            }`}>
-                              {f.status === 'submitted' ? 'Soumis' : 'Brouillon'}
-                            </span>
-                          </div>
-                          <FormulairePayloadView
-                            status={f.status}
-                            submittedAt={f.submittedAt}
-                            createdAt={f.createdAt}
-                            payload={(f.payload ?? {}) as Record<string, unknown>}
-                            showStatusBanner={false}
-                          />
-                        </div>
-                      ))}
+                      {(() => {
+                        // Un seul formulaire affiché : le plus récent soumis, sinon le plus récent.
+                        const sorted = [...patientDetail.formulaires].sort(
+                          (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt),
+                        )
+                        const uniqueById = sorted.filter(
+                          (f, i, arr) => arr.findIndex((x) => x.id === f.id) === i,
+                        )
+                        const latestSubmitted = uniqueById.find((f) => f.status === 'submitted')
+                        const toShow = latestSubmitted ? [latestSubmitted] : uniqueById.slice(0, 1)
+                        const hiddenCount = Math.max(0, uniqueById.length - toShow.length)
+
+                        return (
+                          <>
+                            {toShow.map((f) => (
+                              <div key={f.id}>
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${f.status === 'submitted' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                                  <p className="text-sm font-semibold text-slate-700">
+                                    Formulaire médical
+                                    <span className="font-normal text-slate-400 ml-2">· {formatDate(f.createdAt)}</span>
+                                  </p>
+                                  <span className={`ml-auto text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                    f.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                                  }`}>
+                                    {f.status === 'submitted' ? 'Soumis' : 'Brouillon'}
+                                  </span>
+                                </div>
+                                <FormulairePayloadView
+                                  status={f.status}
+                                  submittedAt={f.submittedAt}
+                                  createdAt={f.createdAt}
+                                  payload={(f.payload ?? {}) as Record<string, unknown>}
+                                  showStatusBanner={false}
+                                />
+                                {hiddenCount > 0 && (
+                                  <p className="mt-3 text-xs text-slate-400">
+                                    {hiddenCount} ancienne(s) version(s) masquée(s) — affichage du formulaire le plus récent uniquement.
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </>
+                        )
+                      })()}
                     </div>
                   )}
                 </Section>
@@ -2300,7 +2911,7 @@ export default function DevisGestionnairePage() {
       {/* Modal devis */}
       {showModal && patientRow && (
         <DevisModal
-          onClose={() => setShowModal(false)}
+          onClose={flushDraftAndCloseModal}
           patientName={patientRow.user.fullName}
           existingDevis={existingDevis}
           isEditing={isEditingExisting}
@@ -2326,7 +2937,7 @@ export default function DevisGestionnairePage() {
           inclutIds={inclutIds} setInclutIds={setInclutIds}
           exclutIds={exclutIds} setExclutIds={setExclutIds}
           drainageNb={drainageNb} setDrainageNb={setDrainageNb}
-          sent={sent} savedDraft={savedDraft} actionLoading={actionLoading}
+          sent={sent} savedDraft={savedDraft} autoSaving={autoSaving} actionLoading={actionLoading}
           onSend={() => void handleSend()}
           onSaveDraft={() => void handleSaveDraft()}
           onDelete={() => handleDeleteDevis()}
@@ -2351,7 +2962,7 @@ export default function DevisGestionnairePage() {
         description={
           pendingDelete?.kind === 'dossier'
             ? `${pendingDelete.patientName} sera retiré(e) de la liste des devis (classé en abstention). L’historique reste consultable dans Patients.`
-            : 'Cette action est irréversible. Le devis sera définitivement effacé.'
+            : 'Cette version ira dans « Supprimés », disparaîtra de l’espace patient et le PDF associé passera en « Message supprimé » dans le chat. Les autres versions restent intactes.'
         }
         confirmLabel={pendingDelete?.kind === 'dossier' ? 'Retirer de la liste' : 'Supprimer le devis'}
         loading={deleteLoading}
@@ -2363,6 +2974,96 @@ export default function DevisGestionnairePage() {
           </div>
         }
       />
+
+      {/* Choix de la version à supprimer */}
+      {deletePicker && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => !deletePicker.loading && setDeletePicker(null)}
+            aria-label="Fermer"
+          />
+          <div className="relative w-full max-w-lg max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-border flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">Supprimer un devis</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {deletePicker.patientName} — choisissez la version à supprimer
+                </p>
+              </div>
+              <button
+                type="button"
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100"
+                onClick={() => setDeletePicker(null)}
+                disabled={deletePicker.loading}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-3 py-3 flex-1 min-h-0 overflow-y-auto space-y-1">
+              {deletePicker.loading && (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Chargement des versions…
+                </div>
+              )}
+              {!deletePicker.loading && deletePicker.versions.map((d) => {
+                const sc = {
+                  accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
+                  refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
+                  envoye:    { label: 'Envoyé',   cls: 'bg-sky-100 text-sky-700' },
+                  brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
+                } as const
+                const badge = sc[d.statut as keyof typeof sc] ?? sc.brouillon
+                const selected = deletePicker.selectedId === d.id
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setDeletePicker((prev) => prev ? { ...prev, selectedId: d.id } : prev)}
+                    className={cn(
+                      'w-full text-left rounded-xl border px-3.5 py-3 transition-colors',
+                      selected
+                        ? 'border-destructive/40 bg-red-50/80 ring-1 ring-destructive/20'
+                        : 'border-transparent hover:bg-slate-50',
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 truncate">
+                          {d.numeroDevis || 'Sans n°'} · v{d.version}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {formatDate(d.dateCreation)}
+                          {typeof d.total === 'number' ? ` · ${formatCurrency(d.total, (d.currency as CurrencyUnit) || 'TND')}` : ''}
+                        </p>
+                      </div>
+                      <span className={cn('shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full', badge.cls)}>
+                        {badge.label}
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2 shrink-0">
+              <Button variant="ghost" onClick={() => setDeletePicker(null)} disabled={deletePicker.loading}>
+                Annuler
+              </Button>
+              <Button
+                variant="destructive"
+                className="gap-1.5"
+                disabled={deletePicker.loading || !deletePicker.selectedId}
+                onClick={confirmDeletePickerSelection}
+              >
+                <Trash2 className="h-4 w-4" />
+                Continuer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Choix de version à consulter */}
       {consultVersionsOpen && (
@@ -2493,6 +3194,81 @@ export default function DevisGestionnairePage() {
                   <Send className="h-4 w-4" />
                 )}
                 Envoyer à la patiente
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rappel devis → chat + PDF dernière version envoyée */}
+      {rappelOpen && rappelTarget && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => !rappelSending && setRappelOpen(false)}
+            aria-label="Fermer"
+          />
+          <div className="relative w-full max-w-lg max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-border flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">Rappel devis</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {rappelTarget.patientName}
+                  {rappelTarget.numeroDevis
+                    ? ` — ${rappelTarget.numeroDevis}${rappelTarget.version ? ` (v${rappelTarget.version})` : ''}`
+                    : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100"
+                disabled={rappelSending}
+                onClick={() => setRappelOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto space-y-3">
+              <p className="text-[12px] text-slate-500 rounded-lg border border-sky-100 bg-sky-50/80 px-3 py-2">
+                Ce message sera envoyé dans le chat, accompagné du PDF de la dernière version de devis envoyée.
+              </p>
+              <Textarea
+                value={rappelMsg}
+                onChange={(e) => setRappelMsg(e.target.value)}
+                rows={14}
+                className="text-sm leading-relaxed resize-y min-h-[240px]"
+                disabled={rappelSending}
+              />
+              {rappelError && (
+                <p className="text-xs text-destructive flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  {rappelError}
+                </p>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t border-border flex flex-col-reverse sm:flex-row gap-2 sm:justify-end shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={rappelSending}
+                onClick={() => setRappelOpen(false)}
+              >
+                Annuler
+              </Button>
+              <Button
+                type="button"
+                variant="brand"
+                className="gap-2"
+                disabled={rappelSending}
+                onClick={() => void sendRappelDevis()}
+              >
+                {rappelSending ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Envoyer le rappel
               </Button>
             </div>
           </div>

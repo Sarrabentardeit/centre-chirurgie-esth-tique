@@ -58,6 +58,7 @@ const STATUS_STEPS: Record<string, string> = {
   formulaire_complete:  'Votre dossier est en cours d\'analyse par le médecin.',
   en_analyse:           'Votre dossier est en cours d\'analyse par le médecin.',
   rapport_genere:       'Le médecin a analysé votre dossier. Le devis est en cours de préparation.',
+  rapport_modifie:      'Le médecin a mis à jour son analyse. Le devis est en cours d\'ajustement.',
   devis_preparation:    'Le devis est en cours de préparation par l\'équipe.',
   devis_envoye:         'Veuillez accepter votre devis pour pouvoir réserver une date.',
 }

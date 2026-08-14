@@ -59,6 +59,7 @@ const AVATAR_COLOR: Record<string, string> = {
   formulaire_complete: 'bg-amber-100 text-amber-700 ring-2 ring-amber-300',
   en_analyse:          'bg-indigo-100 text-indigo-700',
   rapport_genere:      'bg-violet-100 text-violet-700',
+  rapport_modifie:     'bg-amber-100 text-amber-800',
   devis_envoye:        'bg-blue-100 text-blue-700',
   date_reservee:       'bg-emerald-100 text-emerald-700',
   post_op:             'bg-rose-100 text-rose-700',
@@ -589,7 +590,7 @@ export default function PatientsPage() {
           <div className="divide-y divide-border/50">
             {pagePatients.map((p, idx) => {
               const isUrgent = isGestionnaire
-                ? ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse', 'rapport_genere', 'devis_preparation'].includes(p.status)
+                ? ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse', 'rapport_genere', 'rapport_modifie', 'devis_preparation'].includes(p.status)
                 : p.status === 'formulaire_complete' || p.status === 'en_analyse'
               const isAbstention = p.status === 'abstention'
               const avatarCls  = AVATAR_COLOR[p.status] ?? 'bg-brand-100 text-brand-700'

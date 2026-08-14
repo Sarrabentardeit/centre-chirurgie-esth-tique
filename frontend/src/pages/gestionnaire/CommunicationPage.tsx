@@ -29,6 +29,9 @@ const TEMPLATE_INFO: Record<
   abstention: {
     when: 'Modèle prérempli pour un dossier en abstention.',
   },
+  devisRappel: {
+    when: 'Rappel pour un devis déjà envoyé (message + PDF).',
+  },
 }
 
 const ORDER: CommunicationTemplateKey[] = [
@@ -36,6 +39,7 @@ const ORDER: CommunicationTemplateKey[] = [
   'devisSent',
   'refus',
   'abstention',
+  'devisRappel',
 ]
 
 function isSystemDate(iso: string) {
@@ -253,7 +257,7 @@ export default function CommunicationPage() {
                   Message
                 </label>
                 <Textarea
-                  rows={selectedKey === 'abstention' ? 12 : 5}
+                  rows={selectedKey === 'abstention' || selectedKey === 'devisRappel' ? 12 : 5}
                   value={tpl.content}
                   className="text-sm leading-relaxed"
                   onChange={(e) => updateLocal({ content: e.target.value })}

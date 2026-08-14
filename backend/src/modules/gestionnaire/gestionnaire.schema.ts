@@ -48,7 +48,7 @@ export const planningSejourSchema = z.object({
 
 export type PlanningSejourInput = z.infer<typeof planningSejourSchema>
 
-const templateKeySchema = z.enum(['formulaireAck', 'devisSent', 'refus', 'abstention'])
+const templateKeySchema = z.enum(['formulaireAck', 'devisSent', 'refus', 'abstention', 'devisRappel'])
 
 export const updateTemplateSchema = z.object({
   key: templateKeySchema.optional(),
@@ -75,6 +75,13 @@ export const sendDevisSchema = z.object({
 })
 
 export type SendDevisInput = z.infer<typeof sendDevisSchema>
+
+export const sendDevisRappelSchema = z.object({
+  contenu: z.string().min(1, 'Le message de rappel est obligatoire.'),
+  html: z.string().min(1).optional(),
+})
+
+export type SendDevisRappelInput = z.infer<typeof sendDevisRappelSchema>
 
 export const renderDevisPdfSchema = z.object({
   html: z.string().min(1, 'HTML du devis requis.'),

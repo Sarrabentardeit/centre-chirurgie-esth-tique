@@ -1164,7 +1164,7 @@ export interface GestionnairePlanningSejourDetail {
   updatedAt: string
 }
 
-export type CommunicationTemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention'
+export type CommunicationTemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention' | 'devisRappel'
 
 export interface GestionnaireTemplate {
   key: CommunicationTemplateKey
@@ -1291,6 +1291,19 @@ export const gestionnaireApi = {
       body: JSON.stringify(body ?? {}),
     }),
 
+  /** Rappel chat + PDF de la version envoyée (sans re-changer le statut). */
+  sendDevisRappel: (devisId: string, body: { contenu: string; html?: string }) =>
+    request<{
+      ok: true
+      devisId: string
+      numeroDevis: string | null
+      version: number
+      pdfAttached: boolean
+    }>(`/gestionnaire/devis/${devisId}/rappel`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   /** Même moteur Chromium que l’envoi chat — PDF binaire téléchargeable. */
   renderDevisPdf: async (html: string): Promise<Blob> => {
     const { access } = getTokens()
@@ -1342,9 +1355,30 @@ export const gestionnaireApi = {
     }),
 
   deleteDevis: (devisId: string) =>
-    request<{ ok: true; deleted: true }>(`/gestionnaire/devis/${devisId}`, {
+    request<{ ok: true; deleted: true; softDeleted?: true }>(`/gestionnaire/devis/${devisId}`, {
       method: 'DELETE',
     }),
+
+  getDeletedDevis: () =>
+    request<{
+      ok: true
+      devis: Array<{
+        id: string
+        numeroDevis: string | null
+        statut: string
+        version: number
+        total: number
+        currency: string
+        dateCreation: string
+        deletedAt: string
+        patient: {
+          id: string
+          dossierNumber: string
+          fullName: string
+          email: string
+        }
+      }>
+    }>('/gestionnaire/devis/supprimes'),
 
   getNotifications: () =>
     request<{ ok: true; notifications: GestionnaireNotificationRow[] }>('/gestionnaire/notifications'),

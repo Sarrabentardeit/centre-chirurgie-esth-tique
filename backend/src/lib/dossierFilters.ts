@@ -11,6 +11,7 @@ export const MEDECIN_NON_TRAITES = [
 /** Dossiers déjà traités côté médecin (rapport fait ou suite du parcours). */
 export const MEDECIN_TRAITES = [
   'rapport_genere',
+  'rapport_modifie',
   'devis_preparation',
   'devis_envoye',
   'devis_accepte',
@@ -32,6 +33,7 @@ export const GESTIONNAIRE_NON_TRAITES = [
   'formulaire_complete',
   'en_analyse',
   'rapport_genere',
+  'rapport_modifie',
   'devis_preparation',
 ] as const
 
@@ -48,7 +50,7 @@ export const GESTIONNAIRE_TRAITES = [
 
 const ALL_ACTIVE_STATUSES = [
   'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
-  'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
+  'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte',
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
 ] as const
 

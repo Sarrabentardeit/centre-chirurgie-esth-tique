@@ -27,8 +27,9 @@ import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
-import { sendDevisReadyEmail } from '../../lib/mailer.js'
+import { sendDevisReadyEmail, sendDevisRappelEmail } from '../../lib/mailer.js'
 import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
+import { softDeleteDevisPdfMessages } from '../chat/chat.service.js'
 
 const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
 
@@ -39,10 +40,13 @@ const PLANNING_SEJOUR_STATUSES = ['devis_accepte'] as const
 const patientListInclude = {
   user: { select: { id: true, fullName: true, email: true, createdAt: true } },
   formulaires: { orderBy: { createdAt: 'desc' as const }, take: 1 },
-  devis: { orderBy: { dateCreation: 'desc' as const }, take: 1 },
+  devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' as const }, take: 1 },
 } as const
 
-type TemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention'
+/** Devis visibles (non soft-supprimés). */
+const devisActiveWhere = { deletedAt: null } as const
+
+type TemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention' | 'devisRappel'
 type TemplateChannel = 'chat' | 'notification' | 'both'
 
 type TemplateRecord = {
@@ -55,7 +59,7 @@ type TemplateRecord = {
   updatedBy: string
 }
 
-export const TEMPLATE_KEYS: TemplateKey[] = ['formulaireAck', 'devisSent', 'refus', 'abstention']
+export const TEMPLATE_KEYS: TemplateKey[] = ['formulaireAck', 'devisSent', 'refus', 'abstention', 'devisRappel']
 
 const DEFAULT_TEMPLATES: Record<TemplateKey, Omit<TemplateRecord, 'updatedAt' | 'updatedBy'>> = {
   formulaireAck: {
@@ -90,6 +94,25 @@ Nous vous remercions de votre compréhension et vous souhaitons le meilleur dans
 Je vous souhaite une excellente journée.
 Bien cordialement,
 Houda Chennoufi
+Conciergerie & coordination patients
+Cabinet du Dr Mehdi Chennoufi
+Chirurgie Esthétique, Plastique et Réparatrice
+SCULPTURE, SMOOTH & SMILE`,
+    channel: 'chat',
+    active: true,
+  },
+  devisRappel: {
+    key: 'devisRappel',
+    title: 'Rappel devis',
+    content: `Bonjour Madame,
+Je me permets de revenir vers vous suite à l’envoi du devis concernant votre projet chirurgical avec le Dr Chennoufi.
+N’ayant pas encore eu de retour de votre part, je souhaitais savoir si le diagnostic proposé, l’intervention envisagée ainsi que le devis transmis correspondent à vos attentes, ou si certains points mériteraient d’être clarifiés.
+Nous restons bien entendu entièrement disponibles pour répondre à vos questions, vous apporter des informations complémentaires et, si vous le souhaitez, organiser un échange téléphonique afin de discuter plus sereinement de votre projet et de l’organisation de votre séjour médical.
+N’hésitez pas à me faire part de votre retour, même bref ; il nous est précieux pour vous accompagner au mieux.
+Horaires de travail : Mardi, Mercredi & Jeudi de 09 à 15h (heure locale)
+Au plaisir de vous lire,
+Bien cordialement,
+Houda CHENNOUFI
 Conciergerie & coordination patients
 Cabinet du Dr Mehdi Chennoufi
 Chirurgie Esthétique, Plastique et Réparatrice
@@ -217,7 +240,7 @@ export async function getDashboard(gestionnaireUserId: string) {
     prisma.patient.count({ where: { status: { in: ['date_reservee', 'logistique'] } } }),
     prisma.notification.count({ where: { userId: gestionnaireUserId, lu: false } }),
     prisma.patient.findMany({
-      where: { status: { in: ['rapport_genere', 'devis_preparation'] } },
+      where: { status: { in: ['rapport_genere', 'rapport_modifie', 'devis_preparation'] } },
       include: { user: { select: { fullName: true } } },
       orderBy: { updatedAt: 'desc' },
       take: 6,
@@ -333,7 +356,7 @@ export async function getPatients(search?: string, status?: string) {
                 { user: { email: { contains: search, mode: 'insensitive' } } },
                 { dossierNumber: { contains: search, mode: 'insensitive' } },
                 { phone: { contains: search, mode: 'insensitive' } },
-                { devis: { some: { numeroDevis: { contains: search, mode: 'insensitive' } } } },
+                { devis: { some: { deletedAt: null, numeroDevis: { contains: search, mode: 'insensitive' } } } },
               ],
             }
           : {}),
@@ -359,7 +382,7 @@ export async function getPatientById(patientId: string) {
     include: {
       user: { select: { id: true, fullName: true, email: true, createdAt: true } },
       formulaires: { orderBy: { createdAt: 'desc' } },
-      devis: { orderBy: { dateCreation: 'desc' } },
+      devis: { where: devisActiveWhere, orderBy: { dateCreation: 'desc' } },
       rapports: { orderBy: { createdAt: 'desc' } },
     },
   })
@@ -377,7 +400,7 @@ export async function getPatientById(patientId: string) {
 }
 
 function assertPatientReadyForDevis(status: string) {
-  const ok = ['rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte'].includes(status)
+  const ok = ['rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte'].includes(status)
   if (!ok) {
     throw new AppError(400, 'PATIENT_NOT_READY', 'Le dossier patient n’est pas prêt pour un devis.')
   }
@@ -508,7 +531,7 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
   const dateValidite = input.dateValidite ? new Date(input.dateValidite) : null
 
   const draft = await prisma.devis.findFirst({
-    where: { patientId, statut: 'brouillon' },
+    where: { patientId, statut: 'brouillon', ...devisActiveWhere },
     orderBy: { dateCreation: 'desc' },
   })
 
@@ -535,7 +558,7 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
     }
   } else {
     const last = await prisma.devis.findFirst({
-      where: { patientId },
+      where: { patientId, ...devisActiveWhere },
       orderBy: { version: 'desc' },
       select: { version: true },
     })
@@ -568,7 +591,7 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
     }
   }
 
-  if (['rapport_genere', 'devis_preparation'].includes(patient.status)) {
+  if (['rapport_genere', 'rapport_modifie', 'devis_preparation'].includes(patient.status)) {
     await prisma.patient.update({
       where: { id: patientId },
       data: { status: 'devis_preparation' },
@@ -583,16 +606,36 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
 }
 
 export async function saveDevisCustomContent(gestionnaireId: string, devisId: string, content: string) {
-  const devis = await prisma.devis.findUnique({ where: { id: devisId } })
+  const devis = await prisma.devis.findFirst({
+    where: { id: devisId, deletedAt: null },
+  })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
-  if (devis.gestionnaireId !== gestionnaireId) throw new AppError(403, 'FORBIDDEN', 'Accès refusé.')
-  // Prisma generate bloqué sur Windows (EPERM), on utilise SQL raw
-  await prisma.$executeRaw`UPDATE "devis" SET "custom_content" = ${content} WHERE "id" = ${devisId}`
+
+  // Tout gestionnaire peut personnaliser (plusieurs comptes sur le même cabinet)
+  await prisma.devis.update({
+    where: { id: devisId },
+    data: {
+      customContent: content,
+      gestionnaireId,
+    },
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'update',
+      entity: 'devis',
+      entityId: devisId,
+      after: { customContentSaved: true, length: content.length } as never,
+    },
+  }).catch(() => undefined)
+
   return { ok: true }
 }
 
 export async function sendDevis(gestionnaireId: string, devisId: string, html?: string) {
-  const devis = await prisma.devis.findUnique({ where: { id: devisId } })
+  const devis = await prisma.devis.findFirst({ where: { id: devisId, deletedAt: null } })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
   if (devis.gestionnaireId !== gestionnaireId) {
     throw new AppError(403, 'FORBIDDEN', 'Ce devis ne vous appartient pas.')
@@ -708,6 +751,104 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
   return { devis: updated }
 }
 
+/** Rappel chat + PDF de la dernière version envoyée (sans changer le statut devis). */
+export async function sendDevisRappel(
+  gestionnaireId: string,
+  devisId: string,
+  input: { contenu: string; html?: string },
+) {
+  const devis = await prisma.devis.findFirst({
+    where: { id: devisId, deletedAt: null },
+  })
+  if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+  if (devis.statut !== 'envoye' && devis.statut !== 'accepte') {
+    throw new AppError(400, 'DEVIS_NOT_SENT', 'Le rappel n’est possible que pour un devis déjà envoyé.')
+  }
+
+  const contenu = input.contenu.trim()
+  if (!contenu) throw new AppError(400, 'EMPTY_MESSAGE', 'Le message de rappel ne peut pas être vide.')
+
+  const patient = await prisma.patient.findUnique({
+    where: { id: devis.patientId },
+    include: { user: { select: { fullName: true, id: true, email: true } } },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  await prisma.message.create({
+    data: {
+      patientId: patient.id,
+      expediteurId: gestionnaireId,
+      expediteurRole: 'gestionnaire',
+      contenu,
+      lu: false,
+    },
+  })
+
+  let pdfAttached = false
+  if (input.html?.trim()) {
+    try {
+      const pdfBuffer = await renderHtmlToPdf(input.html)
+      const pieceJointeNom = formatDevisPdfFileName(
+        devis.numeroDevis ?? patient.dossierNumber,
+        patient.user.fullName,
+        devis.version,
+      )
+      const diskSlug = pieceJointeNom
+        .replace(/\.pdf$/i, '')
+        .replace(/[^\w.-]+/g, '_')
+        .slice(0, 80)
+      const filename = `chat-${Date.now()}-${diskSlug || 'Devis'}.pdf`
+      await mkdir(UPLOADS_DIR, { recursive: true })
+      await writeFile(path.join(UPLOADS_DIR, filename), pdfBuffer)
+
+      const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
+      const pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
+
+      await prisma.message.create({
+        data: {
+          patientId: patient.id,
+          expediteurId: gestionnaireId,
+          expediteurRole: 'gestionnaire',
+          contenu: `Pièce jointe : ${pieceJointeNom}`,
+          pieceJointeUrl,
+          pieceJointeNom,
+          lu: false,
+        },
+      })
+      pdfAttached = true
+    } catch (err) {
+      console.error('[sendDevisRappel] Échec génération PDF:', err)
+    }
+  }
+
+  await createUserNotification({
+    userId: patient.userId,
+    titre: 'Rappel concernant votre devis',
+    message: 'L’équipe vous a renvoyé un message avec votre devis. Consultez la discussion.',
+    type: 'info',
+    lienAction: '/patient/chat',
+  }).catch(() => undefined)
+
+  if (patient.user.email?.trim()) {
+    await sendDevisRappelEmail({
+      to: patient.user.email,
+      patientFullName: patient.user.fullName,
+    })
+  } else {
+    console.warn('[sendDevisRappel] Pas d’email patient — notification email ignorée', {
+      patientId: patient.id,
+    })
+  }
+
+  return {
+    ok: true as const,
+    devisId: devis.id,
+    numeroDevis: devis.numeroDevis,
+    version: devis.version,
+    pdfAttached,
+  }
+}
+
 export async function refuseDevis(gestionnaireId: string, devisId: string, input: RefuseDevisInput) {
   const devis = await prisma.devis.findUnique({
     where: { id: devisId },
@@ -764,18 +905,32 @@ export async function refuseDevis(gestionnaireId: string, devisId: string, input
 }
 
 export async function deleteDevis(gestionnaireId: string, devisId: string) {
-  const devis = await prisma.devis.findUnique({
-    where: { id: devisId },
-    include: { patient: true },
+  const devis = await prisma.devis.findFirst({
+    where: { id: devisId, deletedAt: null },
+    include: {
+      patient: {
+        include: { user: { select: { fullName: true } } },
+      },
+    },
   })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
 
+  const pieceJointeNom = formatDevisPdfFileName(
+    devis.numeroDevis ?? devis.patient.dossierNumber,
+    devis.patient.user.fullName,
+    devis.version,
+  )
+
   await prisma.$transaction(async (tx) => {
-    await tx.devis.delete({ where: { id: devisId } })
+    // Uniquement la version sélectionnée
+    await tx.devis.update({
+      where: { id: devisId },
+      data: { deletedAt: new Date() },
+    })
 
     const [remaining, rapportsCount] = await Promise.all([
       tx.devis.findMany({
-        where: { patientId: devis.patientId },
+        where: { patientId: devis.patientId, deletedAt: null },
         select: { statut: true, dateCreation: true },
         orderBy: { dateCreation: 'desc' },
       }),
@@ -797,6 +952,17 @@ export async function deleteDevis(gestionnaireId: string, devisId: string) {
     }
   })
 
+  // Chat : uniquement le PDF de CETTE version → « Message supprimé »
+  await softDeleteDevisPdfMessages(devis.patientId, {
+    numeroDevis: devis.numeroDevis,
+    dossierNumber: devis.patient.dossierNumber,
+    pieceJointeNom,
+    version: devis.version,
+    patientFullName: devis.patient.user.fullName,
+  }).catch((err) => {
+    console.error('[deleteDevis] Échec retrait PDF chat:', err)
+  })
+
   await prisma.auditLog.create({
     data: {
       actorId: gestionnaireId,
@@ -808,12 +974,51 @@ export async function deleteDevis(gestionnaireId: string, devisId: string) {
         patientId: devis.patientId,
         statut: devis.statut,
         numeroDevis: devis.numeroDevis,
+        version: devis.version,
         total: devis.total,
+        softDelete: true,
+        chatPdfRemoved: true,
       } as never,
     },
   }).catch(() => undefined)
 
-  return { deleted: true as const }
+  return { deleted: true as const, softDeleted: true as const }
+}
+
+/** Liste des devis soft-supprimés (archivage gestionnaire). */
+export async function listDeletedDevis() {
+  const rows = await prisma.devis.findMany({
+    where: { deletedAt: { not: null } },
+    include: {
+      patient: {
+        select: {
+          id: true,
+          dossierNumber: true,
+          user: { select: { fullName: true, email: true } },
+        },
+      },
+    },
+    orderBy: { deletedAt: 'desc' },
+  })
+
+  return {
+    devis: rows.map((d) => ({
+      id: d.id,
+      numeroDevis: d.numeroDevis,
+      statut: d.statut,
+      version: d.version,
+      total: d.total,
+      currency: d.currency,
+      dateCreation: d.dateCreation.toISOString(),
+      deletedAt: d.deletedAt!.toISOString(),
+      patient: {
+        id: d.patient.id,
+        dossierNumber: d.patient.dossierNumber,
+        fullName: d.patient.user.fullName,
+        email: d.patient.user.email,
+      },
+    })),
+  }
 }
 
 export async function deletePatientByGestionnaire(actorId: string, patientId: string) {
@@ -1015,7 +1220,7 @@ async function loadPlanningSejourContext(patientId: string) {
       user: { select: { fullName: true, email: true } },
       rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
       devis: {
-        where: { statut: { in: ['envoye', 'accepte'] } },
+        where: { statut: { in: ['envoye', 'accepte'] }, deletedAt: null },
         orderBy: { dateCreation: 'desc' },
         take: 1,
       },

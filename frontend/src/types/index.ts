@@ -15,6 +15,7 @@ export type DossierStatus =
   | 'formulaire_complete'
   | 'en_analyse'
   | 'rapport_genere'
+  | 'rapport_modifie'
   | 'devis_preparation'
   | 'devis_envoye'
   | 'devis_accepte'

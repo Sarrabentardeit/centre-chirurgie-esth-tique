@@ -32,6 +32,7 @@ const STATUS_LABELS: Record<string, { label: string; dot: string }> = {
   formulaire_complete: { label: 'À analyser',     dot: 'bg-amber-400' },
   en_analyse:          { label: 'En analyse',     dot: 'bg-indigo-400' },
   rapport_genere:      { label: 'Rapport',        dot: 'bg-violet-400' },
+  rapport_modifie:     { label: 'Rapport modifié',dot: 'bg-amber-400' },
   devis_envoye:        { label: 'Devis envoyé',   dot: 'bg-blue-400' },
   devis_accepte:       { label: 'Devis accepté',  dot: 'bg-emerald-400' },
   date_reservee:       { label: 'RDV fixé',       dot: 'bg-teal-400' },

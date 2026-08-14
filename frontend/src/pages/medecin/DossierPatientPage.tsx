@@ -95,7 +95,7 @@ const SOURCE_COLORS: Record<string, string> = {
 
 const DOSSIER_STATUSES = [
   'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
-  'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte',
+  'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte',
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
   'abstention',
 ]

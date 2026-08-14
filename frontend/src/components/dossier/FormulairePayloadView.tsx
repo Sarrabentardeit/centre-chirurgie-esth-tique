@@ -79,6 +79,28 @@ function asStringArray(value: unknown): string[] {
   return value.map((v) => String(v).trim()).filter(Boolean)
 }
 
+/** Photos / docs : string URL ou objet `{ url, name }`. */
+function asFileEntries(value: unknown): Array<{ raw: string; name: string }> {
+  if (!Array.isArray(value)) return []
+  const out: Array<{ raw: string; name: string }> = []
+  value.forEach((item, idx) => {
+    if (typeof item === 'string') {
+      const raw = item.trim()
+      if (!raw) return
+      out.push({ raw, name: decodeURIComponent(raw.split('/').pop() ?? `fichier-${idx + 1}`) })
+      return
+    }
+    if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>
+      const raw = String(o.url ?? o.path ?? o.src ?? '').trim()
+      if (!raw) return
+      const name = String(o.name ?? o.filename ?? raw.split('/').pop() ?? `fichier-${idx + 1}`)
+      out.push({ raw, name })
+    }
+  })
+  return out
+}
+
 /** Date souhaitée : ISO → « 22 avril 2026 », sinon texte déjà lisible (ex. Octobre 2026). */
 function formatDateSouhaitee(value: unknown): string | null {
   const raw = asString(value)
@@ -263,15 +285,14 @@ export function FormulairePayloadView({
           <CardContent className="space-y-4">
             <div>
               <p className="text-xs text-muted-foreground mb-2">Photos</p>
-              {asStringArray(p.photos).length === 0 ? (
+              {asFileEntries(p.photos).length === 0 ? (
                 <p className="text-sm text-muted-foreground">-</p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                  {asStringArray(p.photos).map((photo, idx) => {
-                    const url = resolveFormulaireFileUrl(photo)
-                    const fileName = decodeURIComponent(url.split('/').pop() ?? `photo-${idx + 1}`)
+                  {asFileEntries(p.photos).map((photo, idx) => {
+                    const url = resolveFormulaireFileUrl(photo.raw)
                     return (
-                      <PhotoThumb key={`${photo}-${idx}`} url={url} fileName={fileName} />
+                      <PhotoThumb key={`${photo.raw}-${idx}`} url={url} fileName={photo.name} />
                     )
                   })}
                 </div>
@@ -279,18 +300,18 @@ export function FormulairePayloadView({
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-2">Documents</p>
-              {asStringArray(p.documentsPDF).length === 0 ? (
+              {asFileEntries(p.documentsPDF).length === 0 ? (
                 <p className="text-sm text-muted-foreground">-</p>
               ) : (
                 <div className="space-y-2">
-                  {asStringArray(p.documentsPDF).map((doc, idx) => {
-                    const url = resolveFormulaireFileUrl(doc)
-                    const fileName = decodeURIComponent(url.split('/').pop() ?? `document-${idx + 1}`)
+                  {asFileEntries(p.documentsPDF).map((doc, idx) => {
+                    const url = resolveFormulaireFileUrl(doc.raw)
+                    const fileName = doc.name
                     const hasValidUrl = Boolean(url && url.trim())
                     if (!hasValidUrl) {
                       return (
                         <div
-                          key={`${doc}-${idx}`}
+                          key={`${doc.raw}-${idx}`}
                           className="flex items-center gap-2 rounded-lg border px-3 py-2 bg-muted/20 text-muted-foreground"
                           title={fileName}
                         >
@@ -302,7 +323,7 @@ export function FormulairePayloadView({
                     }
                     return (
                       <a
-                        key={`${doc}-${idx}`}
+                        key={`${doc.raw}-${idx}`}
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"

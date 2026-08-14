@@ -294,6 +294,22 @@ export async function sendDevisReadyEmail(input: {
   })
 }
 
+/** Email patient — rappel devis (nouveau message à consulter dans l’espace). */
+export async function sendDevisRappelEmail(input: {
+  to: string
+  patientFullName: string
+}): Promise<void> {
+  await sendPatientEmail({
+    to: input.to,
+    patientName: input.patientFullName,
+    titre: 'Vous avez reçu un message',
+    message:
+      'Vous avez reçu un nouveau message du cabinet concernant votre devis. Merci de consulter votre espace patient pour en prendre connaissance.',
+    lienAction: '/patient/chat',
+    ctaLabel: 'Consulter mon espace →',
+  })
+}
+
 /** Email patient — nouveau message chat (ex. décision / abstention). */
 export async function sendPatientChatMessageEmail(input: {
   to: string

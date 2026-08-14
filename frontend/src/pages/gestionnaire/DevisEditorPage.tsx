@@ -230,12 +230,19 @@ function sejourPdfFromPatient(p: GestionnairePatientDetail) {
   return sejourPdfFromContext(letterCtx(p))
 }
 
-function refreshDossierFieldsInTopHtml(html: string, p: GestionnairePatientDetail): string {
-  return refreshDevisLetterTopHtml(html, letterCtx(p))
+function refreshDossierFieldsInTopHtml(
+  html: string,
+  p: GestionnairePatientDetail,
+  activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
+): string {
+  return refreshDevisLetterTopHtml(html, letterCtx(p, activeDevis))
 }
 
-function buildTopHtml(p: GestionnairePatientDetail): string {
-  return buildDevisLetterTopHtml(letterCtx(p))
+function buildTopHtml(
+  p: GestionnairePatientDetail,
+  activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
+): string {
+  return buildDevisLetterTopHtml(letterCtx(p, activeDevis))
 }
 
 function buildBottomHtml(total: number, tndPerEur = DEFAULT_TND_PER_EUR): string {
@@ -307,16 +314,17 @@ export default function DevisEditorPage() {
       if (dv?.customContent?.trim()) {
         if (dv.customContent.includes(CONTENT_BREAK)) {
           const [top, bot] = dv.customContent.split(CONTENT_BREAK)
-          const topRaw = refreshDossierFieldsInTopHtml(top ?? buildTopHtml(p), p)
+          // Préserve le texte TipTap (inclut/exclut) ; rafraîchit seulement champs dossier / montants
+          const topRaw = refreshDossierFieldsInTopHtml(top ?? buildTopHtml(p, dv), p, dv)
           setInitialTopHtml(topRaw)
           const bottomRaw = bot ?? buildBottomHtml(total, tndPerEurRate)
           setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate))
         } else {
-          setInitialTopHtml(refreshDossierFieldsInTopHtml(dv.customContent, p))
+          setInitialTopHtml(refreshDossierFieldsInTopHtml(dv.customContent, p, dv))
           setInitialBottomHtml(buildBottomHtml(total, tndPerEurRate))
         }
       } else {
-        setInitialTopHtml(buildTopHtml(p))
+        setInitialTopHtml(buildTopHtml(p, dv))
         setInitialBottomHtml(buildBottomHtml(total, tndPerEurRate))
       }
     } catch (e) {
@@ -343,7 +351,8 @@ export default function DevisEditorPage() {
       await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
       setSaved(true)
       return true
-    } catch {
+    } catch (e) {
+      console.error('[DevisEditor] sauvegarde customContent échouée', e)
       return false
     } finally {
       setSaving(false)
@@ -485,9 +494,11 @@ export default function DevisEditorPage() {
       ?? patient.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
       ?? null
     const total = (dv?.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-    editorTop?.commands.setContent(refreshDossierFieldsInTopHtml(buildTopHtml(patient), patient))
+    // Régénère depuis cases + tableau prestations (écrase les edits TipTap — voulu)
+    editorTop?.commands.setContent(buildTopHtml(patient, dv ?? undefined))
     editorBot?.commands.setContent(buildBottomHtml(total, tndPerEur))
     setSaved(false)
+    void flushSave()
   }
 
   /* Calculs financiers (utilisés par l’aperçu et l’export PDF) */
@@ -512,7 +523,8 @@ export default function DevisEditorPage() {
   const buildDevisFullHtml = () => {
     if (!patient || !dv) return ''
     let topHtml = editorTopRef.current?.getHTML() ?? ''
-    topHtml = refreshDossierFieldsInTopHtml(topHtml, patient)
+    // Ne rafraîchit PAS la section inclut/exclut (édits TipTap conservés)
+    topHtml = refreshDossierFieldsInTopHtml(topHtml, patient, dv)
     editorTopRef.current?.commands.setContent(topHtml, { emitUpdate: false })
     const botHtml = editorBotRef.current?.getHTML() ?? ''
     return buildGestionnaireDevisExportHtml({

@@ -297,7 +297,7 @@ export async function getDashboardAlertes(medecinId: string) {
       where: {
         updatedAt: { lt: blockedSince },
         status: {
-          in: ['formulaire_complete', 'en_analyse', 'rapport_genere', 'devis_preparation', 'devis_envoye', 'devis_accepte'],
+          in: ['formulaire_complete', 'en_analyse', 'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte'],
         },
       },
     }),
@@ -354,7 +354,7 @@ export async function getPatients(search?: string, status?: string) {
       include: {
         user: { select: { fullName: true, email: true, createdAt: true } },
         formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
-        devis: { orderBy: { dateCreation: 'desc' }, take: 1 },
+        devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' }, take: 1 },
         rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
       orderBy: { updatedAt: 'desc' },
@@ -499,7 +499,7 @@ export async function getPatientById(patientId: string) {
     include: {
       user: { select: { fullName: true, email: true, createdAt: true } },
       formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
-      devis: { orderBy: { dateCreation: 'desc' } },
+      devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' } },
       agendaEvents: {
         where: { type: 'rdv' },
         orderBy: { dateDebut: 'asc' },
@@ -692,13 +692,26 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     },
   })
 
-  // Mettre à jour le statut dossier vers "Rapport généré" depuis tout statut pré-rapport
+  // 1ère génération → rapport_genere ; mise à jour → rapport_modifie (fiche devis conservée)
   const PRE_RAPPORT_STATUSES = ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse']
+  const DEVIS_FLOW_STATUSES = [
+    'rapport_genere',
+    'rapport_modifie',
+    'devis_preparation',
+    'devis_envoye',
+    'devis_accepte',
+  ]
   if (PRE_RAPPORT_STATUSES.includes(patient.status)) {
     await prisma.patient.update({
       where: { id: patientId },
       data: { status: 'rapport_genere' },
     })
+  } else if (existing && DEVIS_FLOW_STATUSES.includes(patient.status)) {
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: { status: 'rapport_modifie' },
+    })
+    await syncBrouillonDevisFromRapport(patientId, rapport)
   }
 
   const p = await prisma.patient.findUnique({
@@ -708,14 +721,156 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
   if (p) {
     await notifyGestionnaires({
       type: 'info',
-      titre: existing ? 'Rapport médical mis à jour' : 'Rapport médical généré',
-      message: `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) est ${existing ? 'mis à jour' : 'prêt'}. Devis à préparer.`,
+      titre: existing ? 'Rapport médical modifié' : 'Rapport médical généré',
+      message: existing
+        ? `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) a été modifié. Reprenez la même fiche devis : tableau, PDF et éditeur sont mis à jour.`
+        : `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) est prêt. Devis à préparer.`,
       lienAction: `/gestionnaire/devis/${patientId}`,
       email: true,
     })
   }
 
   return { rapport }
+}
+
+const LIGNE_SUPP_CLINIQUE = 'Supp Clinique accompagnateur'
+const LIGNE_SUPP_HOTEL = 'Supp Hôtel Accompagnateur'
+const LIGNE_HOTEL = 'Hôtel (nbr de nuitées)'
+const LIGNE_DRAINAGE = 'Drainage (nbr de séances)'
+
+type DevisLigneJson = {
+  description?: string
+  quantite?: number
+  prixUnitaire?: number
+  total?: number
+}
+
+/** Met à jour le brouillon devis existant avec les nouvelles données médecin (sans créer de nouvelle version). */
+async function syncBrouillonDevisFromRapport(
+  patientId: string,
+  rapport: {
+    forfaitPropose?: number | null
+    nuitsPreoperatoires?: number | null
+    nuitsClinique?: number | null
+    nuitsHotel?: number | null
+    dureeSejourTunisie?: number | null
+    nbAdultesSejour?: number | null
+    nbEnfantsSejour?: number | null
+    drainage?: boolean | null
+    nbSeancesDrainage?: number | null
+  },
+) {
+  const draft = await prisma.devis.findFirst({
+    where: { patientId, statut: 'brouillon', deletedAt: null },
+    orderBy: { dateCreation: 'desc' },
+  })
+  if (!draft) return
+
+  const form = await prisma.formulaire.findFirst({
+    where: { patientId },
+    orderBy: { createdAt: 'desc' },
+    select: { payload: true },
+  })
+  const payload = (form?.payload ?? {}) as Record<string, unknown>
+
+  const preop = Number(rapport.nuitsPreoperatoires) || 0
+  const postop = Number(rapport.nuitsClinique) || 0
+  const cliniqueNuits = preop + postop
+  const hotelNuits =
+    rapport.nuitsHotel != null && Number.isFinite(Number(rapport.nuitsHotel))
+      ? Math.max(0, Math.floor(Number(rapport.nuitsHotel)))
+      : rapport.dureeSejourTunisie != null
+        ? Math.max(0, Math.floor(Number(rapport.dureeSejourTunisie)) - cliniqueNuits)
+        : null
+  const dureeTotale =
+    rapport.dureeSejourTunisie != null && Number.isFinite(Number(rapport.dureeSejourTunisie))
+      ? Math.max(0, Math.floor(Number(rapport.dureeSejourTunisie)))
+      : null
+
+  let nbAdultes =
+    rapport.nbAdultesSejour != null && Number.isFinite(Number(rapport.nbAdultesSejour))
+      ? Math.floor(Number(rapport.nbAdultesSejour))
+      : null
+  let nbEnfants =
+    rapport.nbEnfantsSejour != null && Number.isFinite(Number(rapport.nbEnfantsSejour))
+      ? Math.floor(Number(rapport.nbEnfantsSejour))
+      : null
+
+  const accFlag = payload.accompagnant
+  let qteSupp = 0
+  if (accFlag === true || accFlag === 'Oui' || accFlag === 'oui') {
+    const a = Number(payload.nbAdultesAccompagnement)
+    const e = Number(payload.nbEnfantsAccompagnement)
+    qteSupp =
+      (Number.isFinite(a) && a >= 0 ? Math.floor(a) : 0) +
+      (Number.isFinite(e) && e >= 0 ? Math.floor(e) : 0)
+  } else if (accFlag !== false && accFlag !== 'Non' && accFlag !== 'non') {
+    const a = nbAdultes ?? 0
+    const e = nbEnfants ?? 0
+    qteSupp = Math.max(0, a + e - (a >= 1 ? 1 : 0))
+  }
+
+  const qteDrainage =
+    rapport.drainage === false
+      ? 0
+      : rapport.nbSeancesDrainage != null && Number.isFinite(Number(rapport.nbSeancesDrainage))
+        ? Math.max(0, Math.floor(Number(rapport.nbSeancesDrainage)))
+        : null
+
+  const forfait =
+    rapport.forfaitPropose != null && Number.isFinite(Number(rapport.forfaitPropose)) && Number(rapport.forfaitPropose) > 0
+      ? Math.round(Number(rapport.forfaitPropose))
+      : null
+
+  const rawLignes = Array.isArray(draft.lignes) ? (draft.lignes as DevisLigneJson[]) : []
+  if (rawLignes.length === 0) return
+
+  const updatedLignes = rawLignes.map((l, i) => {
+    const description = String(l.description ?? '')
+    let quantite = Math.max(0, Math.round(Number(l.quantite) || 0))
+    let prixUnitaire = Number(l.prixUnitaire) || 0
+    if (i === 0 && forfait != null) prixUnitaire = forfait
+    if (description === LIGNE_SUPP_CLINIQUE || description === LIGNE_SUPP_HOTEL) quantite = qteSupp
+    if (description === LIGNE_HOTEL && hotelNuits != null) quantite = hotelNuits
+    if (description === LIGNE_DRAINAGE && qteDrainage != null) quantite = qteDrainage
+    return {
+      description,
+      quantite,
+      prixUnitaire,
+      total: quantite * prixUnitaire,
+    }
+  })
+  const total = updatedLignes.reduce((s, l) => s + l.total, 0)
+
+  let notesSejour = draft.notesSejour ?? null
+  if (notesSejour) {
+    const patch = (prefix: string, value: string | null) => {
+      if (value == null) return
+      const re = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`, 'm')
+      if (re.test(notesSejour!)) {
+        notesSejour = notesSejour!.replace(re, `${prefix}${value}`)
+      } else {
+        notesSejour = `${notesSejour!.trimEnd()}\n${prefix}${value}`
+      }
+    }
+    if (cliniqueNuits > 0 || rapport.nuitsClinique != null || rapport.nuitsPreoperatoires != null) {
+      patch('SEJOUR_CLINIQUE_NUITS:', String(cliniqueNuits))
+    }
+    if (hotelNuits != null) patch('SEJOUR_HOTEL_NUITS:', String(hotelNuits))
+    if (dureeTotale != null) patch('SEJOUR_DUREE_TOTALE:', String(dureeTotale))
+    if (nbAdultes != null) patch('SEJOUR_NB_ADULTES:', String(nbAdultes))
+    if (nbEnfants != null) patch('SEJOUR_NB_ENFANTS:', String(nbEnfants))
+    if (qteDrainage != null) patch('DEVIS_DRAINAGE_NB:', String(qteDrainage))
+  }
+
+  await prisma.devis.update({
+    where: { id: draft.id },
+    data: {
+      lignes: updatedLignes as never,
+      total,
+      ...(notesSejour != null ? { notesSejour } : {}),
+    },
+  })
 }
 
 // ─── Agenda ───────────────────────────────────────────────────────────────────
@@ -970,7 +1125,7 @@ export async function createRendezVous(
 
 export async function getAllDevis() {
   const devisList = await prisma.devis.findMany({
-    where: { statut: { in: ['envoye', 'accepte', 'refuse'] } },
+    where: { statut: { in: ['envoye', 'accepte', 'refuse'] }, deletedAt: null },
     include: {
       patient: {
         select: {

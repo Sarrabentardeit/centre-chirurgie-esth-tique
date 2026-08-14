@@ -30,7 +30,7 @@ function resolveParcoursKey(status: DossierStatus): (typeof PARCOURS)[number]['k
   if (status === 'nouveau' || status === 'formulaire_en_cours' || status === 'formulaire_complete') {
     return 'formulaire_complete'
   }
-  if (status === 'en_analyse' || status === 'rapport_genere') return 'rapport_genere'
+  if (status === 'en_analyse' || status === 'rapport_genere' || status === 'rapport_modifie') return 'rapport_genere'
   if (status === 'devis_preparation' || status === 'devis_envoye') return 'devis_envoye'
   if (status === 'devis_accepte' || status === 'date_reservee') return 'date_reservee'
   if (status === 'logistique') return 'logistique'
@@ -169,6 +169,7 @@ function resolveNextStep(patient: PatientDossierData): NextStep {
   if (
     patient.status === 'en_analyse' ||
     patient.status === 'rapport_genere' ||
+    patient.status === 'rapport_modifie' ||
     patient.status === 'devis_preparation' ||
     patient.status === 'formulaire_complete'
   ) {

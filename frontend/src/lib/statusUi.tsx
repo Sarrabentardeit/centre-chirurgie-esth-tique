@@ -34,6 +34,7 @@ const DOSSIER_UI: Record<DossierStatus, { label: string; tone: StatusTone; icon:
   formulaire_complete:  { label: 'Form. complété',    tone: 'brand',   icon: FileText },
   en_analyse:           { label: 'En analyse',        tone: 'teal',    icon: Stethoscope },
   rapport_genere:       { label: 'Rapport généré',    tone: 'teal',    icon: Stethoscope },
+  rapport_modifie:      { label: 'Rapport modifié',   tone: 'amber',   icon: FileEdit },
   devis_preparation:    { label: 'Devis en cours',    tone: 'amber',   icon: FileEdit },
   devis_envoye:         { label: 'Devis envoyé',      tone: 'brand',   icon: Send },
   devis_accepte:        { label: 'Devis accepté',     tone: 'emerald', icon: CheckCircle2 },

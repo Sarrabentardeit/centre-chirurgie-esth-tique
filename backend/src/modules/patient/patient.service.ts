@@ -206,13 +206,14 @@ export async function getDevis(userId: string) {
   const patient = await prisma.patient.findUnique({ where: { userId } })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
 
-  // Seuls les devis envoyés au patient (pas les brouillons gestionnaire en cours).
+  // Seuls les devis envoyés au patient (pas les brouillons) et non soft-supprimés.
   const devis = await prisma.devis.findMany({
     where: {
       patientId: patient.id,
       statut: { in: ['envoye', 'accepte', 'refuse'] },
+      deletedAt: null,
     },
-    orderBy: { dateCreation: 'desc' },
+    orderBy: [{ version: 'desc' }, { dateCreation: 'desc' }],
   })
   return { devis }
 }
@@ -222,7 +223,7 @@ export async function enregistrerConsultationDevis(userId: string, devisId: stri
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
 
   const devis = await prisma.devis.findFirst({
-    where: { id: devisId, patientId: patient.id },
+    where: { id: devisId, patientId: patient.id, deletedAt: null },
   })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
   if (devis.statut !== 'envoye' || devis.vuParPatientAt) {
@@ -255,7 +256,7 @@ export async function repondreDevis(userId: string, devisId: string, input: Repo
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Profil patient introuvable.')
 
   const devis = await prisma.devis.findFirst({
-    where: { id: devisId, patientId: patient.id },
+    where: { id: devisId, patientId: patient.id, deletedAt: null },
   })
   if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
   if (devis.statut !== 'envoye') {

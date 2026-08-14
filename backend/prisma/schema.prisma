@@ -24,6 +24,8 @@ enum DossierStatus {
   formulaire_complete
   en_analyse
   rapport_genere
+  /// Rapport médecin mis à jour après une 1re génération (devis à recalibrer)
+  rapport_modifie
   devis_preparation
   devis_envoye
   devis_accepte
@@ -244,10 +246,13 @@ model Devis {
   dateValidite   DateTime?   @map("date_validite")
   dateCreation   DateTime    @default(now()) @map("date_creation")
   vuParPatientAt DateTime?   @map("vu_par_patient_at")
+  /// Soft-delete : masqué patient + listes actives, visible dans « Devis supprimés »
+  deletedAt      DateTime?   @map("deleted_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
+  @@index([deletedAt])
   @@map("devis")
 }
 

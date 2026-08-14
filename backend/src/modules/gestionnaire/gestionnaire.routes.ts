@@ -165,7 +165,7 @@ gestionnaireRouter.post(
         pid(req.params.devisId),
         req.body,
       )
-      res.json({ ok: true, ...result })
+      res.json(result)
     } catch (e) {
       next(e)
     }

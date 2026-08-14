@@ -247,6 +247,15 @@ export async function syncHiddenDevisPdfsForPatient(patientId: string): Promise<
   }
 }
 
+export const EQUIPE_THREAD_ID = 'equipe'
+
+/** Nom affiché dans le canal interne (une seule discussion gestionnaire ↔ médecin). */
+function equipeDisplayName(role: string): string {
+  if (role === 'gestionnaire') return 'Houda'
+  if (role === 'medecin') return 'Dr Chennoufi'
+  return role
+}
+
 function mapMessage(m: {
   id: string
   patientId: string
@@ -260,16 +269,25 @@ function mapMessage(m: {
   deletedForAll?: boolean
   pinned?: boolean
   pinnedAt?: Date | null
+  staffOnly?: boolean
   expediteur?: { fullName: string } | null
+  patient?: {
+    dossierNumber: string
+    user: { fullName: string }
+  } | null
 }) {
   const deletedForAll = Boolean(m.deletedForAll)
+  const staffOnly = Boolean(m.staffOnly)
+  const expediteurNom = staffOnly
+    ? equipeDisplayName(m.expediteurRole)
+    : (m.expediteur?.fullName ?? null)
   return {
     id: m.id,
     dossierPatientId: m.patientId,
     patientId: m.patientId,
     expediteurId: m.expediteurId,
     expediteurRole: m.expediteurRole as UserRole,
-    expediteurNom: m.expediteur?.fullName ?? null,
+    expediteurNom,
     contenu: deletedForAll ? '' : m.contenu,
     pieceJointeUrl: deletedForAll ? null : (m.pieceJointeUrl ?? null),
     pieceJointeNom: deletedForAll ? null : (m.pieceJointeNom ?? null),
@@ -278,6 +296,9 @@ function mapMessage(m: {
     deletedForAll,
     pinned: Boolean(m.pinned),
     pinnedAt: m.pinnedAt?.toISOString() ?? null,
+    staffOnly,
+    patientNom: m.patient?.user.fullName ?? null,
+    dossierNumber: m.patient?.dossierNumber ?? null,
   }
 }
 
@@ -315,6 +336,18 @@ async function getAccessibleMessage(userId: string, role: UserRole, messageId: s
     if (!patient || patient.id !== message.patientId) {
       throw new AppError(403, 'FORBIDDEN', 'Accès refusé.')
     }
+    if (message.staffOnly) {
+      throw new AppError(404, 'MESSAGE_NOT_FOUND', 'Message introuvable.')
+    }
+  }
+
+  // Médecin : pas d’accès aux messages publics gestionnaire ↔ patiente
+  if (
+    role === 'medecin' &&
+    !message.staffOnly &&
+    message.expediteurRole === 'gestionnaire'
+  ) {
+    throw new AppError(404, 'MESSAGE_NOT_FOUND', 'Message introuvable.')
   }
 
   const hidden = await prisma.messageHidden.findUnique({
@@ -427,13 +460,85 @@ export async function searchChatPatients(search?: string) {
   }
 }
 
-export async function listConversations(role: UserRole) {
+export async function listConversations(
+  role: UserRole,
+  channel: 'patient' | 'equipe' = 'patient',
+) {
   if (role === 'patient') {
     throw new AppError(403, 'FORBIDDEN', 'Réservé à l’équipe.')
   }
 
+  // Canal équipe : une seule discussion Houda ↔ Dr (toutes les demandes dossiers)
+  if (channel === 'equipe') {
+    const last = await prisma.message.findFirst({
+      where: { staffOnly: true, deletedForAll: false },
+      orderBy: { dateEnvoi: 'desc' },
+      select: {
+        contenu: true,
+        pieceJointeNom: true,
+        dateEnvoi: true,
+        expediteurRole: true,
+        patient: {
+          select: { dossierNumber: true, user: { select: { fullName: true } } },
+        },
+      },
+    })
+
+    if (!last) return { conversations: [] }
+
+    const unreadCount = await prisma.message.count({
+      where: {
+        staffOnly: true,
+        lu: false,
+        deletedForAll: false,
+        expediteurRole: role === 'medecin' ? 'gestionnaire' : 'medecin',
+      },
+    })
+
+    const previewRaw =
+      last.contenu?.trim() ||
+      (last.pieceJointeNom ? `📎 ${last.pieceJointeNom}` : '')
+    const patientHint = last.patient
+      ? `${last.patient.user.fullName} · ${last.patient.dossierNumber}`
+      : ''
+    const preview = patientHint
+      ? `${patientHint} — ${previewRaw}`.slice(0, 100)
+      : previewRaw.slice(0, 100)
+
+    const peerName = role === 'medecin' ? 'Houda' : 'Dr Chennoufi'
+
+    return {
+      conversations: [
+        {
+          patientId: EQUIPE_THREAD_ID,
+          dossierNumber: 'Équipe',
+          fullName: peerName,
+          email: role === 'medecin' ? 'Gestionnaire' : 'Médecin',
+          unreadCount,
+          lastMessageAt: last.dateEnvoi.toISOString(),
+          lastMessagePreview: preview,
+          lastExpediteurRole: last.expediteurRole,
+          channel: 'equipe' as const,
+          unified: true,
+        },
+      ],
+    }
+  }
+
+  /** Médecin : chat patients = uniquement patient ↔ médecin (pas les messages gestionnaire). */
+  const medecinPatientOnly = role === 'medecin'
+
+  const threadWhere = medecinPatientOnly
+    ? {
+        staffOnly: false,
+        deletedForAll: false,
+        expediteurRole: { in: ['patient', 'medecin'] },
+      }
+    : { staffOnly: false, deletedForAll: false }
+
   const grouped = await prisma.message.groupBy({
     by: ['patientId'],
+    where: threadWhere,
     _count: { id: true },
     _max: { dateEnvoi: true },
   })
@@ -451,15 +556,25 @@ export async function listConversations(role: UserRole) {
       where: {
         patientId: { in: patientIds },
         lu: false,
-        expediteurRole: 'patient',
         deletedForAll: false,
+        staffOnly: false,
+        expediteurRole: 'patient',
       },
       _count: { id: true },
     }),
     Promise.all(
       patientIds.map((id) =>
         prisma.message.findFirst({
-          where: { patientId: id, deletedForAll: false },
+          where: {
+            patientId: id,
+            ...(medecinPatientOnly
+              ? {
+                  staffOnly: false,
+                  deletedForAll: false,
+                  expediteurRole: { in: ['patient', 'medecin'] },
+                }
+              : { staffOnly: false, deletedForAll: false }),
+          },
           orderBy: { dateEnvoi: 'desc' },
           select: {
             patientId: true,
@@ -467,9 +582,10 @@ export async function listConversations(role: UserRole) {
             expediteurRole: true,
             dateEnvoi: true,
             pieceJointeNom: true,
+            staffOnly: true,
           },
-        })
-      )
+        }),
+      ),
     ),
   ])
 
@@ -485,7 +601,7 @@ export async function listConversations(role: UserRole) {
       if (!p) return null
       const last = lastByPatient.get(g.patientId)
       const preview = last
-        ? (last.contenu?.trim() || (last.pieceJointeNom ? `📎 ${last.pieceJointeNom}` : ''))
+        ? last.contenu?.trim() || (last.pieceJointeNom ? `📎 ${last.pieceJointeNom}` : '')
         : 'Message supprimé'
       return {
         patientId: p.id,
@@ -496,6 +612,7 @@ export async function listConversations(role: UserRole) {
         lastMessageAt: (last?.dateEnvoi ?? g._max.dateEnvoi ?? new Date()).toISOString(),
         lastMessagePreview: preview.slice(0, 100),
         lastExpediteurRole: last?.expediteurRole ?? null,
+        channel: 'patient' as const,
       }
     })
     .filter((c): c is NonNullable<typeof c> => c !== null)
@@ -508,19 +625,80 @@ export async function getMessages(
   userId: string,
   role: UserRole,
   patientIdQuery?: string,
+  channel: 'patient' | 'equipe' | 'all' = 'all',
 ) {
+  // Une seule discussion interne : tous les messages staffOnly (tous dossiers)
+  if (
+    role !== 'patient' &&
+    channel === 'equipe' &&
+    (!patientIdQuery || patientIdQuery === EQUIPE_THREAD_ID)
+  ) {
+    const messages = await prisma.message.findMany({
+      where: {
+        staffOnly: true,
+        deletedForAll: false,
+        hiddenBy: { none: { userId } },
+      },
+      orderBy: { dateEnvoi: 'asc' },
+      include: {
+        expediteur: { select: { fullName: true } },
+        patient: {
+          select: {
+            dossierNumber: true,
+            user: { select: { fullName: true } },
+          },
+        },
+      },
+    })
+
+    return {
+      patientId: EQUIPE_THREAD_ID,
+      messages: messages.map(mapMessage),
+    }
+  }
+
   const patientId = await resolvePatientIdForUser(userId, role, patientIdQuery)
 
   // Filet : PDF d’un devis soft-supprimé → « Message supprimé »
   await syncHiddenDevisPdfsForPatient(patientId).catch(() => undefined)
 
+  const staffFilter =
+    role === 'patient'
+      ? { staffOnly: false as const }
+      : channel === 'equipe'
+        ? { staffOnly: true as const }
+        : channel === 'patient' && role === 'medecin'
+          ? {
+              staffOnly: false as const,
+              expediteurRole: { in: ['patient', 'medecin'] },
+            }
+          : channel === 'patient'
+            ? { staffOnly: false as const }
+            : role === 'medecin'
+              ? {
+                  OR: [
+                    { staffOnly: true },
+                    { staffOnly: false, expediteurRole: { in: ['patient', 'medecin'] } },
+                  ],
+                }
+              : {}
+
   const messages = await prisma.message.findMany({
     where: {
       patientId,
       hiddenBy: { none: { userId } },
+      ...staffFilter,
     },
     orderBy: { dateEnvoi: 'asc' },
-    include: { expediteur: { select: { fullName: true } } },
+    include: {
+      expediteur: { select: { fullName: true } },
+      patient: {
+        select: {
+          dossierNumber: true,
+          user: { select: { fullName: true } },
+        },
+      },
+    },
   })
 
   return {
@@ -542,6 +720,11 @@ export async function sendMessage(
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
+  const staffOnly = Boolean(input.staffOnly) && role !== 'patient'
+  if (input.staffOnly && role === 'patient') {
+    throw new AppError(403, 'FORBIDDEN', 'Message interne réservé à l’équipe.')
+  }
+
   const preview = input.contenu.trim() || (input.pieceJointeNom ? `📎 ${input.pieceJointeNom}` : 'Pièce jointe')
 
   const message = await prisma.message.create({
@@ -553,8 +736,17 @@ export async function sendMessage(
       pieceJointeUrl: input.pieceJointeUrl ?? null,
       pieceJointeNom: input.pieceJointeNom ?? null,
       lu: false,
+      staffOnly,
     },
-    include: { expediteur: { select: { fullName: true } } },
+    include: {
+      expediteur: { select: { fullName: true } },
+      patient: {
+        select: {
+          dossierNumber: true,
+          user: { select: { fullName: true } },
+        },
+      },
+    },
   })
 
   if (role === 'patient') {
@@ -564,6 +756,7 @@ export async function sendMessage(
         expediteurRole: { in: ['medecin', 'gestionnaire'] },
         lu: false,
         deletedForAll: false,
+        staffOnly: false,
       },
       data: { lu: true },
     })
@@ -573,6 +766,18 @@ export async function sendMessage(
       dossierNumber: patient.dossierNumber,
       preview,
     })
+  } else if (staffOnly) {
+    // Interne : marquer lus les messages équipe de l’autre, ne pas notifier la patiente
+    await prisma.message.updateMany({
+      where: {
+        patientId,
+        staffOnly: true,
+        lu: false,
+        deletedForAll: false,
+        expediteurId: { not: userId },
+      },
+      data: { lu: true },
+    })
   } else {
     await prisma.message.updateMany({
       where: {
@@ -580,6 +785,7 @@ export async function sendMessage(
         expediteurRole: 'patient',
         lu: false,
         deletedForAll: false,
+        staffOnly: false,
       },
       data: { lu: true },
     })
@@ -598,9 +804,10 @@ export async function sendMessage(
     type: 'chat:message',
     patientId,
     messageId: mapped.id,
+    senderId: userId,
   })
   publishChatToStaff({ type: 'chat:unread', patientId })
-  if (role !== 'patient') {
+  if (role !== 'patient' && !staffOnly) {
     publishChatToUser(patient.user.id, { type: 'chat:unread', patientId })
   }
 
@@ -612,6 +819,27 @@ export async function markMessagesRead(
   role: UserRole,
   input: MarkReadInput,
 ) {
+  const channel = input.channel ?? 'all'
+
+  // Fil unifié Équipe : marquer toutes les demandes internes comme lues
+  if (
+    role !== 'patient' &&
+    channel === 'equipe' &&
+    (!input.patientId || input.patientId === EQUIPE_THREAD_ID)
+  ) {
+    await prisma.message.updateMany({
+      where: {
+        staffOnly: true,
+        lu: false,
+        deletedForAll: false,
+        expediteurId: { not: userId },
+      },
+      data: { lu: true },
+    })
+    publishChatToStaff({ type: 'chat:unread', patientId: EQUIPE_THREAD_ID })
+    return { ok: true as const }
+  }
+
   const patientId = await resolvePatientIdForUser(userId, role, input.patientId)
 
   if (role === 'patient') {
@@ -621,6 +849,29 @@ export async function markMessagesRead(
         expediteurRole: { in: ['medecin', 'gestionnaire'] },
         lu: false,
         deletedForAll: false,
+        staffOnly: false,
+      },
+      data: { lu: true },
+    })
+  } else if (channel === 'equipe') {
+    await prisma.message.updateMany({
+      where: {
+        patientId,
+        lu: false,
+        deletedForAll: false,
+        staffOnly: true,
+        expediteurId: { not: userId },
+      },
+      data: { lu: true },
+    })
+  } else if (channel === 'patient') {
+    await prisma.message.updateMany({
+      where: {
+        patientId,
+        lu: false,
+        deletedForAll: false,
+        staffOnly: false,
+        expediteurRole: 'patient',
       },
       data: { lu: true },
     })
@@ -628,9 +879,12 @@ export async function markMessagesRead(
     await prisma.message.updateMany({
       where: {
         patientId,
-        expediteurRole: 'patient',
         lu: false,
         deletedForAll: false,
+        OR: [
+          { expediteurRole: 'patient', staffOnly: false },
+          { staffOnly: true, expediteurId: { not: userId } },
+        ],
       },
       data: { lu: true },
     })
@@ -652,6 +906,7 @@ export async function getUnreadCount(userId: string, role: UserRole) {
         patientId: patient.id,
         lu: false,
         deletedForAll: false,
+        staffOnly: false,
         expediteurRole: { in: ['medecin', 'gestionnaire'] },
         hiddenBy: { none: { userId } },
       },
@@ -659,14 +914,72 @@ export async function getUnreadCount(userId: string, role: UserRole) {
     return { unread }
   }
 
+  // Médecin : messages patiente + demandes internes gestionnaire
+  // Gestionnaire : messages patiente + réponses internes médecin
   const unread = await prisma.message.count({
     where: {
       lu: false,
       deletedForAll: false,
-      expediteurRole: 'patient',
+      OR: [
+        { staffOnly: false, expediteurRole: 'patient' },
+        {
+          staffOnly: true,
+          expediteurRole: role === 'medecin' ? 'gestionnaire' : 'medecin',
+        },
+      ],
     },
   })
   return { unread }
+}
+
+/**
+ * Message interne équipe (ex. gestionnaire → médecin) dans le fil du dossier.
+ * Invisible pour la patiente.
+ */
+export async function sendStaffOnlyMessage(
+  gestionnaireId: string,
+  patientId: string,
+  contenu: string,
+) {
+  const text = contenu.trim()
+  if (!text) throw new AppError(400, 'EMPTY_MESSAGE', 'Le message ne peut pas être vide.')
+
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    select: { id: true, dossierNumber: true, user: { select: { fullName: true } } },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const message = await prisma.message.create({
+    data: {
+      patientId,
+      expediteurId: gestionnaireId,
+      expediteurRole: 'gestionnaire',
+      contenu: text,
+      lu: false,
+      staffOnly: true,
+    },
+    include: {
+      expediteur: { select: { fullName: true } },
+      patient: {
+        select: {
+          dossierNumber: true,
+          user: { select: { fullName: true } },
+        },
+      },
+    },
+  })
+
+  const mapped = mapMessage(message)
+  void publishThreadEvent(patientId, {
+    type: 'chat:message',
+    patientId,
+    messageId: mapped.id,
+    senderId: gestionnaireId,
+  })
+  publishChatToStaff({ type: 'chat:unread', patientId })
+
+  return { message: mapped, patient }
 }
 
 /** Supprimer pour tout le monde (tombstone visible). */

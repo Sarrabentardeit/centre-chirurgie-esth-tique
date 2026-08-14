@@ -1744,7 +1744,7 @@ export default function FormulairePage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-0 sm:pl-8">
                         <div className="space-y-1">
                           <Label htmlFor="nb-adultes-accomp" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                            Nombre d’adultes <span className="text-destructive">*</span>
+                            Adultes accompagnants (hors patient) <span className="text-destructive">*</span>
                           </Label>
                           <Input
                             id="nb-adultes-accomp"
@@ -1762,7 +1762,7 @@ export default function FormulairePage() {
                         </div>
                         <div className="space-y-1">
                           <Label htmlFor="nb-enfants-accomp" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
-                            Nombre d’enfants <span className="text-destructive">*</span>
+                            Enfants accompagnants <span className="text-destructive">*</span>
                           </Label>
                           <Input
                             id="nb-enfants-accomp"

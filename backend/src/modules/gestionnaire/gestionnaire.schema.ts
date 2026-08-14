@@ -14,6 +14,10 @@ export const upsertDevisDraftSchema = z.object({
   planningMedical: z.string().optional().nullable(),
   notesSejour: z.string().optional().nullable(),
   currency: z.string().length(3).optional().default('EUR'),
+  /** Force une nouvelle version (conserve les devis existants, ex. après nouveau rapport). */
+  nouvelleVersion: z.boolean().optional(),
+  /** Rapport source de cette version. */
+  rapportId: z.string().uuid().optional().nullable(),
 })
 
 export type UpsertDevisDraftInput = z.infer<typeof upsertDevisDraftSchema>
@@ -82,6 +86,13 @@ export const sendDevisRappelSchema = z.object({
 })
 
 export type SendDevisRappelInput = z.infer<typeof sendDevisRappelSchema>
+
+/** Demande gestionnaire → médecin : MAJ rapport (sans toucher au devis). */
+export const demandeMajRapportSchema = z.object({
+  message: z.string().min(1, 'Le message est obligatoire.'),
+})
+
+export type DemandeMajRapportInput = z.infer<typeof demandeMajRapportSchema>
 
 export const renderDevisPdfSchema = z.object({
   html: z.string().min(1, 'HTML du devis requis.'),

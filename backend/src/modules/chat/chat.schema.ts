@@ -7,6 +7,8 @@ export const sendMessageSchema = z
     patientId: z.string().uuid().optional(),
     pieceJointeUrl: z.string().url().optional(),
     pieceJointeNom: z.string().trim().max(255).optional(),
+    /** Message interne équipe (invisible patiente). Réservé staff. */
+    staffOnly: z.boolean().optional().default(false),
   })
   .superRefine((data, ctx) => {
     if (!data.contenu && !data.pieceJointeUrl) {
@@ -19,7 +21,9 @@ export const sendMessageSchema = z
   })
 
 export const markReadSchema = z.object({
-  patientId: z.string().uuid().optional(),
+  patientId: z.union([z.string().uuid(), z.literal('equipe')]).optional(),
+  /** Limite le marquage lu au canal ouvert (évite de vider Demandes en lisant Patients). */
+  channel: z.enum(['patient', 'equipe', 'all']).optional().default('all'),
 })
 
 export const messageIdParamSchema = z.object({

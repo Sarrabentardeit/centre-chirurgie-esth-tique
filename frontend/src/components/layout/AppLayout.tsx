@@ -79,11 +79,11 @@ export function AppLayout() {
 
   const isChatRoute = location.pathname.endsWith('/chat')
 
-  // Autoriser le son après le premier clic / touche (politique navigateurs)
+  // Autoriser le son après interaction (politique navigateurs) — reste actif
   useEffect(() => {
     const unlock = () => unlockNotificationAudio()
-    window.addEventListener('pointerdown', unlock, { once: true })
-    window.addEventListener('keydown', unlock, { once: true })
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('keydown', unlock)
     return () => {
       window.removeEventListener('pointerdown', unlock)
       window.removeEventListener('keydown', unlock)
@@ -134,9 +134,10 @@ export function AppLayout() {
   }, [refreshChatUnread, location.pathname])
 
   useChatRealtime((event) => {
-    // Son Messenger uniquement à la réception d’un vrai message (pas à l’ouverture)
+    // Son UNIQUEMENT à l’arrivée d’un message d’un autre utilisateur (pas soi-même, pas au chargement)
     if (event.type === 'chat:message') {
-      if (!isChatRoute) {
+      const fromOther = !event.senderId || event.senderId !== user?.id
+      if (fromOther && !isChatRoute) {
         unlockNotificationAudio()
         playMessageSound()
       }

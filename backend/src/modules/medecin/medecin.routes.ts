@@ -216,6 +216,20 @@ medecinRouter.post(
   }
 )
 
+medecinRouter.delete(
+  '/patients/:id/rapport/:rapportId',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await medecinService.deleteRapport(
+        req.auth!.sub,
+        paramToString(req.params.id),
+        paramToString(req.params.rapportId),
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) { next(e) }
+  },
+)
+
 // ── RDV patient ───────────────────────────────────────────────────────────────
 medecinRouter.post(
   '/patients/:id/rdv',

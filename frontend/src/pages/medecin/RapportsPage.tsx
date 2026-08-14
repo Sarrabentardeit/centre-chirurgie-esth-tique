@@ -3,7 +3,7 @@ import {
   Search, CheckCircle2, Clock, X, AlertTriangle, Heart, Scissors,
   Save, RefreshCw, AlertCircle, DollarSign, StickyNote, ExternalLink,
   ClipboardPlus, Sparkles, ArrowLeft,
-  Phone, Mail, MapPin, Activity, Calendar,
+  Phone, Mail, MapPin, Activity, Calendar, Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -21,8 +21,9 @@ import { medecinApi } from '@/lib/api'
 import type { PatientListItem } from '@/lib/api'
 import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
 import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
-import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { cachedFetch, hasCachedData, invalidateCache } from '@/lib/cachedFetch'
 import { queryKeys } from '@/lib/queryKeys'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -197,6 +198,12 @@ export default function RapportsPage() {
   const [saving, setSaving]               = useState(false)
   const [saved, setSaved]                 = useState(false)
   const [saveError, setSaveError]         = useState<string | null>(null)
+  /** true = prochain enregistrement crée un nouveau rapport (ne touche pas aux précédents). */
+  const [modeNouveauRapport, setModeNouveauRapport] = useState(false)
+  const [rapportsCount, setRapportsCount] = useState(0)
+  const [deleteTarget, setDeleteTarget] = useState<PatientWithRapport | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const closeEditor = () => {
     setDrawerOpen(false)
@@ -239,6 +246,24 @@ export default function RapportsPage() {
 
   useEffect(() => { void load({ useCache: true }) }, [load])
 
+  const handleDeleteRapport = async () => {
+    if (!deleteTarget?.rapport?.id) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await medecinApi.deleteRapport(deleteTarget.id, deleteTarget.rapport.id)
+      toast({ title: 'Rapport supprimé', variant: 'success' })
+      if (selectedId === deleteTarget.id) closeEditor()
+      setDeleteTarget(null)
+      await invalidateCache(queryKeys.medecinPatientsAll())
+      void load({ useCache: false })
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Suppression impossible.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const handleSelect = async (patientId: string) => {
     setSelectedId(patientId)
     setDiagnostic(''); setExamensDemandes([]); setExamensAutreChecked(false); setExamensAutreText(''); setInterventions(''); setValeur(''); setForfait('')
@@ -246,10 +271,14 @@ export default function RapportsPage() {
     setNbAdultesSejour(''); setNbEnfantsSejour(''); setAnesthesieGenerale(false)
     setDrainage(null); setNbSeancesDrainage(''); setNotes('')
     setSaved(false); setSaveError(null)
+    setModeNouveauRapport(false)
+    setRapportsCount(0)
     setDrawerOpen(true)
     try {
       const res = await medecinApi.getPatient(patientId)
-      const r = res.patient.rapports?.[0]
+      const allRapports = res.patient.rapports ?? []
+      setRapportsCount(allRapports.length)
+      const r = allRapports[0]
       if (r) {
         const savedExamens = r.examensDemandes ?? []
         const autreEntree = savedExamens.find((x) => x.trim().toLowerCase().startsWith('autre'))
@@ -298,7 +327,7 @@ export default function RapportsPage() {
     } catch { /* silent */ }
   }
 
-  const handleSave = async () => {
+  const handleSave = async (asNouveau?: boolean) => {
     if (!selectedId || !diagnostic.trim()) return
     if (!forfait || Number(forfait) <= 0) {
       setSaveError('Le forfait médical est obligatoire.')
@@ -320,6 +349,7 @@ export default function RapportsPage() {
     const nPost = Number(nuitsClinique)
     const nHotel = Number(nuitsHotel)
     const totalTunisie = nPre + nPost + nHotel
+    const createNouveau = asNouveau === true || modeNouveauRapport || !selected?.rapport
     setSaving(true); setSaveError(null)
     try {
       const examensPayload = [...examensDemandes]
@@ -345,10 +375,19 @@ export default function RapportsPage() {
         drainage: drainage ?? undefined,
         nbSeancesDrainage: drainage === true ? Number(nbSeancesDrainage) : null,
         notes: notes || undefined,
+        nouveauRapport: createNouveau && !!selected?.rapport,
       })
       setSaved(true)
-      toast({ title: 'Rapport enregistré', description: 'Le diagnostic a été sauvegardé.', variant: 'success' })
+      toast({
+        title: createNouveau && selected?.rapport ? 'Nouveau rapport généré' : 'Rapport enregistré',
+        description: createNouveau && selected?.rapport
+          ? 'Le rapport précédent est conservé. Un nouveau devis pourra être créé ensuite.'
+          : 'Le diagnostic a été sauvegardé.',
+        variant: 'success',
+      })
       setTimeout(() => setSaved(false), 3000)
+      setModeNouveauRapport(false)
+      setRapportsCount((c) => (createNouveau && selected?.rapport ? c + 1 : Math.max(c, 1)))
       setPatients((prev) => prev.map((p) => p.id === selectedId
         ? {
             ...p,
@@ -374,6 +413,7 @@ export default function RapportsPage() {
             },
           }
         : p))
+      void load({ useCache: false })
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Erreur lors de la sauvegarde.')
     } finally {
@@ -487,19 +527,59 @@ export default function RapportsPage() {
               <ExternalLink className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Dossier</span>
             </Button>
+            {selected.rapport && (
+              <Button
+                variant={modeNouveauRapport ? 'brand' : 'outline'}
+                size="sm"
+                className="h-9 gap-1.5"
+                onClick={() => setModeNouveauRapport(true)}
+                disabled={saving}
+                title="Crée un nouveau rapport sans modifier les précédents"
+              >
+                <ClipboardPlus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Nouveau rapport</span>
+              </Button>
+            )}
             <Button
               variant="brand"
               size="sm"
               className="h-9 gap-2 font-semibold"
-              onClick={() => void handleSave()}
+              onClick={() => void handleSave(modeNouveauRapport || !selected.rapport)}
               disabled={!diagnostic.trim() || saving}
             >
               {saved
                 ? <><CheckCircle2 className="h-4 w-4" /> OK</>
-                : <><Save className="h-4 w-4" /> {saving ? '…' : selected.rapport ? 'Mettre à jour' : 'Enregistrer'}</>}
+                : <><Save className="h-4 w-4" /> {saving ? '…' : (
+                    !selected.rapport
+                      ? 'Enregistrer'
+                      : modeNouveauRapport
+                        ? 'Générer le nouveau rapport'
+                        : 'Corriger le rapport actuel'
+                  )}</>}
             </Button>
           </div>
         </div>
+
+        {selected.rapport && (
+          <div className={`rounded-xl border px-4 py-2.5 text-xs ${
+            modeNouveauRapport
+              ? 'border-amber-200 bg-amber-50 text-amber-900'
+              : 'border-slate-200 bg-slate-50 text-slate-600'
+          }`}>
+            {modeNouveauRapport
+              ? `Mode nouveau rapport : le rapport précédent (R${rapportsCount || 1}) restera figé. Vous créez R${(rapportsCount || 1) + 1} — même dossier, devis v1 conservé.`
+              : `${rapportsCount > 1 ? `${rapportsCount} rapports` : '1 rapport'} sur ce dossier. Après un devis, utilisez « Nouveau rapport » (ne pas corriger l’ancien).`}
+            {modeNouveauRapport && (
+              <button
+                type="button"
+                className="ml-2 underline font-medium"
+                onClick={() => setModeNouveauRapport(false)}
+              >
+                Annuler
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Bandeau patient */}
         <div className="rounded-2xl border border-border bg-white px-4 py-3 sm:px-5 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
@@ -713,15 +793,15 @@ export default function RapportsPage() {
                   <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Accompagnants</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <FieldLabel>Adultes</FieldLabel>
-                      <Input type="number" min={1} max={20} placeholder="1" value={nbAdultesSejour} onChange={(e) => setNbAdultesSejour(e.target.value)} className="h-10" />
+                      <FieldLabel>Adultes accompagnants</FieldLabel>
+                      <Input type="number" min={0} max={20} placeholder="0" value={nbAdultesSejour} onChange={(e) => setNbAdultesSejour(e.target.value)} className="h-10" />
                     </div>
                     <div>
                       <FieldLabel>Enfants (2–12 ans)</FieldLabel>
                       <Input type="number" min={0} max={20} placeholder="0" value={nbEnfantsSejour} onChange={(e) => setNbEnfantsSejour(e.target.value)} className="h-10" />
                     </div>
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1.5">Depuis le formulaire patient.</p>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">Depuis le formulaire — sans compter la patiente.</p>
                 </div>
 
                 <div className="border-t border-border pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -769,14 +849,24 @@ export default function RapportsPage() {
         {/* Barre d’actions mobile sticky */}
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white/95 backdrop-blur px-4 py-3 pb-safe lg:hidden flex items-center gap-2">
           <Button variant="outline" className="h-11 flex-1" onClick={closeEditor}>Retour</Button>
+          {selected.rapport && !modeNouveauRapport && (
+            <Button
+              variant="outline"
+              className="h-11 px-3"
+              onClick={() => setModeNouveauRapport(true)}
+              disabled={saving}
+            >
+              <ClipboardPlus className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="brand"
             className="h-11 flex-[1.4] gap-2 font-semibold"
-            onClick={() => void handleSave()}
+            onClick={() => void handleSave(modeNouveauRapport || !selected.rapport)}
             disabled={!diagnostic.trim() || saving}
           >
             <Save className="h-4 w-4" />
-            {saving ? '…' : 'Enregistrer'}
+            {saving ? '…' : modeNouveauRapport ? 'Nouveau' : 'Enregistrer'}
           </Button>
         </div>
       </div>
@@ -892,66 +982,96 @@ export default function RapportsPage() {
               const hasRapport = patientHasRapport(p)
               const needsAnalysis = !hasRapport && (p.status === 'formulaire_complete' || p.status === 'en_analyse')
               const rowPct = rowCompletion(p)
+              const canDelete = Boolean(p.rapport?.id)
               return (
-                <button
+                <div
                   key={p.id}
-                  type="button"
-                  onClick={() => void handleSelect(p.id)}
-                  className="w-full flex items-center gap-3 px-3 sm:px-4 py-3.5 text-left transition-colors hover:bg-slate-50/90"
+                  className="flex items-center gap-3 px-3 sm:px-4 py-3.5 transition-colors hover:bg-slate-50/90"
                 >
-                  <div className="relative shrink-0">
-                    <Avatar className="h-11 w-11">
-                      <AvatarFallback className={`text-xs font-bold ${
-                        needsAnalysis ? 'bg-amber-100 text-amber-800' :
-                        hasRapport ? 'bg-teal-100 text-teal-800' : 'bg-brand-100 text-brand-800'
-                      }`}>
-                        {getInitials(p.user.fullName)}
-                      </AvatarFallback>
-                    </Avatar>
-                    {needsAnalysis && (
-                      <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 border-2 border-white" />
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <p className="text-sm font-semibold text-slate-900 truncate">{p.user.fullName}</p>
-                      <span className="hidden md:inline-flex shrink-0">
-                        <StatusBadge kind="dossier" value={p.status} />
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-[11px] font-mono text-brand-700">{p.dossierNumber}</p>
-                      <span className="text-[11px] text-muted-foreground">· {formatRelative(p.updatedAt)}</span>
-                    </div>
-                    <div className="flex items-center gap-3 pt-0.5">
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1 max-w-[140px]">
-                        <div className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${
-                              rowPct === 100 ? 'bg-emerald-500' : rowPct >= 60 ? 'bg-teal-500' : rowPct > 0 ? 'bg-amber-400' : 'bg-slate-200'
-                            }`}
-                            style={{ width: `${rowPct}%` }}
-                          />
-                        </div>
-                        <span className="text-[10px] tabular-nums text-muted-foreground w-7">{rowPct}%</span>
-                      </div>
-                      {p.rapport?.forfaitPropose != null && (
-                        <span className="text-[11px] font-semibold text-brand-800 tabular-nums">
-                          {p.rapport.forfaitPropose.toLocaleString('fr-TN')} TND
-                        </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleSelect(p.id)}
+                    className="flex flex-1 items-center gap-3 min-w-0 text-left"
+                  >
+                    <div className="relative shrink-0">
+                      <Avatar className="h-11 w-11">
+                        <AvatarFallback className={`text-xs font-bold ${
+                          needsAnalysis ? 'bg-amber-100 text-amber-800' :
+                          hasRapport ? 'bg-teal-100 text-teal-800' : 'bg-brand-100 text-brand-800'
+                        }`}>
+                          {getInitials(p.user.fullName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      {needsAnalysis && (
+                        <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 border-2 border-white" />
                       )}
                     </div>
-                  </div>
 
-                  <span className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
-                    needsAnalysis
-                      ? 'text-amber-800 border-amber-200 bg-amber-50'
-                      : 'text-slate-700 border-slate-200 bg-white'
-                  }`}>
-                    {hasRapport ? 'Modifier' : 'Rédiger'}
-                  </span>
-                </button>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 truncate">{p.user.fullName}</p>
+                        <span className="hidden md:inline-flex shrink-0">
+                          <StatusBadge kind="dossier" value={p.status} />
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-[11px] font-mono text-brand-700">{p.dossierNumber}</p>
+                        <span className="text-[11px] text-muted-foreground">· {formatRelative(p.updatedAt)}</span>
+                      </div>
+                      <div className="flex items-center gap-3 pt-0.5">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1 max-w-[140px]">
+                          <div className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                rowPct === 100 ? 'bg-emerald-500' : rowPct >= 60 ? 'bg-teal-500' : rowPct > 0 ? 'bg-amber-400' : 'bg-slate-200'
+                              }`}
+                              style={{ width: `${rowPct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] tabular-nums text-muted-foreground w-7">{rowPct}%</span>
+                        </div>
+                        {p.rapport?.forfaitPropose != null && (
+                          <span className="text-[11px] font-semibold text-brand-800 tabular-nums">
+                            {p.rapport.forfaitPropose.toLocaleString('fr-TN')} TND
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+
+                  <div className="shrink-0 flex items-center gap-1.5">
+                    {canDelete && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 px-2 text-[11px] text-destructive border-destructive/30 hover:bg-destructive/5"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDeleteError(null)
+                          setDeleteTarget(p)
+                        }}
+                        aria-label={`Supprimer le rapport de ${p.user.fullName}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Supprimer</span>
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className={`h-8 px-2.5 text-[11px] font-semibold ${
+                        needsAnalysis
+                          ? 'text-amber-800 border-amber-200 bg-amber-50 hover:bg-amber-100'
+                          : 'text-slate-700 border-slate-200 bg-white'
+                      }`}
+                      onClick={() => void handleSelect(p.id)}
+                    >
+                      {hasRapport ? 'Modifier' : 'Rédiger'}
+                    </Button>
+                  </div>
+                </div>
               )
             })
           )}
@@ -966,6 +1086,26 @@ export default function RapportsPage() {
           />
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => {
+          if (deleting) return
+          setDeleteTarget(null)
+          setDeleteError(null)
+        }}
+        title="Supprimer ce rapport ?"
+        description={
+          deleteTarget
+            ? `Le rapport actuel de ${deleteTarget.user.fullName} (${deleteTarget.dossierNumber}) sera définitivement supprimé. Les devis déjà émis restent conservés.`
+            : undefined
+        }
+        confirmLabel="Supprimer"
+        confirmVariant="destructive"
+        loading={deleting}
+        error={deleteError}
+        onConfirm={() => void handleDeleteRapport()}
+      />
     </div>
   )
 }

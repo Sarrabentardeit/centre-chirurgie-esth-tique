@@ -1,8 +1,9 @@
-/** Sons courts via Web Audio API (aucun fichier audio requis). */
+/** Sons courts via Web Audio API — uniquement message entrant / notification système. */
 
 let audioCtx: AudioContext | null = null
 let lastMessageAt = 0
 let lastNotifAt = 0
+let unlocked = false
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -21,6 +22,7 @@ function getAudioContext(): AudioContext | null {
 export function unlockNotificationAudio() {
   const ctx = getAudioContext()
   if (!ctx) return
+  unlocked = true
   if (ctx.state === 'suspended') void ctx.resume()
 }
 
@@ -53,39 +55,47 @@ function playTone(
   osc.stop(t0 + opts.duration + 0.03)
 }
 
+async function ensureCtxReady(): Promise<AudioContext | null> {
+  const ctx = getAudioContext()
+  if (!ctx) return null
+  if (ctx.state === 'suspended') {
+    try {
+      await ctx.resume()
+    } catch {
+      return unlocked ? ctx : null
+    }
+  }
+  return ctx
+}
+
 /**
- * Son message — style Messenger / chat classique :
- * double « pop » doux, clair, court (pas une alarme).
+ * Son message — uniquement à la réception d’un message d’un autre utilisateur.
  */
 export function playMessageSound() {
   const now = Date.now()
   if (now - lastMessageAt < 450) return
   lastMessageAt = now
 
-  const ctx = getAudioContext()
-  if (!ctx) return
-  if (ctx.state === 'suspended') void ctx.resume()
-
-  // Pop 1 (plus grave) + Pop 2 (plus aigu) — signature type Messenger
-  playTone(ctx, { freq: 920, freqEnd: 1100, start: 0, duration: 0.09, type: 'sine', volume: 0.11 })
-  playTone(ctx, { freq: 1240, freqEnd: 1480, start: 0.1, duration: 0.11, type: 'sine', volume: 0.1 })
-  // Harmonique légère pour le « bubble »
-  playTone(ctx, { freq: 1840, start: 0.1, duration: 0.07, type: 'triangle', volume: 0.035 })
+  void ensureCtxReady().then((ctx) => {
+    if (!ctx) return
+    playTone(ctx, { freq: 920, freqEnd: 1100, start: 0, duration: 0.09, type: 'sine', volume: 0.11 })
+    playTone(ctx, { freq: 1240, freqEnd: 1480, start: 0.1, duration: 0.11, type: 'sine', volume: 0.1 })
+    playTone(ctx, { freq: 1840, start: 0.1, duration: 0.07, type: 'triangle', volume: 0.035 })
+  })
 }
 
 /**
- * Son notification — distinct du chat : carillon plus grave / « ding » app.
+ * Son notification — uniquement à l’arrivée d’une notif système (hors chat).
  */
 export function playNotificationSound() {
   const now = Date.now()
   if (now - lastNotifAt < 600) return
   lastNotifAt = now
 
-  const ctx = getAudioContext()
-  if (!ctx) return
-  if (ctx.state === 'suspended') void ctx.resume()
-
-  playTone(ctx, { freq: 520, start: 0, duration: 0.14, type: 'triangle', volume: 0.1 })
-  playTone(ctx, { freq: 690, start: 0.12, duration: 0.16, type: 'triangle', volume: 0.09 })
-  playTone(ctx, { freq: 520, start: 0.28, duration: 0.18, type: 'sine', volume: 0.06 })
+  void ensureCtxReady().then((ctx) => {
+    if (!ctx) return
+    playTone(ctx, { freq: 520, start: 0, duration: 0.14, type: 'triangle', volume: 0.1 })
+    playTone(ctx, { freq: 690, start: 0.12, duration: 0.16, type: 'triangle', volume: 0.09 })
+    playTone(ctx, { freq: 520, start: 0.28, duration: 0.18, type: 'sine', volume: 0.06 })
+  })
 }

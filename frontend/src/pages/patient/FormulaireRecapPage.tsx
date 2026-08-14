@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { authApi, formulaireApi } from '@/lib/api'
 import { formatIsoDateFrLong, formatDateTime } from '@/lib/utils'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
+import { resolveFormulaireFileUrl } from '@/components/dossier/FormulairePayloadView'
 import type { MeResponse } from '@/lib/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -113,22 +114,12 @@ function Lightbox({ src, name, onClose }: { src: string; name: string; onClose: 
   )
 }
 
-// ─── URL resolver ────────────────────────────────────────────────────────────
-// Retourne null si le fichier n'a pas d'URL serveur (ancien format : juste nom)
+// ─── URL resolver (même logique que médecin / gestionnaire) ─────────────────
 
 function resolveFileUrl(p: string): string | null {
   if (p.startsWith('blob:')) return null
-  if (p.startsWith('http://') || p.startsWith('https://')) return p
-  if (p.startsWith('/')) {
-    const base = (import.meta.env.VITE_API_URL as string | undefined)?.replace('/api', '') ?? 'http://localhost:4000'
-    return `${base}${p}`
-  }
-  // Compat ancien format: nom de fichier nu -> /uploads/<filename>
-  // Permet d'ouvrir les fichiers déjà stockés avant la migration d'URL.
-  const base = (import.meta.env.VITE_API_URL as string | undefined)?.replace('/api', '') ?? 'http://localhost:4000'
-  const cleanName = p.trim()
-  if (!cleanName) return null
-  return `${base}/uploads/${encodeURIComponent(cleanName)}`
+  const url = resolveFormulaireFileUrl(p)
+  return url.trim() ? url : null
 }
 
 // ─── Photo Grid ───────────────────────────────────────────────────────────────
@@ -546,8 +537,8 @@ export default function FormulaireRecapPage() {
             />
             {p.accompagnant === true && (
               <>
-                <Row label="Nombre d’adultes (accompagnement)" value={p.nbAdultesAccompagnement != null ? String(p.nbAdultesAccompagnement) : undefined} />
-                <Row label="Nombre d’enfants (accompagnement)" value={p.nbEnfantsAccompagnement != null ? String(p.nbEnfantsAccompagnement) : undefined} />
+                <Row label="Adultes accompagnants (hors patient)" value={p.nbAdultesAccompagnement != null ? String(p.nbAdultesAccompagnement) : undefined} />
+                <Row label="Enfants accompagnants" value={p.nbEnfantsAccompagnement != null ? String(p.nbEnfantsAccompagnement) : undefined} />
               </>
             )}
             <Row label="Description" value={p.descriptionDemande} />

@@ -15,7 +15,7 @@ import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { feedbackSuccess, toast } from '@/store/toastStore'
-import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, STATUS_COLORS, STATUS_LABELS, type CurrencyUnit } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, getDevisDisplayNumber, STATUS_COLORS, STATUS_LABELS, type CurrencyUnit } from '@/lib/utils'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
@@ -111,13 +111,12 @@ function totalAccompagnantsQty(
     const enfants = Number.isFinite(e) && e >= 0 ? Math.floor(e) : 0
     return adultesAcc + enfants
   }
-  // Rapport / infos séjour : nbAdultes inclut la patiente
+  // Rapport / notes séjour : nbAdultes = accompagnants uniquement (sans la patiente)
   const adults = Number(nbAdultes)
   const enfants = Number(nbEnfants)
   const a = Number.isFinite(adults) ? Math.floor(adults) : 0
   const e = Number.isFinite(enfants) ? Math.floor(enfants) : 0
-  if (a <= 0 && e <= 0) return 0
-  return Math.max(0, a + e - (a >= 1 ? 1 : 0))
+  return Math.max(0, a + e)
 }
 
 const LIGNE_SUPP_CLINIQUE_ACCOMP = 'Supp Clinique accompagnateur'
@@ -248,13 +247,22 @@ Cabinet du Dr Mehdi Chennoufi
 Chirurgie Esthétique, Plastique et Réparatrice
 SCULPTURE, SMOOTH & SMILE`
 
-function applyTemplateVars(content: string, fullName: string) {
+/** Message prérempli → médecin (court). */
+const DEMANDE_MAJ_RAPPORT_FALLBACK = `Bonjour Docteur,
+
+Pouvez-vous générer un nouveau rapport médical pour la patiente {fullName} (dossier {dossier}) ?
+
+Le devis v1 reste conservé.`
+
+function applyTemplateVars(content: string, fullName: string, dossierNumber = '') {
   const parts = fullName.trim().split(/\s+/)
   const prenom = parts[0] ?? ''
   const nom = parts.slice(1).join(' ')
   return content
+    .split('{fullName}').join(fullName.trim())
     .split('{prenom}').join(prenom)
     .split('{nom}').join(nom)
+    .split('{dossier}').join(dossierNumber)
     .split('{reason}').join('')
 }
 
@@ -477,6 +485,7 @@ interface DevisModalProps {
   inclutIds: string[]; setInclutIds: (v: string[] | ((prev: string[]) => string[])) => void
   exclutIds: string[]; setExclutIds: (v: string[] | ((prev: string[]) => string[])) => void
   drainageNb: number; setDrainageNb: (v: number | ((prev: number) => number)) => void
+  contentionDetail: string; setContentionDetail: (v: string) => void
   sent: boolean; savedDraft: boolean; autoSaving?: boolean; actionLoading: boolean
   onSend: () => void; onSaveDraft: () => void
   onDelete: () => void
@@ -503,6 +512,7 @@ function DevisModal({
   inclutIds, setInclutIds,
   exclutIds, setExclutIds,
   drainageNb, setDrainageNb,
+  contentionDetail, setContentionDetail,
   sent, savedDraft, autoSaving = false, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
   tauxEur,
   formError = null,
@@ -725,6 +735,7 @@ function DevisModal({
                       onValueChange={(v) => {
                         setHotelChoice(v)
                         if (v !== 'autre') setHotelAutre('')
+                        if (v === 'aucun') setHotelNuits('0')
                       }}
                     >
                       <SelectTrigger className={cn(
@@ -736,6 +747,7 @@ function DevisModal({
                       <SelectContent>
                         <SelectItem value="mouradi">Mouradi Gammarth</SelectItem>
                         <SelectItem value="darMarsa">Hotel Dar Marsa La Marsa</SelectItem>
+                        <SelectItem value="aucun">Aucun (séjour géré par la patiente)</SelectItem>
                         <SelectItem value="autre">Autre</SelectItem>
                       </SelectContent>
                     </Select>
@@ -749,6 +761,11 @@ function DevisModal({
                         value={hotelAutre}
                         onChange={(e) => setHotelAutre(e.target.value)}
                       />
+                    )}
+                    {hotelChoice === 'aucun' && (
+                      <p className="text-[11px] text-slate-500 mt-1.5">
+                        Pas d’hôtel cabinet — convalescence prise en charge par la patiente.
+                      </p>
                     )}
                     {hotelNomInvalid && (
                       <p className="text-[11px] text-destructive mt-1">Hôtel obligatoire</p>
@@ -784,17 +801,17 @@ function DevisModal({
                   <p className="text-[11px] text-slate-400 mt-1">Auto : nuits clinique + nuits hôtel</p>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1.5">Nombre d&apos;adultes</label>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1.5">Adultes accompagnants</label>
                   <Input
                     className="h-9 text-sm border-slate-200 bg-white"
                     type="number"
-                    min={1}
+                    min={0}
                     step={1}
-                    placeholder="Ex. : 1"
+                    placeholder="0"
                     value={nbAdultes}
                     onChange={(e) => setNbAdultes(e.target.value)}
                   />
-                  <p className="text-[11px] text-slate-400 mt-1">Depuis le rapport médecin.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Sans la patiente — depuis le rapport.</p>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1.5">Nbr enfants (2 – 12 ans)</label>
@@ -881,6 +898,33 @@ function DevisModal({
                                 {drainageNb > 1 ? 'Séances' : 'Séance'} de drainage lymphatique :
                                 massages par un kinésithérapeute,
                               </span>
+                            </div>
+                          </div>
+                        )
+                      }
+                      if (item.id === 'vetement_contention') {
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-start gap-2.5 text-sm text-slate-700 leading-snug"
+                          >
+                            <Checkbox
+                              className="mt-0.5"
+                              checked={checked}
+                              onCheckedChange={(v) =>
+                                setInclutIds((prev) => toggleId(prev, item.id, v === true))
+                              }
+                            />
+                            <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                              <span className="shrink-0">Vêtement de contention :</span>
+                              <input
+                                type="text"
+                                value={contentionDetail}
+                                onChange={(e) => setContentionDetail(e.target.value)}
+                                placeholder="Préciser le vêtement…"
+                                className="h-8 min-w-[10rem] flex-1 max-w-md rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
+                                aria-label="Préciser le vêtement de contention"
+                              />
                             </div>
                           </div>
                         )
@@ -1063,20 +1107,21 @@ export default function DevisGestionnairePage() {
   const [hotelChoice, setHotelChoice]         = useState('')
   const [hotelAutre, setHotelAutre]           = useState('')
   const [hotelNuits, setHotelNuits]           = useState('')
-  const [nbAdultes, setNbAdultes]             = useState('1')
+  const [nbAdultes, setNbAdultes]             = useState('0')
   const [nbEnfants, setNbEnfants]             = useState('0')
   const [dureeSejourTotale, setDureeSejourTotale] = useState('')
   const [notesSejour, setNotesSejour]         = useState('')
   const [inclutIds, setInclutIds]             = useState<string[]>(() => defaultInclutIds())
   const [exclutIds, setExclutIds]             = useState<string[]>(() => defaultExclutIds())
   const [drainageNb, setDrainageNb]           = useState(2)
+  const [contentionDetail, setContentionDetail] = useState('')
   const [isEditingExisting, setIsEditingExisting] = useState(false)
   const [sent, setSent]                       = useState(false)
   const [savedDraft, setSavedDraft]           = useState(false)
   const [autoSaving, setAutoSaving]           = useState(false)
   const [actionLoading, setActionLoading]     = useState(false)
   const [pendingDelete, setPendingDelete] = useState<
-    | { kind: 'devis'; devisId: string }
+    | { kind: 'devis'; devisIds: string[] }
     | { kind: 'dossier'; patientId: string; patientName: string }
     | null
   >(null)
@@ -1096,14 +1141,20 @@ export default function DevisGestionnairePage() {
     numeroDevis?: string | null
     version?: number
   } | null>(null)
+  const [majRapportOpen, setMajRapportOpen] = useState(false)
+  const [majRapportMsg, setMajRapportMsg] = useState(DEMANDE_MAJ_RAPPORT_FALLBACK)
+  const [majRapportSending, setMajRapportSending] = useState(false)
+  const [majRapportError, setMajRapportError] = useState<string | null>(null)
   const [consultVersionsOpen, setConsultVersionsOpen] = useState(false)
   const [deletePicker, setDeletePicker] = useState<{
     patientId: string
     patientName: string
+    dossierNumber: string
     versions: Devis[]
-    selectedId: string
+    selectedIds: string[]
     loading: boolean
   } | null>(null)
+  const [historiqueSelectedIds, setHistoriqueSelectedIds] = useState<string[]>([])
   const [abstentionMsgError, setAbstentionMsgError] = useState<string | null>(null)
   const [dossierStatusDraft, setDossierStatusDraft] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
@@ -1243,6 +1294,7 @@ export default function DevisGestionnairePage() {
     setIsEditingExisting(false)
     setSent(false)
     setSavedDraft(false)
+    setHistoriqueSelectedIds([])
     navigate(`/gestionnaire/devis/${id}`)
   }
 
@@ -1251,6 +1303,7 @@ export default function DevisGestionnairePage() {
     setSelectedPatient('')
     setPatientDetail(null)
     setShowModal(false)
+    setHistoriqueSelectedIds([])
     navigate('/gestionnaire/devis')
   }
 
@@ -1346,8 +1399,8 @@ export default function DevisGestionnairePage() {
     const fp = rap?.forfaitPropose ?? rapportsList[0]?.forfaitPropose
     const honoraires =
       typeof fp === 'number' && Number.isFinite(fp) && fp > 0 ? fp : undefined
-    /** Rapport modifié : on garde la même fiche devis mais on injecte les nouvelles données médecin. */
-    const syncFromRapport = status === 'rapport_modifie'
+    /** Ancien comportement « sync même fiche » retiré : un nouveau rapport → nouveau devis. */
+    const syncFromRapport = false
 
     if (editing && existingDevis) {
       const baseLignes = existingDevis.lignes.map((l) => ({
@@ -1381,6 +1434,7 @@ export default function DevisGestionnairePage() {
       setInclutIds(p.inclutIds ?? defaultInclutIds())
       setExclutIds(p.exclutIds ?? defaultExclutIds())
       setDrainageNb(syncFromRapport ? defaultDrainageNbFromRapport(rap) : (p.drainageNb ?? defaultDrainageNbFromRapport(rap)))
+      setContentionDetail(p.contentionDetail ?? '')
       setIsEditingExisting(true)
     } else {
       setLignes(
@@ -1402,6 +1456,7 @@ export default function DevisGestionnairePage() {
       setInclutIds(defaultInclutIds())
       setExclutIds(defaultExclutIds())
       setDrainageNb(defaultDrainageNbFromRapport(rap))
+      setContentionDetail('')
       setIsEditingExisting(false)
     }
     setSent(false); setSavedDraft(false)
@@ -1423,6 +1478,7 @@ export default function DevisGestionnairePage() {
           total: quantite * l.prixUnitaire,
         }
       })
+    const latestRapportId = (patientDetail?.rapports?.[0] ?? rapportsList[0])?.id ?? null
     return {
       dateValidite: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       lignes: ls, total: ls.reduce((s, x) => s + x.total, 0),
@@ -1440,8 +1496,12 @@ export default function DevisGestionnairePage() {
           inclutIds,
           exclutIds,
           drainageNb,
+          contentionDetail,
         }) || null,
       currency,
+      // Nouvelle fiche (pas édition) + devis déjà présents → nouvelle version (v1 conservée)
+      nouvelleVersion: !isEditingExisting && devisVersions.length > 0,
+      rapportId: latestRapportId,
     }
   }
 
@@ -1587,6 +1647,7 @@ export default function DevisGestionnairePage() {
     inclutIds,
     exclutIds,
     drainageNb,
+    contentionDetail,
     currency,
   ])
 
@@ -1609,6 +1670,7 @@ export default function DevisGestionnairePage() {
         inclutIds,
         exclutIds,
         drainageNb,
+        contentionDetail,
       }),
     [
       lignes,
@@ -1625,6 +1687,7 @@ export default function DevisGestionnairePage() {
       inclutIds,
       exclutIds,
       drainageNb,
+      contentionDetail,
     ],
   )
 
@@ -1753,8 +1816,40 @@ export default function DevisGestionnairePage() {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     setActionLoading(true); setModalError(null); setPageError(null)
     try {
-      // Sauvegarder d'abord le brouillon pour s'assurer que le devisId existe
-      const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, buildPayload())
+      // Sauvegarder brouillon + synchroniser immédiatement le HTML lettre (inclut/exclut)
+      const payload = buildPayload()
+      const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, payload)
+      const detail = patientDetail?.id === selectedPatient
+        ? patientDetail
+        : (await gestionnaireApi.getPatient(selectedPatient)).patient
+      const devisForSync: Devis = {
+        ...r.devis,
+        lignes: payload.lignes,
+        total: payload.total,
+        notesSejour: payload.notesSejour,
+        currency: payload.currency,
+        dateValidite: payload.dateValidite,
+        planningMedical: payload.planningMedical,
+        customContent: r.devis.customContent
+          ?? detail.devis?.find((d) => d.id === r.devis.id)?.customContent
+          ?? null,
+      }
+      const letterCtx = letterContextFromGestionnairePatient(
+        {
+          ...detail,
+          devis: detail.devis?.some((d) => d.id === r.devis.id)
+            ? detail.devis.map((d) => (d.id === r.devis.id ? devisForSync : d))
+            : [...(detail.devis ?? []), devisForSync],
+        },
+        devisForSync,
+      )
+      const { contentToSave } = refreshDevisCustomContentParts({
+        customContent: devisForSync.customContent,
+        devis: devisForSync,
+        letterContext: letterCtx,
+        tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
+      })
+      await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
       setShowModal(false)
       setModalReady(false)
       navigate(
@@ -1773,9 +1868,11 @@ export default function DevisGestionnairePage() {
     setDeleteError(null)
   }
 
-  const requestDeleteDevis = (devisId: string) => {
+  const requestDeleteDevis = (devisIds: string | string[]) => {
+    const ids = (Array.isArray(devisIds) ? devisIds : [devisIds]).filter(Boolean)
+    if (ids.length === 0) return
     setDeleteError(null)
-    setPendingDelete({ kind: 'devis', devisId })
+    setPendingDelete({ kind: 'devis', devisIds: ids })
   }
 
   const requestRemoveFromDevisList = (patientId: string, patientName: string) => {
@@ -1783,7 +1880,18 @@ export default function DevisGestionnairePage() {
     setPendingDelete({ kind: 'dossier', patientId, patientName })
   }
 
-  /** Ouvre la popup de choix de version à supprimer. */
+  const devisDisplayName = (
+    d: { numeroDevis?: string | null; version: number },
+    dossierNumber: string | null | undefined,
+    patientName: string,
+  ) =>
+    formatDevisListName(
+      getDevisDisplayNumber(d, dossierNumber) || dossierNumber,
+      patientName,
+      d.version,
+    )
+
+  /** Ouvre la popup de choix de version(s) à supprimer. */
   const openDeleteVersionPicker = async (
     e: MouseEvent | null,
     patientId: string,
@@ -1795,12 +1903,14 @@ export default function DevisGestionnairePage() {
     setDeletePicker({
       patientId,
       patientName,
+      dossierNumber: '',
       versions: [],
-      selectedId: preferredDevisId ?? '',
+      selectedIds: preferredDevisId ? [preferredDevisId] : [],
       loading: true,
     })
     try {
       const r = await gestionnaireApi.getPatient(patientId)
+      const dossierNumber = r.patient.dossierNumber ?? ''
       const versions = [...(r.patient.devis ?? [])]
         .sort((a, b) => b.version - a.version || +new Date(b.dateCreation) - +new Date(a.dateCreation))
       if (versions.length === 0) {
@@ -1813,15 +1923,16 @@ export default function DevisGestionnairePage() {
         requestDeleteDevis(versions[0]!.id)
         return
       }
-      const selectedId =
-        (preferredDevisId && versions.some((d) => d.id === preferredDevisId))
-          ? preferredDevisId
-          : versions[0]!.id
+      const selectedIds =
+        preferredDevisId && versions.some((d) => d.id === preferredDevisId)
+          ? [preferredDevisId]
+          : [versions[0]!.id]
       setDeletePicker({
         patientId,
         patientName,
+        dossierNumber,
         versions,
-        selectedId,
+        selectedIds,
         loading: false,
       })
     } catch (err) {
@@ -1830,11 +1941,24 @@ export default function DevisGestionnairePage() {
     }
   }
 
+  const toggleDeletePickerId = (id: string) => {
+    setDeletePicker((prev) => {
+      if (!prev) return prev
+      const has = prev.selectedIds.includes(id)
+      return {
+        ...prev,
+        selectedIds: has
+          ? prev.selectedIds.filter((x) => x !== id)
+          : [...prev.selectedIds, id],
+      }
+    })
+  }
+
   const confirmDeletePickerSelection = () => {
-    if (!deletePicker?.selectedId) return
-    const id = deletePicker.selectedId
+    if (!deletePicker?.selectedIds.length) return
+    const ids = [...deletePicker.selectedIds]
     setDeletePicker(null)
-    requestDeleteDevis(id)
+    requestDeleteDevis(ids)
   }
 
   const confirmPendingDelete = async () => {
@@ -1845,13 +1969,19 @@ export default function DevisGestionnairePage() {
     setPageError(null)
     try {
       if (pendingDelete.kind === 'devis') {
-        await gestionnaireApi.deleteDevis(pendingDelete.devisId)
+        for (const id of pendingDelete.devisIds) {
+          await gestionnaireApi.deleteDevis(id)
+        }
         setShowModal(false)
         setIsEditingExisting(false)
+        setHistoriqueSelectedIds([])
         if (selectedPatient) await loadPatientDetail(selectedPatient)
+        const n = pendingDelete.devisIds.length
         toast({
-          title: 'Devis déplacé dans « Supprimés »',
-          description: 'Cette version est retirée de l’espace patient et du chat.',
+          title: n > 1 ? `${n} devis déplacés dans « Supprimés »` : 'Devis déplacé dans « Supprimés »',
+          description: n > 1
+            ? 'Ces versions sont retirées de l’espace patient et du chat.'
+            : 'Cette version est retirée de l’espace patient et du chat.',
           variant: 'success',
         })
         await loadDeletedDevis()
@@ -2011,6 +2141,42 @@ export default function DevisGestionnairePage() {
       setRappelError(e instanceof Error ? e.message : 'Envoi impossible.')
     } finally {
       setRappelSending(false)
+    }
+  }
+
+  const openMajRapport = () => {
+    if (!patientRow) return
+    setMajRapportError(null)
+    setMajRapportMsg(
+      applyTemplateVars(
+        DEMANDE_MAJ_RAPPORT_FALLBACK,
+        patientRow.user.fullName,
+        patientRow.dossierNumber,
+      ),
+    )
+    setMajRapportOpen(true)
+  }
+
+  const sendMajRapport = async () => {
+    if (!patientRow) return
+    const message = majRapportMsg.trim()
+    if (!message) {
+      setMajRapportError('Le message ne peut pas être vide.')
+      return
+    }
+    setMajRapportSending(true)
+    setMajRapportError(null)
+    try {
+      await gestionnaireApi.requestRapportUpdate(patientRow.id, { message })
+      setMajRapportOpen(false)
+      feedbackSuccess(
+        'Message envoyé au médecin',
+        'Dans le chat du dossier (interne) + notification. Ouvrir Messages côté médecin.',
+      )
+    } catch (e) {
+      setMajRapportError(e instanceof Error ? e.message : 'Envoi impossible.')
+    } finally {
+      setMajRapportSending(false)
     }
   }
 
@@ -2398,12 +2564,28 @@ export default function DevisGestionnairePage() {
     const devisStatut = existingDevis?.statut
     const isRead = !!existingDevis?.vuParPatientAt
 
+    const latestRapport = rapportsList[0] ?? null
+    const rapportIdsUsedByDevis = new Set(
+      devisVersions.map((d) => d.rapportId).filter((id): id is string => !!id),
+    )
+    const needsNewDevisFromRapport = Boolean(
+      latestRapport &&
+      existingDevis &&
+      (
+        rapportIdsUsedByDevis.size > 0
+          ? !rapportIdsUsedByDevis.has(latestRapport.id)
+          : +new Date(latestRapport.createdAt) > +new Date(existingDevis.dateCreation)
+      ),
+    )
+
     const devisActionLabel =
       !existingDevis || existingDevis.statut === 'refuse'
         ? 'Créer un devis'
-        : existingDevis.statut === 'brouillon'
-          ? 'Modifier le brouillon'
-          : 'Modifier le devis'
+        : needsNewDevisFromRapport
+          ? `Créer un nouveau devis (v${(devisVersions[0]?.version ?? 0) + 1})`
+          : existingDevis.statut === 'brouillon'
+            ? 'Modifier le brouillon'
+            : 'Modifier le devis'
 
     const devisAllowed = canPatientHaveDevis(patientRow.status)
     const isAbstention = patientRow.status === 'abstention'
@@ -2424,163 +2606,178 @@ export default function DevisGestionnairePage() {
             {/* Hero dossier */}
             <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
               <div
-                className="px-4 sm:px-6 pt-5 pb-4"
+                className="px-4 sm:px-6 pt-5 pb-4 space-y-4"
                 style={{
                   background:
                     'linear-gradient(135deg, rgba(6,42,48,0.06) 0%, rgba(184,140,92,0.08) 55%, rgba(255,255,255,0.9) 100%)',
                 }}
               >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="flex items-start gap-3 sm:gap-4 min-w-0">
-                    <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 ring-2 ring-white shadow-sm">
-                      <AvatarFallback className="bg-brand-100 text-brand-800 text-base sm:text-lg font-bold">
-                        {initials(patientRow.user.fullName)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 space-y-1.5">
-                      <h2 className="text-lg sm:text-xl font-bold text-slate-900 truncate">
-                        {patientRow.user.fullName}
-                      </h2>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] sm:text-xs font-mono font-semibold text-brand-800 bg-white/80 border border-brand-100 px-2 py-0.5 rounded-md">
-                          {patientRow.dossierNumber}
+                {/* Identité */}
+                <div className="flex items-start gap-3 sm:gap-4">
+                  <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 ring-2 ring-white shadow-sm">
+                    <AvatarFallback className="bg-brand-100 text-brand-800 text-base sm:text-lg font-bold">
+                      {initials(patientRow.user.fullName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
+                      {patientRow.user.fullName}
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] sm:text-xs font-mono font-semibold text-brand-800 bg-white/90 border border-brand-100 px-2 py-0.5 rounded-md">
+                        {patientRow.dossierNumber}
+                      </span>
+                      <StatusBadge kind="dossier" value={patientRow.status} />
+                      {devisStatut && <StatusBadge kind="devis" value={devisStatut} />}
+                      {devisStatut === 'envoye' && (
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
+                          {isRead
+                            ? <><Eye className="h-3 w-3" /> Vu le {formatDateTime(existingDevis!.vuParPatientAt!)}</>
+                            : <><EyeOff className="h-3 w-3" /> Pas encore consulté</>}
                         </span>
-                        <StatusBadge kind="dossier" value={patientRow.status} />
-                        {devisStatut && <StatusBadge kind="devis" value={devisStatut} />}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-                        {patientRow.user.email && (
-                          <span className="inline-flex items-center gap-1 min-w-0">
-                            <Mail className="h-3 w-3 shrink-0 text-slate-400" />
-                            <span className="truncate">{patientRow.user.email}</span>
-                          </span>
-                        )}
-                        {patientRow.phone && (
-                          <span className="inline-flex items-center gap-1">
-                            <Phone className="h-3 w-3 shrink-0 text-slate-400" />
-                            {patientRow.phone}
-                          </span>
-                        )}
-                        {(patientRow.ville || patientRow.pays) && (
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
-                            {[patientRow.ville, patientRow.pays].filter(Boolean).join(', ')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 w-full lg:w-auto lg:items-end shrink-0">
-                    <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:justify-end gap-2 w-full">
-                      {isAbstention ? (
-                        <Button
-                          variant="brand"
-                          className="gap-2 w-full sm:w-auto h-10 text-sm font-semibold justify-center"
-                          onClick={openAbstentionMessage}
-                          disabled={detailLoading}
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                          Envoyer message
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            variant="brand"
-                            className="gap-2 w-full sm:w-auto h-10 text-sm font-semibold justify-center"
-                            onClick={() => openModal(!!existingDevis && existingDevis.statut !== 'refuse')}
-                            disabled={detailLoading || !devisAllowed}
-                            title={
-                              devisAllowed
-                                ? undefined
-                                : 'En attente du rapport médical (médecin) avant devis.'
-                            }
-                          >
-                            <FileText className="h-4 w-4" />
-                            {devisActionLabel}
-                          </Button>
-                          {existingDevis && existingDevis.statut === 'envoye' && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="gap-1.5 w-full sm:w-auto h-10 text-sm border-sky-200 text-sky-700 hover:bg-sky-50 justify-center bg-white/80"
-                              disabled={detailLoading || rappelSending}
-                              onClick={() =>
-                                openRappelDevis(null, patientRow.id, patientRow.user.fullName, {
-                                  id: existingDevis.id,
-                                  numeroDevis: existingDevis.numeroDevis,
-                                  version: existingDevis.version,
-                                })
-                              }
-                            >
-                              <Bell className="h-4 w-4" />
-                              Rappel devis
-                            </Button>
+                      )}
+                      {devisStatut === 'accepte' && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+                          <CheckCircle2 className="h-3 w-3" /> Accepté
+                          {isRead && (
+                            <span className="font-normal text-slate-400">
+                              · lu le {formatDateTime(existingDevis!.vuParPatientAt!)}
+                            </span>
                           )}
-                          {existingDevis && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="gap-1.5 w-full sm:w-auto h-10 text-sm border-slate-200 justify-center bg-white/80"
-                              onClick={() => {
-                                if (devisVersions.length === 1) {
-                                  openConsultDevis(devisVersions[0].id)
-                                  return
-                                }
-                                setConsultVersionsOpen(true)
-                              }}
-                            >
-                              <Eye className="h-4 w-4" />
-                              Consulter
-                              {devisVersions.length > 1 && (
-                                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                              )}
-                            </Button>
-                          )}
-                          {existingDevis && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="gap-1.5 w-full sm:w-auto h-10 text-sm text-destructive border-destructive/30 hover:bg-destructive/10 justify-center bg-white/80"
-                              disabled={actionLoading}
-                              onClick={() => handleDeleteDevis()}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Supprimer
-                            </Button>
-                          )}
-                        </>
+                        </span>
                       )}
                     </div>
+                  </div>
+                </div>
+
+                {/* Coordonnées — grille pleine largeur */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 rounded-xl border border-white/80 bg-white/70 px-3 py-2.5">
+                  <div className="flex items-center gap-2 min-w-0 text-xs text-slate-700">
+                    <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="truncate">{patientRow.user.email || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0 text-xs text-slate-700">
+                    <Phone className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="truncate">{patientRow.phone || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0 text-xs text-slate-700">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="truncate">
+                      {[patientRow.ville, patientRow.pays].filter(Boolean).join(', ') || '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Actions — barre unique */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {isAbstention ? (
-                      <p className="text-[11px] text-slate-500 lg:text-right">
-                        Transmettre la décision du médecin à la patiente.
-                      </p>
-                    ) : !devisAllowed ? (
-                      <p className="text-[11px] text-amber-700 lg:text-right">
-                        Rapport médical requis avant devis.
-                      </p>
-                    ) : null}
-                    {devisStatut === 'envoye' && (
-                      <div className={`flex items-center gap-1.5 text-xs font-medium lg:justify-end ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {isRead
-                          ? <><Eye className="h-3.5 w-3.5" /> Vu le {formatDateTime(existingDevis!.vuParPatientAt!)}</>
-                          : <><EyeOff className="h-3.5 w-3.5" /> Pas encore consulté</>}
-                      </div>
-                    )}
-                    {devisStatut === 'accepte' && (
-                      <div className="flex flex-col gap-0.5 lg:items-end">
-                        <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5">
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Accepté par le patient
-                        </span>
-                        {isRead && (
-                          <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                            <Eye className="h-3 w-3" /> Lu le {formatDateTime(existingDevis!.vuParPatientAt!)}
-                          </span>
+                      <Button
+                        variant="brand"
+                        className="gap-2 h-10 text-sm font-semibold"
+                        onClick={openAbstentionMessage}
+                        disabled={detailLoading}
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                        Envoyer message
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          variant="brand"
+                          className="gap-2 h-10 text-sm font-semibold"
+                          onClick={() =>
+                            openModal(
+                              needsNewDevisFromRapport
+                                ? false
+                                : !!existingDevis && existingDevis.statut !== 'refuse',
+                            )
+                          }
+                          disabled={detailLoading || !devisAllowed}
+                          title={
+                            devisAllowed
+                              ? needsNewDevisFromRapport
+                                ? 'Nouveau devis à partir du dernier rapport — les versions précédentes restent conservées.'
+                                : undefined
+                              : 'En attente du rapport médical (médecin) avant devis.'
+                          }
+                        >
+                          <FileText className="h-4 w-4" />
+                          {devisActionLabel}
+                        </Button>
+                        {existingDevis && existingDevis.statut === 'envoye' && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-1.5 h-10 text-sm border-sky-200 text-sky-700 hover:bg-sky-50 bg-white"
+                            disabled={detailLoading || rappelSending}
+                            onClick={() =>
+                              openRappelDevis(null, patientRow.id, patientRow.user.fullName, {
+                                id: existingDevis.id,
+                                numeroDevis: existingDevis.numeroDevis,
+                                version: existingDevis.version,
+                              })
+                            }
+                          >
+                            <Bell className="h-4 w-4" />
+                            Rappel devis
+                          </Button>
                         )}
-                      </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-1.5 h-10 text-sm border-brand-200 text-brand-800 hover:bg-brand-50 bg-white"
+                          disabled={detailLoading || majRapportSending}
+                          onClick={openMajRapport}
+                          title="Demander un nouveau rapport au médecin — sans toucher aux devis existants"
+                        >
+                          <Stethoscope className="h-4 w-4" />
+                          Écrire au Dr Chennoufi
+                        </Button>
+                        {existingDevis && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-1.5 h-10 text-sm border-slate-200 bg-white"
+                            onClick={() => {
+                              if (devisVersions.length === 1) {
+                                openConsultDevis(devisVersions[0].id)
+                                return
+                              }
+                              setConsultVersionsOpen(true)
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                            Consulter
+                            {devisVersions.length > 1 && (
+                              <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                            )}
+                          </Button>
+                        )}
+                        {existingDevis && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-1.5 h-10 text-sm text-destructive border-destructive/30 hover:bg-destructive/10 bg-white"
+                            disabled={actionLoading}
+                            onClick={() => handleDeleteDevis()}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Supprimer
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
+                  {isAbstention ? (
+                    <p className="text-[11px] text-slate-500">
+                      Transmettre la décision du médecin à la patiente.
+                    </p>
+                  ) : !devisAllowed ? (
+                    <p className="text-[11px] text-amber-700">
+                      Rapport médical requis avant devis.
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -2796,15 +2993,28 @@ export default function DevisGestionnairePage() {
                     <p className="text-sm text-slate-400 text-center py-4">Aucun rapport disponible.</p>
                   ) : rapportsList.length > 0 ? (
                     <div className="space-y-6">
-                      {rapportsList.map((r, idx) => (
+                      {rapportsList.map((r, idx) => {
+                        const n = rapportsList.length - idx
+                        const isLatest = idx === 0
+                        return (
                         <div key={r.id}>
                           {idx > 0 && <hr className="border-slate-100 mb-6" />}
-                          <p className="text-sm font-semibold text-slate-600 mb-4">
-                            Rapport du {formatDate(r.createdAt)}
-                          </p>
+                          <div className="flex items-center gap-2 mb-4 flex-wrap">
+                            <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md border ${
+                              isLatest
+                                ? 'bg-brand-50 text-brand-800 border-brand-200'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}>
+                              Rapport R{n}{isLatest ? ' · actuel' : ' · conservé'}
+                            </span>
+                            <p className="text-sm font-semibold text-slate-600">
+                              {formatDate(r.createdAt)}
+                            </p>
+                          </div>
                           <RapportView r={r} currency={currency} />
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   ) : null}
                 </Section>
@@ -2818,58 +3028,119 @@ export default function DevisGestionnairePage() {
                   {!devisVersions.length ? (
                     <p className="text-sm text-slate-400 text-center py-4">Aucun devis créé.</p>
                   ) : (
-                    <div className="divide-y divide-slate-100">
-                      {devisVersions.map((d) => {
-                        const sc = {
-                          accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
-                          refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
-                          envoye:    { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700' },
-                          brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
-                        }[d.statut] ?? { label: d.statut, cls: 'bg-slate-100 text-slate-600' }
-                        const devisName = formatDevisListName(
-                          patientRow.dossierNumber,
-                          patientRow.user.fullName,
-                          d.version,
-                        )
-                        return (
-                          <div key={d.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
-                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sc.cls}`}>{sc.label}</span>
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium text-slate-800 truncate">{devisName}</p>
-                              <p className="text-slate-400 text-xs">Version {d.version}</p>
-                            </div>
-                            <span className="font-bold text-slate-800">{formatCurrency(d.total, currency)}</span>
-                            <span className="text-xs text-slate-400">{formatDate(d.dateCreation)}</span>
-                            {d.statut === 'envoye' && (
-                              <span className={`flex items-center gap-1.5 text-xs font-medium ${d.vuParPatientAt ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                {d.vuParPatientAt
-                                  ? <><Eye className="h-3.5 w-3.5" /> Vu le {formatDate(d.vuParPatientAt)}</>
-                                  : <><EyeOff className="h-3.5 w-3.5" /> Non consulté</>}
-                              </span>
-                            )}
+                    <div className="space-y-2">
+                      {historiqueSelectedIds.length > 0 && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50/70 px-3 py-2">
+                          <p className="text-xs font-medium text-red-800">
+                            {historiqueSelectedIds.length} devis sélectionné{historiqueSelectedIds.length > 1 ? 's' : ''}
+                          </p>
+                          <div className="flex items-center gap-2">
                             <Button
+                              type="button"
                               variant="ghost"
                               size="sm"
-                              className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
-                              onClick={() => openConsultDevis(d.id)}
+                              className="h-7 text-xs"
+                              onClick={() => setHistoriqueSelectedIds([])}
                             >
-                              <Eye className="h-3.5 w-3.5" />
-                              Consulter
+                              Tout désélectionner
                             </Button>
-                            {d.statut === 'envoye' && (
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              className="h-7 gap-1 text-xs"
+                              disabled={actionLoading}
+                              onClick={() => requestDeleteDevis(historiqueSelectedIds)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Supprimer
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="divide-y divide-slate-100">
+                        {devisVersions.map((d) => {
+                          const sc = {
+                            accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
+                            refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
+                            envoye:    { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700' },
+                            brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
+                          }[d.statut] ?? { label: d.statut, cls: 'bg-slate-100 text-slate-600' }
+                          const devisName = devisDisplayName(
+                            d,
+                            patientRow.dossierNumber,
+                            patientRow.user.fullName,
+                          )
+                          const checked = historiqueSelectedIds.includes(d.id)
+                          return (
+                            <div key={d.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
+                              <button
+                                type="button"
+                                aria-label={checked ? 'Désélectionner' : 'Sélectionner'}
+                                onClick={() =>
+                                  setHistoriqueSelectedIds((prev) =>
+                                    checked ? prev.filter((id) => id !== d.id) : [...prev, d.id],
+                                  )
+                                }
+                                className={cn(
+                                  'h-4 w-4 rounded border shrink-0 flex items-center justify-center transition-colors',
+                                  checked
+                                    ? 'bg-brand-600 border-brand-600 text-white'
+                                    : 'border-slate-300 bg-white hover:border-brand-400',
+                                )}
+                              >
+                                {checked ? <CheckCircle2 className="h-3 w-3" /> : null}
+                              </button>
+                              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sc.cls}`}>{sc.label}</span>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-slate-800 truncate">{devisName}</p>
+                                <p className="text-slate-400 text-xs">Version {d.version}</p>
+                              </div>
+                              <span className="font-bold text-slate-800">{formatCurrency(d.total, currency)}</span>
+                              <span className="text-xs text-slate-400">{formatDate(d.dateCreation)}</span>
+                              {d.statut === 'envoye' && (
+                                <span className={`flex items-center gap-1.5 text-xs font-medium ${d.vuParPatientAt ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                  {d.vuParPatientAt
+                                    ? <><Eye className="h-3.5 w-3.5" /> Vu le {formatDate(d.vuParPatientAt)}</>
+                                    : <><EyeOff className="h-3.5 w-3.5" /> Non consulté</>}
+                                </span>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="text-xs text-red-500 hover:bg-red-50 h-7 px-2.5"
-                                onClick={() => void handleRefuse()}
-                                disabled={actionLoading}
+                                className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
+                                onClick={() => openConsultDevis(d.id)}
                               >
-                                Marquer refusé
+                                <Eye className="h-3.5 w-3.5" />
+                                Consulter
                               </Button>
-                            )}
-                          </div>
-                        )
-                      })}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-destructive hover:bg-destructive/10 h-7 px-2.5 gap-1"
+                                disabled={actionLoading}
+                                onClick={() => requestDeleteDevis(d.id)}
+                                title="Supprimer cette version (espace patient + chat)"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Supprimer
+                              </Button>
+                              {d.statut === 'envoye' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs text-red-500 hover:bg-red-50 h-7 px-2.5"
+                                  onClick={() => void handleRefuse()}
+                                  disabled={actionLoading}
+                                >
+                                  Marquer refusé
+                                </Button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   )}
                 </Section>
@@ -2937,6 +3208,7 @@ export default function DevisGestionnairePage() {
           inclutIds={inclutIds} setInclutIds={setInclutIds}
           exclutIds={exclutIds} setExclutIds={setExclutIds}
           drainageNb={drainageNb} setDrainageNb={setDrainageNb}
+          contentionDetail={contentionDetail} setContentionDetail={setContentionDetail}
           sent={sent} savedDraft={savedDraft} autoSaving={autoSaving} actionLoading={actionLoading}
           onSend={() => void handleSend()}
           onSaveDraft={() => void handleSaveDraft()}
@@ -2957,14 +3229,24 @@ export default function DevisGestionnairePage() {
         title={
           pendingDelete?.kind === 'dossier'
             ? 'Retirer ce dossier de la liste ?'
-            : 'Supprimer ce devis ?'
+            : (pendingDelete?.kind === 'devis' && pendingDelete.devisIds.length > 1)
+              ? `Supprimer ${pendingDelete.devisIds.length} devis ?`
+              : 'Supprimer ce devis ?'
         }
         description={
           pendingDelete?.kind === 'dossier'
             ? `${pendingDelete.patientName} sera retiré(e) de la liste des devis (classé en abstention). L’historique reste consultable dans Patients.`
-            : 'Cette version ira dans « Supprimés », disparaîtra de l’espace patient et le PDF associé passera en « Message supprimé » dans le chat. Les autres versions restent intactes.'
+            : (pendingDelete?.kind === 'devis' && pendingDelete.devisIds.length > 1)
+              ? 'Ces versions iront dans « Supprimés », disparaîtront de l’espace patient et les PDF associés passeront en « Message supprimé » dans le chat.'
+              : 'Cette version ira dans « Supprimés », disparaîtra de l’espace patient et le PDF associé passera en « Message supprimé » dans le chat. Les autres versions restent intactes.'
         }
-        confirmLabel={pendingDelete?.kind === 'dossier' ? 'Retirer de la liste' : 'Supprimer le devis'}
+        confirmLabel={
+          pendingDelete?.kind === 'dossier'
+            ? 'Retirer de la liste'
+            : (pendingDelete?.kind === 'devis' && pendingDelete.devisIds.length > 1)
+              ? `Supprimer (${pendingDelete.devisIds.length})`
+              : 'Supprimer le devis'
+        }
         loading={deleteLoading}
         error={deleteError}
         onConfirm={confirmPendingDelete}
@@ -2989,7 +3271,7 @@ export default function DevisGestionnairePage() {
               <div className="min-w-0">
                 <p className="text-sm font-bold text-slate-900">Supprimer un devis</p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {deletePicker.patientName} — choisissez la version à supprimer
+                  {deletePicker.patientName} — sélectionnez une ou plusieurs versions
                 </p>
               </div>
               <button
@@ -3016,12 +3298,13 @@ export default function DevisGestionnairePage() {
                   brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
                 } as const
                 const badge = sc[d.statut as keyof typeof sc] ?? sc.brouillon
-                const selected = deletePicker.selectedId === d.id
+                const selected = deletePicker.selectedIds.includes(d.id)
+                const devisName = devisDisplayName(d, deletePicker.dossierNumber, deletePicker.patientName)
                 return (
                   <button
                     key={d.id}
                     type="button"
-                    onClick={() => setDeletePicker((prev) => prev ? { ...prev, selectedId: d.id } : prev)}
+                    onClick={() => toggleDeletePickerId(d.id)}
                     className={cn(
                       'w-full text-left rounded-xl border px-3.5 py-3 transition-colors',
                       selected
@@ -3029,11 +3312,18 @@ export default function DevisGestionnairePage() {
                         : 'border-transparent hover:bg-slate-50',
                     )}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 truncate">
-                          {d.numeroDevis || 'Sans n°'} · v{d.version}
-                        </p>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={cn(
+                          'h-4 w-4 rounded border shrink-0 flex items-center justify-center',
+                          selected ? 'bg-destructive border-destructive text-white' : 'border-slate-300 bg-white',
+                        )}
+                        aria-hidden
+                      >
+                        {selected ? <CheckCircle2 className="h-3 w-3" /> : null}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900 truncate">{devisName}</p>
                         <p className="text-[11px] text-slate-400 mt-0.5">
                           {formatDate(d.dateCreation)}
                           {typeof d.total === 'number' ? ` · ${formatCurrency(d.total, (d.currency as CurrencyUnit) || 'TND')}` : ''}
@@ -3054,11 +3344,12 @@ export default function DevisGestionnairePage() {
               <Button
                 variant="destructive"
                 className="gap-1.5"
-                disabled={deletePicker.loading || !deletePicker.selectedId}
+                disabled={deletePicker.loading || deletePicker.selectedIds.length === 0}
                 onClick={confirmDeletePickerSelection}
               >
                 <Trash2 className="h-4 w-4" />
                 Continuer
+                {deletePicker.selectedIds.length > 1 ? ` (${deletePicker.selectedIds.length})` : ''}
               </Button>
             </div>
           </div>
@@ -3098,10 +3389,10 @@ export default function DevisGestionnairePage() {
                   envoye:    { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700' },
                   brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
                 }[d.statut] ?? { label: d.statut, cls: 'bg-slate-100 text-slate-600' }
-                const devisName = formatDevisListName(
+                const devisName = devisDisplayName(
+                  d,
                   patientRow?.dossierNumber,
-                  patientRow?.user.fullName,
-                  d.version,
+                  patientRow?.user.fullName ?? '',
                 )
                 return (
                   <button
@@ -3269,6 +3560,75 @@ export default function DevisGestionnairePage() {
                   <Send className="h-4 w-4" />
                 )}
                 Envoyer le rappel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Demande MAJ rapport → notification médecin + lien dossier */}
+      {majRapportOpen && patientRow && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => !majRapportSending && setMajRapportOpen(false)}
+            aria-label="Fermer"
+          />
+          <div className="relative w-full max-w-lg max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-border flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">Écrire au Dr Chennoufi</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {patientRow.user.fullName} · {patientRow.dossierNumber}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100"
+                disabled={majRapportSending}
+                onClick={() => setMajRapportOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto space-y-3">
+              <Textarea
+                value={majRapportMsg}
+                onChange={(e) => setMajRapportMsg(e.target.value)}
+                rows={7}
+                className="text-sm leading-relaxed resize-y min-h-[140px]"
+                disabled={majRapportSending}
+              />
+              {majRapportError && (
+                <p className="text-xs text-destructive flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  {majRapportError}
+                </p>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t border-border flex flex-col-reverse sm:flex-row gap-2 sm:justify-end shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={majRapportSending}
+                onClick={() => setMajRapportOpen(false)}
+              >
+                Annuler
+              </Button>
+              <Button
+                type="button"
+                variant="brand"
+                className="gap-2"
+                disabled={majRapportSending}
+                onClick={() => void sendMajRapport()}
+              >
+                {majRapportSending ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Envoyer au médecin
               </Button>
             </div>
           </div>

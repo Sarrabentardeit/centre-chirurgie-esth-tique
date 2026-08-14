@@ -166,7 +166,10 @@ export default function NotificationsPage() {
                     notif.type === 'warning' && !isRead && 'border-l-amber-500',
                     notif.type === 'urgent' && !isRead && 'border-l-red-500',
                   )}
-                  onClick={() => void markRead(notif.id)}
+                  onClick={() => {
+                    void markRead(notif.id)
+                    if (notif.lienAction) navigate(notif.lienAction)
+                  }}
                 >
                   <CardContent className="pt-4 pb-4">
                     <div className="flex items-start gap-3">
@@ -195,17 +198,18 @@ export default function NotificationsPage() {
                             )}
                           </div>
                         </div>
-                        <p className="text-sm text-muted-foreground mt-0.5">{notif.message}</p>
+                        <p className="text-sm text-muted-foreground mt-0.5 whitespace-pre-line">{notif.message}</p>
                         {notif.lienAction && (
                           <Button
                             variant="link"
                             className="p-0 h-auto text-xs text-brand-600 hover:underline mt-1"
                             onClick={(e) => {
                               e.stopPropagation()
+                              void markRead(notif.id)
                               navigate(notif.lienAction!)
                             }}
                           >
-                            Voir le détail →
+                            Ouvrir le dossier →
                           </Button>
                         )}
                       </div>

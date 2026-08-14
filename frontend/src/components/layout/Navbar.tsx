@@ -125,7 +125,7 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
     prevNotifUnreadRef.current = nonChatUnreadCount
   }, [nonChatUnreadCount, user, notifsReady])
 
-  // Temps réel : son notif dès l’arrivée serveur (hors notifs chat → son message)
+  // Son UNIQUEMENT à l’arrivée d’une notif système (pas chat, pas au refresh)
   useChatRealtime((event) => {
     if (event.type !== 'notif:new') return
     void loadApiNotifications({ force: true })
@@ -498,7 +498,10 @@ export function Navbar({ onMenuClick, title }: NavbarProps) {
                           <div className={`mt-1 h-2 w-2 rounded-full ${n.lu ? 'bg-slate-300' : 'bg-brand-600'}`} />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-foreground truncate">{n.titre}</p>
-                            <p className="text-xs text-muted-foreground line-clamp-2">{n.message}</p>
+                            <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-line">{n.message}</p>
+                            {n.lienAction && (
+                              <p className="mt-1 text-[11px] font-medium text-brand-700">Ouvrir le dossier →</p>
+                            )}
                             <p className="mt-1 text-[11px] text-muted-foreground">{formatRelative(n.dateCreation)}</p>
                           </div>
                         </div>

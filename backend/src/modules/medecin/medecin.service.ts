@@ -504,7 +504,7 @@ export async function getPatientById(patientId: string) {
         where: { type: 'rdv' },
         orderBy: { dateDebut: 'asc' },
       },
-      rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
+      rapports: { orderBy: { createdAt: 'desc' } },
     },
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
@@ -644,8 +644,12 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     notes:                    input.notes,
   }
 
+  /** Nouveau rapport = toujours créer une ligne ; ne pas écraser l’historique. */
+  const forceNouveau = input.nouveauRapport === true
+  const createNew = forceNouveau || !existing
+
   let rapport
-  if (existing) {
+  if (!createNew && existing) {
     rapport = await prisma.rapport.update({ where: { id: existing.id }, data })
     await writeAuditLog({
       actorId: medecinId,
@@ -692,7 +696,9 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     },
   })
 
-  // 1ère génération → rapport_genere ; mise à jour → rapport_modifie (fiche devis conservée)
+  // 1ère génération → rapport_genere
+  // Nouveau rapport (après devis) → rapport_genere (signal « créer un nouveau devis », v1 intacte)
+  // Correction du rapport courant (sans nouveau) → rapport_modifie + sync brouillon lié
   const PRE_RAPPORT_STATUSES = ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse']
   const DEVIS_FLOW_STATUSES = [
     'rapport_genere',
@@ -701,12 +707,13 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     'devis_envoye',
     'devis_accepte',
   ]
-  if (PRE_RAPPORT_STATUSES.includes(patient.status)) {
+  const isAdditionalRapport = createNew && !!existing
+  if (PRE_RAPPORT_STATUSES.includes(patient.status) || isAdditionalRapport) {
     await prisma.patient.update({
       where: { id: patientId },
       data: { status: 'rapport_genere' },
     })
-  } else if (existing && DEVIS_FLOW_STATUSES.includes(patient.status)) {
+  } else if (!createNew && existing && DEVIS_FLOW_STATUSES.includes(patient.status)) {
     await prisma.patient.update({
       where: { id: patientId },
       data: { status: 'rapport_modifie' },
@@ -719,18 +726,67 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     select: { dossierNumber: true, user: { select: { fullName: true } } },
   })
   if (p) {
+    const titre = isAdditionalRapport
+      ? 'Nouveau rapport médical généré'
+      : createNew
+        ? 'Rapport médical généré'
+        : 'Rapport médical modifié'
+    const message = isAdditionalRapport
+      ? `Un nouveau rapport a été généré pour ${p.user.fullName} (${p.dossierNumber}). Créez un nouveau devis — les versions précédentes restent conservées.`
+      : createNew
+        ? `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) est prêt. Devis à préparer.`
+        : `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) a été corrigé.`
     await notifyGestionnaires({
       type: 'info',
-      titre: existing ? 'Rapport médical modifié' : 'Rapport médical généré',
-      message: existing
-        ? `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) a été modifié. Reprenez la même fiche devis : tableau, PDF et éditeur sont mis à jour.`
-        : `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) est prêt. Devis à préparer.`,
+      titre,
+      message,
       lienAction: `/gestionnaire/devis/${patientId}`,
       email: true,
     })
   }
 
   return { rapport }
+}
+
+export async function deleteRapport(medecinId: string, patientId: string, rapportId: string) {
+  const patient = await prisma.patient.findUnique({ where: { id: patientId }, select: { id: true, status: true } })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const rapport = await prisma.rapport.findFirst({
+    where: { id: rapportId, patientId },
+  })
+  if (!rapport) throw new AppError(404, 'RAPPORT_NOT_FOUND', 'Rapport introuvable.')
+
+  await prisma.$transaction([
+    prisma.devis.updateMany({
+      where: { rapportId },
+      data: { rapportId: null },
+    }),
+    prisma.rapportVersion.deleteMany({ where: { rapportId } }),
+    prisma.rapport.delete({ where: { id: rapportId } }),
+  ])
+
+  await writeAuditLog({
+    actorId: medecinId,
+    actorRole: 'medecin',
+    action: 'delete',
+    entity: 'rapport',
+    entityId: rapportId,
+    before: rapport,
+  })
+
+  const remaining = await prisma.rapport.count({ where: { patientId } })
+  if (
+    remaining === 0 &&
+    (patient.status === 'rapport_genere' || patient.status === 'rapport_modifie')
+  ) {
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: { status: 'en_analyse' },
+    })
+  }
+
+  return { deleted: true as const, rapportId }
 }
 
 const LIGNE_SUPP_CLINIQUE = 'Supp Clinique accompagnateur'

@@ -63,12 +63,15 @@ chatRouter.get('/unread', async (req: Request, res: Response, next: NextFunction
 })
 
 // GET /api/chat/conversations — liste des fils (équipe)
+// ?channel=patient|equipe — sépare chat patiente vs messages internes médecin
 chatRouter.get(
   '/conversations',
   requireRole('medecin', 'gestionnaire'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await chatService.listConversations(req.auth!.role)
+      const raw = typeof req.query.channel === 'string' ? req.query.channel : 'patient'
+      const channel = raw === 'equipe' ? 'equipe' : 'patient'
+      const result = await chatService.listConversations(req.auth!.role, channel)
       res.json({ ok: true, ...result })
     } catch (e) {
       next(e)
@@ -111,11 +114,13 @@ chatRouter.post('/upload', upload.single('file'), (req: Request, res: Response) 
   })
 })
 
-// GET /api/chat/messages?patientId=
+// GET /api/chat/messages?patientId=&channel=patient|equipe|all
 chatRouter.get('/messages', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const patientId = typeof req.query.patientId === 'string' ? req.query.patientId : undefined
-    const result = await chatService.getMessages(req.auth!.sub, req.auth!.role, patientId)
+    const raw = typeof req.query.channel === 'string' ? req.query.channel : 'all'
+    const channel = raw === 'equipe' || raw === 'patient' ? raw : 'all'
+    const result = await chatService.getMessages(req.auth!.sub, req.auth!.role, patientId, channel)
     res.json({ ok: true, ...result })
   } catch (e) {
     next(e)

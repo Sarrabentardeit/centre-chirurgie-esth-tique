@@ -6,7 +6,6 @@ import {
   DEVIS_ACCENT,
   DEVIS_CHARTE,
   devisFieldRow,
-  devisHighlightBox,
   devisLabel,
   devisSectionHeading,
   devisSeparator,
@@ -15,6 +14,7 @@ import {
   DEVIS_EXCLUT_ITEMS,
   labelsForIds,
   labelsForInclut,
+  parseContentionDetailFromNotes,
   resolveDrainageNb,
   resolveExclutIds,
   resolveInclutIds,
@@ -28,6 +28,7 @@ export type DevisLetterDevis = {
   statut?: string
   numeroDevis?: string | null
   notesSejour?: string | null
+  version?: number | null
 }
 
 export type DevisLetterRapport = {
@@ -154,7 +155,8 @@ export function sejourPdfFromContext(ctx: DevisLetterContext) {
   const fromRapport = devisSejourDefaultsFromRapport(rap, formPayload)
   const nbAdultes = sej.nbAdultes.trim() !== '' ? sej.nbAdultes.trim() : fromRapport.nbAdultes
   const nbEnfants = sej.nbEnfants.trim() !== '' ? sej.nbEnfants.trim() : fromRapport.nbEnfants
-  const typeChambre = Number(nbAdultes) === 2 ? 'Double' : 'Single'
+  // nbAdultes = accompagnants uniquement ; ≥1 adulte accompagnant → chambre Double (avec la patiente)
+  const typeChambre = Number(nbAdultes) >= 1 ? 'Double' : 'Single'
 
   return {
     dureeHosp,
@@ -228,22 +230,36 @@ function refreshDevisFieldByLabel(html: string, label: string, value: string): s
 }
 
 function refreshHighlightByLabel(html: string, label: string, value: string): string {
-  if (typeof window === 'undefined') return html
   if (value == null || value === '—') return html
+  // Uniquement via DOM : un seul <p> (jamais de regex multi-paragraphes —
+  // sinon on écrase tout le début de la lettre jusqu’à « Durée TOTALE »).
+  if (typeof window === 'undefined') {
+    // Fallback Node / SSR : paragraphe isolé seulement
+    const fresh = `${paraSalmonHi(`${label} ${value}`)}\n<p></p>`
+    const re =
+      /<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour\s*:(?:(?!<\/p>)[\s\S])*<\/p>(?:\s*<p(?:\s[^>]*)?>\s*<\/p>)?/i
+    return re.test(html) ? html.replace(re, fresh) : html
+  }
+
   const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
   const root = doc.getElementById('__root')
   if (!root) return html
   const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
   const target = normalize(label)
+  const fresh = `${paraSalmonHi(`${label} ${value}`)}\n<p></p>`
+
   for (const p of Array.from(root.querySelectorAll('p'))) {
     if (!normalize(p.textContent ?? '').startsWith(target)) continue
-    const tmp = doc.createElement('div')
-    tmp.innerHTML = devisHighlightBox(label, value)
-    const fresh = tmp.firstElementChild
-    if (fresh) {
-      p.replaceWith(fresh)
-      return root.innerHTML
+    const next = p.nextElementSibling
+    if (next?.tagName === 'P' && normalize(next.textContent ?? '') === '') {
+      next.remove()
     }
+    const tmp = doc.createElement('div')
+    tmp.innerHTML = fresh
+    const frag = doc.createDocumentFragment()
+    while (tmp.firstChild) frag.appendChild(tmp.firstChild)
+    p.replaceWith(frag)
+    return root.innerHTML
   }
   return html
 }
@@ -487,14 +503,14 @@ export function devisRefTitleHtml(title: string): string {
 function refreshDevisTitleInTopHtml(html: string, title: string): string {
   const styled = devisRefTitleHtml(title)
   let out = html
-  // Toutes les variantes TipTap / anciennes (centré, class, texte nu)
+  // Variantes TipTap / anciennes (centré, class, avec ou sans -a/-b)
   out = out.replace(/<p[^>]*class="[^"]*devis-ref-title[^"]*"[^>]*>[\s\S]*?<\/p>/gi, styled)
   out = out.replace(
-    /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis(?:\s+MC-[\w-]*)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+    /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
     styled,
   )
   out = out.replace(
-    /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-[\w-]+\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+    /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-[\w-]+(?:\s+-?[a-z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
     styled,
   )
   // Si aucun titre trouvé, l’insérer avant le récapitulatif
@@ -512,11 +528,7 @@ function refreshDevisTitleInTopHtml(html: string, title: string): string {
 
 /**
  * Applique toutes les règles lettre devis sur le HTML haut (éditeur + PDF partout).
- *
- * Important : la section « Votre devis inclut / Notre forfait exclut » n’est PAS
- * régénérée ici. Une fois saisie/modifiée dans TipTap, le HTML édité est la source
- * de vérité (sinon chaque refresh écrase les ajouts/suppressions de phrases).
- * La génération initiale reste dans buildDevisLetterTopHtml / buildOffreInclutExclutHtml.
+ * Cases « Votre devis inclut / Notre forfait exclut » → resynchronisées depuis notesSejour.
  */
 export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext): string {
   const sv = sejourPdfFromContext(ctx)
@@ -526,6 +538,7 @@ export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext)
   out = stripDureeInterventionLine(out)
   out = refreshExamensInTopHtml(out, ctx)
   out = normalizeInclutExclutLabels(out)
+  out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
   out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
   out = refreshDevisFieldByLabel(out, "Durée d'Hospitalisation :", sv.dureeHosp)
@@ -632,7 +645,8 @@ ${devisFieldRow('Tél. Mobile :', tel)}
 ${devisSectionHeading('Diagnostic du chirurgien : Dr CHENNOUFI Mehdi')}
 <p>${diagnostic.replace(/\n/g, '<br/>')}</p>
 <p></p>
-${devisHighlightBox('Durée TOTALE du séjour :', sv.dureeTotale)}
+${paraSalmonHi(`Durée TOTALE du séjour : ${sv.dureeTotale}`)}
+<p></p>
 
 ${devisSeparator()}
 
@@ -680,7 +694,8 @@ function ulFromLabels(labels: string[]): string {
 export function buildOffreInclutExclutHtml(ctx: DevisLetterContext): string {
   const notes = pickDevis(ctx)?.notesSejour ?? ''
   const drainageNb = resolveDrainageNb(notes, ctx.rapports?.[0] ?? null)
-  const inclut = labelsForInclut(resolveInclutIds(notes), drainageNb)
+  const contentionDetail = parseContentionDetailFromNotes(notes)
+  const inclut = labelsForInclut(resolveInclutIds(notes), drainageNb, contentionDetail)
   const exclut = labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes))
   return `${OFFRE_INCLUT_START}
 <p><strong>Votre devis inclut :</strong></p>
@@ -694,17 +709,46 @@ ${OFFRE_EXCLUT_END}`
 }
 
 /**
- * Resynchronise uniquement la section inclut/exclut depuis les cases du modal.
- * Utilisé au « Réinitialiser » — pas au refresh courant (qui doit respecter TipTap).
+ * Resynchronise la section inclut/exclut depuis les cases du modal (notesSejour).
+ * TipTap retire souvent les commentaires HTML → repli index-safe (pas de regex multi-<p>).
  */
 export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetterContext): string {
   const fresh = buildOffreInclutExclutHtml(ctx)
   const marked = new RegExp(`${OFFRE_INCLUT_START}[\\s\\S]*?${OFFRE_EXCLUT_END}`)
   if (marked.test(html)) return html.replace(marked, fresh)
 
-  // Sans marqueurs (TipTap les retire souvent) : remplacer après « Offre de prix »
+  const inclutIdx = html.search(/Votre devis inclut\s*:/i)
+  const exclutIdx = html.search(/Notre forfait exclut\s*:/i)
+  if (inclutIdx >= 0 && exclutIdx > inclutIdx) {
+    const start = html.lastIndexOf('<p', inclutIdx)
+    if (start >= 0) {
+      const afterExclutTitle = html.indexOf('</p>', exclutIdx)
+      if (afterExclutTitle > exclutIdx) {
+        let pos = afterExclutTitle + 4
+        // TipTap : éventuels <p></p> vides entre le titre et la <ul>
+        while (true) {
+          const empty = html.slice(pos).match(/^\s*<p\b[^>]*>\s*<\/p>/i)
+          if (!empty) break
+          pos += empty[0].length
+        }
+        const ulMatch = html.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)
+        if (ulMatch) {
+          pos += ulMatch[0].length
+        } else {
+          const dash = html.slice(pos).match(/^\s*<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—\s*(?:<\/em>)?\s*<\/p>/i)
+          if (dash) pos += dash[0].length
+        }
+        return `${html.slice(0, start)}${fresh}${html.slice(pos)}`
+      }
+    }
+  }
+
+  // Dernier recours : remplacer tout après « Offre de prix » (fin du HTML haut)
   const offreIdx = html.search(/Offre de prix\s*:/i)
-  if (offreIdx < 0) return html
+  if (offreIdx < 0) {
+    if (/Votre devis inclut/i.test(html)) return html
+    return `${html}\n${fresh}`
+  }
   const close = html.indexOf('</p>', offreIdx)
   if (close < 0) return html
   return `${html.slice(0, close + 4)}\n${fresh}`

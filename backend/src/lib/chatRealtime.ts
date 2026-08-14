@@ -5,6 +5,8 @@ export type ChatRealtimeEvent = {
   type: 'chat:message' | 'chat:thread' | 'chat:unread' | 'notif:new'
   patientId?: string
   messageId?: string
+  /** Auteur du message — pour ne pas sonner chez l’expéditeur. */
+  senderId?: string
   notificationId?: string
   titre?: string
   /** chat = pas de son notif (déjà couvert par son message) */

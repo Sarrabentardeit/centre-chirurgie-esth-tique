@@ -1,11 +1,12 @@
 /**
  * Cases à cocher « Votre devis inclut / Notre forfait exclut »
- * Persistées dans notesSejour (préfixes DEVIS_INCLUT / DEVIS_EXCLUT / DEVIS_DRAINAGE_NB).
+ * Persistées dans notesSejour (préfixes DEVIS_INCLUT / DEVIS_EXCLUT / DEVIS_DRAINAGE_NB / DEVIS_CONTENTION).
  */
 
 export const DEVIS_INCLUT_PREFIX = 'DEVIS_INCLUT:'
 export const DEVIS_EXCLUT_PREFIX = 'DEVIS_EXCLUT:'
 export const DEVIS_DRAINAGE_NB_PREFIX = 'DEVIS_DRAINAGE_NB:'
+export const DEVIS_CONTENTION_PREFIX = 'DEVIS_CONTENTION:'
 
 export type DevisOfferItem = { id: string; label: string }
 
@@ -44,8 +45,13 @@ export const DEVIS_INCLUT_ITEMS: readonly DevisOfferItem[] = [
     label: 'Séances de drainage lymphatique : massages par un kinésithérapeute,',
   },
   {
+    id: 'soins_infirmiers_hotel',
+    label: "Soins infirmiers à l'hôtel,",
+  },
+  {
     id: 'vetement_contention',
-    label: 'Vêtement de contention à préciser,',
+    /** Libellé dynamique via contentionLabel(detail) */
+    label: 'Vêtement de contention,',
   },
   {
     id: 'consult_postop',
@@ -62,6 +68,12 @@ export function drainageLabel(nb: number): string {
   const n = Math.max(0, Math.floor(Number(nb) || 0))
   const word = n > 1 ? 'Séances' : 'Séance'
   return `${n} ${word} de drainage lymphatique : massages par un kinésithérapeute,`
+}
+
+/** Libellé PDF / éditeur pour le vêtement de contention (détail saisi). */
+export function contentionLabel(detail: string): string {
+  const d = detail.replace(/\s+/g, ' ').trim()
+  return d ? `Vêtement de contention : ${d},` : 'Vêtement de contention,'
 }
 
 /** Défaut = séances rapport médecin, sinon 2. */
@@ -138,12 +150,18 @@ export function labelsForIds(
   return items.filter((i) => set.has(i.id)).map((i) => i.label)
 }
 
-/** Libellés « inclut » avec nb de séances drainage dynamique. */
-export function labelsForInclut(ids: string[], drainageNb: number): string[] {
+/** Libellés « inclut » avec drainage + détail contention dynamiques. */
+export function labelsForInclut(
+  ids: string[],
+  drainageNb: number,
+  contentionDetail = '',
+): string[] {
   const set = new Set(ids)
-  return DEVIS_INCLUT_ITEMS.filter((i) => set.has(i.id)).map((i) =>
-    i.id === 'drainage' ? drainageLabel(drainageNb) : i.label,
-  )
+  return DEVIS_INCLUT_ITEMS.filter((i) => set.has(i.id)).map((i) => {
+    if (i.id === 'drainage') return drainageLabel(drainageNb)
+    if (i.id === 'vetement_contention') return contentionLabel(contentionDetail)
+    return i.label
+  })
 }
 
 export function parseDrainageNbFromNotes(notes: string | null | undefined): number | null {
@@ -151,6 +169,12 @@ export function parseDrainageNbFromNotes(notes: string | null | undefined): numb
   if (line == null) return null
   const n = Number.parseInt(line.slice(DEVIS_DRAINAGE_NB_PREFIX.length).trim(), 10)
   return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+export function parseContentionDetailFromNotes(notes: string | null | undefined): string {
+  const line = (notes ?? '').split('\n').find((l) => l.startsWith(DEVIS_CONTENTION_PREFIX))
+  if (line == null) return ''
+  return line.slice(DEVIS_CONTENTION_PREFIX.length).trim()
 }
 
 export function resolveDrainageNb(

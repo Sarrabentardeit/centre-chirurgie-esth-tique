@@ -11,6 +11,7 @@ import {
   saveDevisContentSchema,
   sendDevisSchema,
   sendDevisRappelSchema,
+  demandeMajRapportSchema,
   renderDevisPdfSchema,
   updateUserByGestionnaireSchema,
   updateTemplateSchema,
@@ -163,6 +164,23 @@ gestionnaireRouter.post(
       const result = await gestionnaireService.sendDevisRappel(
         req.auth!.sub,
         pid(req.params.devisId),
+        req.body,
+      )
+      res.json(result)
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.post(
+  '/patients/:id/demande-maj-rapport',
+  validate(demandeMajRapportSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.requestRapportUpdate(
+        req.auth!.sub,
+        pid(req.params.id),
         req.body,
       )
       res.json(result)

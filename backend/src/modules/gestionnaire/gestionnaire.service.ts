@@ -27,9 +27,9 @@ import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
-import { sendDevisReadyEmail, sendDevisRappelEmail } from '../../lib/mailer.js'
+import { sendDevisReadyEmail, sendDevisRappelEmail, sendNotificationEmail } from '../../lib/mailer.js'
 import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
-import { softDeleteDevisPdfMessages } from '../chat/chat.service.js'
+import { softDeleteDevisPdfMessages, sendStaffOnlyMessage } from '../chat/chat.service.js'
 
 const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
 
@@ -530,13 +530,31 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
   const lignesJson = input.lignes as never
   const dateValidite = input.dateValidite ? new Date(input.dateValidite) : null
 
+  const latestRapport = await prisma.rapport.findFirst({
+    where: { patientId },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true },
+  })
+  const rapportId =
+    input.rapportId === null
+      ? null
+      : (input.rapportId ?? latestRapport?.id ?? null)
+
   const draft = await prisma.devis.findFirst({
     where: { patientId, statut: 'brouillon', ...devisActiveWhere },
     orderBy: { dateCreation: 'desc' },
   })
 
+  const forceNewVersion = input.nouvelleVersion === true
+  // Si un brouillon existe mais pour un autre rapport → nouvelle version (ne pas écraser v1)
+  const draftForOtherRapport =
+    !!draft &&
+    !!rapportId &&
+    !!draft.rapportId &&
+    draft.rapportId !== rapportId
+
   let devis
-  if (draft) {
+  if (draft && !forceNewVersion && !draftForOtherRapport) {
     const updateData: Parameters<typeof prisma.devis.update>[0]['data'] = {
       gestionnaireId,
       lignes: lignesJson,
@@ -545,6 +563,7 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       notesSejour: input.notesSejour ?? null,
       currency: input.currency ?? 'EUR',
       ...(dateValidite ? { dateValidite } : {}),
+      ...(rapportId && !draft.rapportId ? { rapportId } : {}),
     }
     if (!draft.numeroDevis) {
       updateData.numeroDevis = await generateNextDevisNumber(prisma)
@@ -574,6 +593,7 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       notesSejour: input.notesSejour ?? null,
       currency: input.currency ?? 'EUR',
       dateValidite,
+      rapportId: rapportId ?? undefined,
     })
 
     const patientProfile = await prisma.patient.findUnique({
@@ -846,6 +866,92 @@ export async function sendDevisRappel(
     numeroDevis: devis.numeroDevis,
     version: devis.version,
     pdfAttached,
+  }
+}
+
+/**
+ * Notifie le(s) médecin(s) pour générer un *nouveau* rapport (sans écraser l’ancien).
+ * Envoie aussi un message interne dans le chat du dossier (visible équipe uniquement).
+ */
+export async function requestRapportUpdate(
+  gestionnaireId: string,
+  patientId: string,
+  input: { message: string },
+) {
+  const message = input.message.trim()
+  if (!message) throw new AppError(400, 'EMPTY_MESSAGE', 'Le message ne peut pas être vide.')
+
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    include: { user: { select: { fullName: true } } },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const medecins = await prisma.user.findMany({
+    where: { role: 'medecin' },
+    select: { id: true },
+  })
+  if (medecins.length === 0) {
+    throw new AppError(404, 'MEDECIN_NOT_FOUND', 'Aucun compte médecin trouvé.')
+  }
+
+  const titre = 'Demande de nouveau rapport'
+  const lienAction = `/medecin/chat?channel=equipe&patientId=${patientId}`
+  const lienDossier = `/medecin/patients/${patientId}?tab=rapport&nouveau=1`
+
+  const notifMessage =
+    message.length <= 320
+      ? message
+      : `Bonjour Docteur,\n\nPouvez-vous générer un nouveau rapport pour ${patient.user.fullName} (dossier ${patient.dossierNumber}) ?\nLe devis v1 reste conservé.`
+
+  // 1) Message dans le chat du dossier (interne — pas visible patiente)
+  await sendStaffOnlyMessage(gestionnaireId, patientId, notifMessage)
+
+  // 2) Notification cloche + email (lien vers le chat du dossier)
+  await Promise.all(
+    medecins.map((m) =>
+      createUserNotification({
+        userId: m.id,
+        type: 'warning',
+        titre,
+        message: notifMessage,
+        lienAction,
+        kind: 'system',
+      }),
+    ),
+  )
+
+  await sendNotificationEmail({
+    titre,
+    message: notifMessage,
+    lienAction: lienDossier,
+    audience: 'medecin',
+  }).catch((err) => {
+    console.warn('[requestRapportUpdate] Email médecin non envoyé', err)
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'create',
+      entity: 'notification',
+      entityId: patientId,
+      after: {
+        kind: 'demande_maj_rapport',
+        patientId,
+        dossierNumber: patient.dossierNumber,
+        patientName: patient.user.fullName,
+        via: 'chat+notification',
+      } as never,
+    },
+  })
+
+  return {
+    ok: true as const,
+    patientId,
+    dossierNumber: patient.dossierNumber,
+    fullName: patient.user.fullName,
   }
 }
 

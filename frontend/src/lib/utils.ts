@@ -150,11 +150,18 @@ export function getDevisDisplayNumber(
 }
 
 export function formatDevisTitle(
-  devis: { numeroDevis?: string | null } | null | undefined,
+  devis: { numeroDevis?: string | null; version?: number | null } | null | undefined,
   dossierNumber?: string | null,
 ): string {
   const num = getDevisDisplayNumber(devis, dossierNumber)
-  return num ? `Devis ${num}` : 'Devis'
+  const base = num ? `Devis ${num}` : 'Devis'
+  const v = devis?.version
+  const versionNum =
+    v != null && Number.isFinite(v) && v >= 1 ? Math.floor(v) : num ? 1 : null
+  if (versionNum == null) return base
+  const code = 96 + versionNum // 1 → a, 2 → b, 3 → c
+  const letter = code >= 97 && code <= 122 ? String.fromCharCode(code) : String(versionNum)
+  return `${base} -${letter}`
 }
 
 /**

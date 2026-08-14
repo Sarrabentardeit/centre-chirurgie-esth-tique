@@ -1,9 +1,11 @@
 /** Lignes structurées dans `notesSejour` du devis (préfixes + texte libre). */
 
 import {
+  DEVIS_CONTENTION_PREFIX,
   DEVIS_DRAINAGE_NB_PREFIX,
   DEVIS_EXCLUT_PREFIX,
   DEVIS_INCLUT_PREFIX,
+  parseContentionDetailFromNotes,
   parseDrainageNbFromNotes,
   parseExclutIdsFromNotes,
   parseInclutIdsFromNotes,
@@ -32,6 +34,7 @@ const META_PREFIXES = [
   DEVIS_INCLUT_PREFIX,
   DEVIS_EXCLUT_PREFIX,
   DEVIS_DRAINAGE_NB_PREFIX,
+  DEVIS_CONTENTION_PREFIX,
 ] as const
 
 function lineValue(lines: string[], prefix: string): string {
@@ -57,6 +60,8 @@ export interface ParsedSejourMeta {
   exclutIds: string[] | null
   /** null = non renseigné → défaut = séances du rapport. */
   drainageNb: number | null
+  /** Détail du vêtement de contention (texte libre). */
+  contentionDetail: string
 }
 
 export const CLINIQUE_CHOIX = {
@@ -68,6 +73,8 @@ export const CLINIQUE_CHOIX = {
 export const HOTEL_CHOIX = {
   mouradi: 'Mouradi Gammarth',
   darMarsa: 'Hotel Dar Marsa La Marsa',
+  /** Patiente gère elle-même sa convalescence (pas d’hôtel cabinet). */
+  aucun: 'Aucun',
   autre: '__autre__',
 } as const
 
@@ -84,6 +91,7 @@ export function cliniqueNomFromChoice(choice: string, autre: string): string {
 export function hotelNomFromChoice(choice: string, autre: string): string {
   if (choice === 'mouradi') return HOTEL_CHOIX.mouradi
   if (choice === 'darMarsa') return HOTEL_CHOIX.darMarsa
+  if (choice === 'aucun') return HOTEL_CHOIX.aucun
   if (choice === 'autre') return autre.trim()
   return ''
 }
@@ -102,6 +110,9 @@ export function resolveHotelFromNom(nom: string): { choice: string; autre: strin
   if (!n) return { choice: '', autre: '' }
   if (n === HOTEL_CHOIX.mouradi || /mouradi/i.test(n)) return { choice: 'mouradi', autre: '' }
   if (n === HOTEL_CHOIX.darMarsa || /dar\s*marsa/i.test(n)) return { choice: 'darMarsa', autre: '' }
+  if (n === HOTEL_CHOIX.aucun || /^aucun$/i.test(n) || /sans\s*h[oô]tel/i.test(n)) {
+    return { choice: 'aucun', autre: '' }
+  }
   return { choice: 'autre', autre: n }
 }
 
@@ -138,6 +149,7 @@ export function parseSejourMeta(notes: string | null | undefined): ParsedSejourM
     inclutIds: parseInclutIdsFromNotes(notes),
     exclutIds: parseExclutIdsFromNotes(notes),
     drainageNb: parseDrainageNbFromNotes(notes),
+    contentionDetail: parseContentionDetailFromNotes(notes),
   }
 }
 
@@ -155,26 +167,30 @@ export function buildSejourNotes(i: ParsedSejourMeta): string {
     i.drainageNb != null && Number.isFinite(i.drainageNb)
       ? `${DEVIS_DRAINAGE_NB_PREFIX}${Math.max(0, Math.floor(i.drainageNb))}`
       : '',
+    i.contentionDetail.trim()
+      ? `${DEVIS_CONTENTION_PREFIX}${i.contentionDetail.replace(/\s+/g, ' ').trim()}`
+      : '',
     i.noteSejour.trim(),
   ].filter(Boolean).join('\n')
 }
 
 /**
  * Préremplit adultes/enfants depuis le formulaire patient.
- * Adultes = patient (1) + adultes accompagnants. Enfants = enfants accompagnants.
+ * Adultes = uniquement les adultes accompagnants (sans la patiente).
+ * Enfants = enfants accompagnants.
  */
 export function accompagnantsFromFormulairePayload(
   payload: Record<string, unknown> | null | undefined,
 ): { nbAdultes: string; nbEnfants: string } {
   if (!payload || payload.accompagnant !== true) {
-    return { nbAdultes: '1', nbEnfants: '0' }
+    return { nbAdultes: '0', nbEnfants: '0' }
   }
   const nAdultesAcc = Number(payload.nbAdultesAccompagnement)
   const nEnfants = Number(payload.nbEnfantsAccompagnement)
   const adultesAcc = Number.isFinite(nAdultesAcc) && nAdultesAcc >= 0 ? Math.floor(nAdultesAcc) : 0
   const enfants = Number.isFinite(nEnfants) && nEnfants >= 0 ? Math.floor(nEnfants) : 0
   return {
-    nbAdultes: String(1 + adultesAcc),
+    nbAdultes: String(adultesAcc),
     nbEnfants: String(enfants),
   }
 }

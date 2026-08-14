@@ -99,7 +99,15 @@ const GLOBAL_CSS = `
 .ProseMirror strong { font-weight: 700; }
 .ProseMirror em { font-style: italic; color: ${DEVIS_CHARTE.gray}; }
 .ProseMirror u { text-decoration: none; border-bottom: 1px solid ${DEVIS_CHARTE.rose}; }
-.ProseMirror mark { background: ${DEVIS_CHARTE.cream}; padding: 0 1px; }
+.ProseMirror mark {
+  padding: 0 1px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+/* Ne pas écraser le fluo saumon/gris (style inline) */
+.ProseMirror mark:not([style*="background"]) {
+  background: ${DEVIS_CHARTE.cream};
+}
 .doc-shell .tiptap { min-height: 420px; }
 .doc-section-bottom .ProseMirror,
 .doc-section-bottom .tiptap { min-height: 180px; }
@@ -314,14 +322,24 @@ export default function DevisEditorPage() {
       if (dv?.customContent?.trim()) {
         if (dv.customContent.includes(CONTENT_BREAK)) {
           const [top, bot] = dv.customContent.split(CONTENT_BREAK)
-          // Préserve le texte TipTap (inclut/exclut) ; rafraîchit seulement champs dossier / montants
+          // Sync auto : clinique/hôtel/nuits + cases inclut/exclut depuis notesSejour
           const topRaw = refreshDossierFieldsInTopHtml(top ?? buildTopHtml(p, dv), p, dv)
           setInitialTopHtml(topRaw)
           const bottomRaw = bot ?? buildBottomHtml(total, tndPerEurRate)
           setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate))
+          // Persister le HTML synchronisé (évite d’avoir besoin de « Réinitialiser »)
+          if (id && topRaw !== (top ?? '')) {
+            const contentToSave = `${topRaw}${CONTENT_BREAK}${replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate)}`
+            void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
+          }
         } else {
-          setInitialTopHtml(refreshDossierFieldsInTopHtml(dv.customContent, p, dv))
+          const topRaw = refreshDossierFieldsInTopHtml(dv.customContent, p, dv)
+          setInitialTopHtml(topRaw)
           setInitialBottomHtml(buildBottomHtml(total, tndPerEurRate))
+          if (id && topRaw !== dv.customContent) {
+            const contentToSave = `${topRaw}${CONTENT_BREAK}${buildBottomHtml(total, tndPerEurRate)}`
+            void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
+          }
         }
       } else {
         setInitialTopHtml(buildTopHtml(p, dv))
@@ -659,9 +677,10 @@ export default function DevisEditorPage() {
       {showStaleLetterHint && (
         <div className="no-print shrink-0 mx-4 sm:mx-6 mb-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900 leading-snug">
           <strong className="font-semibold">Contenu personnalisable.</strong>{' '}
-          La <strong>clinique</strong>, l&apos;<strong>hôtel</strong> et les <strong>durées en nuits</strong> se synchronisent
-          automatiquement depuis le devis à chaque ouverture. Le reste du texte vient de votre dernière sauvegarde ici.
-          Pour tout régénérer à partir du dossier actuel, cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
+          La <strong>clinique</strong>, l&apos;<strong>hôtel</strong>, les <strong>durées</strong> et la liste
+          {' '}<strong>« Votre devis inclut / exclut »</strong> se synchronisent automatiquement depuis le devis
+          à chaque ouverture. Le reste du texte vient de votre dernière sauvegarde ici.
+          Pour tout régénérer (écraser le texte libre), cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
         </div>
       )}
 

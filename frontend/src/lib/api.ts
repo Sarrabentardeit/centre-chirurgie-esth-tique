@@ -360,6 +360,7 @@ export interface DevisLigne {
 export interface Devis {
   id: string
   numeroDevis?: string | null
+  rapportId?: string | null
   statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse'
   version: number
   lignes: DevisLigne[]
@@ -439,6 +440,11 @@ export interface ChatMessage {
   deletedForAll?: boolean
   pinned?: boolean
   pinnedAt?: string | null
+  /** Message interne équipe — invisible pour la patiente. */
+  staffOnly?: boolean
+  /** Contexte dossier (fil unifié Équipe). */
+  patientNom?: string | null
+  dossierNumber?: string | null
 }
 
 export interface ChatConversation {
@@ -450,7 +456,12 @@ export interface ChatConversation {
   lastMessageAt: string
   lastMessagePreview: string
   lastExpediteurRole: string | null
+  channel?: 'patient' | 'equipe'
+  /** Fil unique Houda ↔ médecin (toutes demandes). */
+  unified?: boolean
 }
+
+export const EQUIPE_THREAD_ID = 'equipe'
 
 export interface ChatPatientOption {
   id: string
@@ -464,17 +475,24 @@ export const chatApi = {
   getUnread: () =>
     request<{ ok: true; unread: number }>('/chat/unread'),
 
-  getConversations: () =>
-    request<{ ok: true; conversations: ChatConversation[] }>('/chat/conversations'),
+  getConversations: (channel: 'patient' | 'equipe' = 'patient') =>
+    request<{ ok: true; conversations: ChatConversation[] }>(
+      `/chat/conversations?channel=${encodeURIComponent(channel)}`,
+    ),
 
   searchPatients: (search?: string) => {
     const q = search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''
     return request<{ ok: true; patients: ChatPatientOption[] }>(`/chat/patients${q}`)
   },
 
-  getMessages: (patientId?: string) => {
-    const q = patientId ? `?patientId=${encodeURIComponent(patientId)}` : ''
-    return request<{ ok: true; patientId: string; messages: ChatMessage[] }>(`/chat/messages${q}`)
+  getMessages: (patientId?: string, channel?: 'patient' | 'equipe' | 'all') => {
+    const q = new URLSearchParams()
+    if (patientId) q.set('patientId', patientId)
+    if (channel && channel !== 'all') q.set('channel', channel)
+    const qs = q.toString()
+    return request<{ ok: true; patientId: string; messages: ChatMessage[] }>(
+      `/chat/messages${qs ? `?${qs}` : ''}`,
+    )
   },
 
   sendMessage: (body: {
@@ -482,16 +500,21 @@ export const chatApi = {
     patientId?: string
     pieceJointeUrl?: string
     pieceJointeNom?: string
+    /** Canal interne équipe (invisible patiente). */
+    staffOnly?: boolean
   }) =>
     request<{ ok: true; message: ChatMessage }>('/chat/messages', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 
-  markRead: (patientId?: string) =>
+  markRead: (patientId?: string, channel?: 'patient' | 'equipe' | 'all') =>
     request<{ ok: true }>('/chat/messages/read', {
       method: 'POST',
-      body: JSON.stringify(patientId ? { patientId } : {}),
+      body: JSON.stringify({
+        ...(patientId ? { patientId } : {}),
+        ...(channel ? { channel } : {}),
+      }),
     }),
 
   deleteForAll: (messageId: string) =>
@@ -816,6 +839,7 @@ export const medecinApi = {
         nbEnfantsSejour?: number | null
         notes: string | null
         createdAt: string
+        updatedAt?: string
       }>
     } }>(`/medecin/patients/${id}`),
 
@@ -854,11 +878,19 @@ export const medecinApi = {
     nbAdultesSejour?: number
     nbEnfantsSejour?: number
     notes?: string
+    /** Crée un nouveau rapport sans modifier les précédents. */
+    nouveauRapport?: boolean
   }) =>
     request<{ ok: true; rapport: unknown }>(`/medecin/patients/${patientId}/rapport`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  deleteRapport: (patientId: string, rapportId: string) =>
+    request<{ ok: true; deleted: true; rapportId: string }>(
+      `/medecin/patients/${patientId}/rapport/${rapportId}`,
+      { method: 'DELETE' },
+    ),
 
   createRdv: (patientId: string, body: { date: string; heure: string; type: string; motif?: string; notes?: string }) =>
     request<{ ok: true; rdv: unknown }>(`/medecin/patients/${patientId}/rdv`, {
@@ -1278,6 +1310,8 @@ export const gestionnaireApi = {
       planningMedical?: string | null
       notesSejour?: string | null
       currency?: string
+      nouvelleVersion?: boolean
+      rapportId?: string | null
     }
   ) =>
     request<{ ok: true; devis: Devis }>(`/gestionnaire/patients/${patientId}/devis/brouillon`, {
@@ -1300,6 +1334,18 @@ export const gestionnaireApi = {
       version: number
       pdfAttached: boolean
     }>(`/gestionnaire/devis/${devisId}/rappel`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Notification médecin : demande MAJ rapport (lien dossier, sans toucher au devis). */
+  requestRapportUpdate: (patientId: string, body: { message: string }) =>
+    request<{
+      ok: true
+      patientId: string
+      dossierNumber: string
+      fullName: string
+    }>(`/gestionnaire/patients/${patientId}/demande-maj-rapport`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

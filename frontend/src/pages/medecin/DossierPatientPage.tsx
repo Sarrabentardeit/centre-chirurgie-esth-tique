@@ -2,6 +2,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Stethoscope, CheckCircle2, User, Phone, Mail,
   MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList,
+  History, Eye, Plus, Lock, Pencil, Trash2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +23,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { InfoRow, FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
 
 // ─── Types locaux ──────────────────────────────────────────────────────────────
 
@@ -40,9 +43,23 @@ interface Rapport {
   drainage?: boolean | null
   nbSeancesDrainage?: number | null
   dureeSejourTunisie?: number | null
+  nbAdultesSejour?: number | null
+  nbEnfantsSejour?: number | null
   notes: string | null
   createdAt: string
+  updatedAt?: string
 }
+
+/** R1 = premier rapport chronologique, Rn = plus récent. */
+function rapportVersionNumber(rapports: Rapport[], rapportId: string): number {
+  const chronological = [...rapports].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  )
+  const idx = chronological.findIndex((r) => r.id === rapportId)
+  return idx >= 0 ? idx + 1 : rapports.length
+}
+
+type RapportMode = 'edit' | 'consult' | 'nouveau'
 
 interface PatientDetail {
   id: string
@@ -125,9 +142,12 @@ export default function DossierPatientPage() {
   const [examensAutreText, setExamensAutreText] = useState('')
   const [interventions, setInterventions] = useState('')
   const [forfait, setForfait]           = useState('')
+  const [valeur, setValeur]             = useState('')
   const [nuitsPreoperatoires, setNuitsPreoperatoires] = useState('')
   const [nuitsClinique, setNuitsClinique] = useState('')
   const [nuitsHotel, setNuitsHotel]     = useState('')
+  const [nbAdultesSejour, setNbAdultesSejour] = useState('')
+  const [nbEnfantsSejour, setNbEnfantsSejour] = useState('')
   const [vetementContention, setVetementContention] = useState<boolean | null>(null)
   const [anesthesieGenerale, setAnesthesieGenerale] = useState(false)
   const [drainage, setDrainage] = useState<boolean | null>(null)
@@ -136,54 +156,117 @@ export default function DossierPatientPage() {
   const [saving, setSaving]             = useState(false)
   const [saved, setSaved]               = useState(false)
   const [rapportError, setRapportError] = useState<string | null>(null)
+  const [rapportMode, setRapportMode] = useState<RapportMode>(
+    () => (searchParams.get('nouveau') === '1' ? 'nouveau' : 'edit'),
+  )
+  const [selectedRapportId, setSelectedRapportId] = useState<string | null>(null)
+  const [confirmNouveauOpen, setConfirmNouveauOpen] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [deletingRapport, setDeletingRapport] = useState(false)
+  const [deleteRapportError, setDeleteRapportError] = useState<string | null>(null)
+  const [nouveauFromUrlApplied, setNouveauFromUrlApplied] = useState(false)
 
   // Status change
   const [newStatus, setNewStatus]       = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+
+  const applyRapportToForm = (
+    r: Rapport | null | undefined,
+    formulairePayload?: Record<string, unknown> | null,
+  ) => {
+    if (!r) {
+      setDiagnostic('')
+      setExamensDemandes([])
+      setExamensAutreChecked(false)
+      setExamensAutreText('')
+      setInterventions('')
+      setForfait('')
+      setValeur('')
+      setNuitsPreoperatoires('1')
+      setNuitsClinique('')
+      setNuitsHotel('')
+      if (formulairePayload) {
+        const acc = accompagnantsFromFormulairePayload(formulairePayload)
+        setNbAdultesSejour(acc.nbAdultes)
+        setNbEnfantsSejour(acc.nbEnfants)
+      } else {
+        setNbAdultesSejour('')
+        setNbEnfantsSejour('')
+      }
+      setVetementContention(null)
+      setAnesthesieGenerale(false)
+      setDrainage(null)
+      setNbSeancesDrainage('')
+      setNotes('')
+      return
+    }
+    const savedExamens = r.examensDemandes ?? []
+    const autreEntree = savedExamens.find((x) => x.trim().toLowerCase().startsWith('autre'))
+    setDiagnostic(r.diagnostic ?? '')
+    setExamensDemandes(savedExamens.filter((x) => !x.trim().toLowerCase().startsWith('autre')))
+    setExamensAutreChecked(Boolean(autreEntree))
+    setExamensAutreText(
+      autreEntree?.startsWith(EXAMEN_AUTRE_PREFIX)
+        ? autreEntree.slice(EXAMEN_AUTRE_PREFIX.length).trim()
+        : '',
+    )
+    setInterventions((r.interventionsRecommandees ?? []).join('\n'))
+    setForfait(
+      r.forfaitPropose != null && Number.isFinite(r.forfaitPropose)
+        ? String(Math.round(Number(r.forfaitPropose.toFixed(2))))
+        : '',
+    )
+    setValeur(r.valeurMedicale ?? '')
+    setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
+    setNuitsPreoperatoires(r.nuitsPreoperatoires != null ? String(r.nuitsPreoperatoires) : '1')
+    setNuitsHotel(r.nuitsHotel != null ? String(r.nuitsHotel) : '')
+    if (r.nbAdultesSejour != null || r.nbEnfantsSejour != null) {
+      setNbAdultesSejour(r.nbAdultesSejour != null ? String(r.nbAdultesSejour) : '')
+      setNbEnfantsSejour(r.nbEnfantsSejour != null ? String(r.nbEnfantsSejour) : '')
+    } else if (formulairePayload) {
+      const acc = accompagnantsFromFormulairePayload(formulairePayload)
+      setNbAdultesSejour(acc.nbAdultes)
+      setNbEnfantsSejour(acc.nbEnfants)
+    } else {
+      setNbAdultesSejour('')
+      setNbEnfantsSejour('')
+    }
+    setVetementContention(r.vetementContention ?? null)
+    setAnesthesieGenerale(r.anesthesieGenerale ?? false)
+    setDrainage(r.drainage ?? null)
+    setNbSeancesDrainage(r.nbSeancesDrainage != null ? String(r.nbSeancesDrainage) : '')
+    setNotes(r.notes ?? '')
+  }
+
+  const formulairePayloadForRapport = (p: PatientDetail | null | undefined) =>
+    (p?.formulaires?.[0]?.payload as Record<string, unknown> | undefined) ?? null
 
   const load = async () => {
     if (!id) return
     setLoading(true); setError(null)
     try {
       const res = await medecinApi.getPatient(id)
-      setPatient(res.patient as PatientDetail)
-      // Pre-fill rapport form
-      const r = res.patient.rapports?.[0]
-      if (r) {
-        const savedExamens = r.examensDemandes ?? []
-        const autreEntree = savedExamens.find((x) => x.trim().toLowerCase().startsWith('autre'))
-        setDiagnostic(r.diagnostic ?? '')
-        setExamensDemandes(savedExamens.filter((x) => !x.trim().toLowerCase().startsWith('autre')))
-        setExamensAutreChecked(Boolean(autreEntree))
-        setExamensAutreText(
-          autreEntree?.startsWith(EXAMEN_AUTRE_PREFIX)
-            ? autreEntree.slice(EXAMEN_AUTRE_PREFIX.length).trim()
-            : ''
-        )
-        setInterventions((r.interventionsRecommandees ?? []).join('\n'))
-        setForfait(
-          r.forfaitPropose != null && Number.isFinite(r.forfaitPropose)
-            ? String(Math.round(Number(r.forfaitPropose.toFixed(2))))
-            : ''
-        )
-        setNuitsClinique(r.nuitsClinique != null ? String(r.nuitsClinique) : '')
-        setNuitsPreoperatoires(r.nuitsPreoperatoires != null ? String(r.nuitsPreoperatoires) : '1')
-        setNuitsHotel(r.nuitsHotel != null ? String(r.nuitsHotel) : '')
-        setVetementContention(r.vetementContention ?? null)
-        setAnesthesieGenerale(r.anesthesieGenerale ?? false)
-        setDrainage(r.drainage ?? null)
-        setNbSeancesDrainage(r.nbSeancesDrainage != null ? String(r.nbSeancesDrainage) : '')
-        setNotes(r.notes ?? '')
+      const detail = res.patient as PatientDetail
+      setPatient(detail)
+      const list = (detail.rapports ?? []) as Rapport[]
+      const latest = list[0]
+      const formPayload = formulairePayloadForRapport(detail)
+      const wantNouveau = searchParams.get('nouveau') === '1' && !nouveauFromUrlApplied
+      if (wantNouveau && latest) {
+        setNouveauFromUrlApplied(true)
+        setRapportMode('nouveau')
+        setSelectedRapportId(latest.id)
+        applyRapportToForm(latest, formPayload)
+      } else if (latest) {
+        setRapportMode('edit')
+        setSelectedRapportId(latest.id)
+        applyRapportToForm(latest, formPayload)
       } else {
-        setExamensDemandes([])
-        setExamensAutreChecked(false)
-        setExamensAutreText('')
-        setNuitsPreoperatoires('1')
-        setAnesthesieGenerale(false)
-        setDrainage(null)
-        setNbSeancesDrainage('')
+        setRapportMode('edit')
+        setSelectedRapportId(null)
+        applyRapportToForm(null, formPayload)
       }
-      setNewStatus(res.patient.status)
+      setNewStatus(detail.status)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
@@ -192,6 +275,58 @@ export default function DossierPatientPage() {
   }
 
   useEffect(() => { void load() }, [id])
+
+  const handleSelectRapportVersion = (rapportId: string) => {
+    if (!patient) return
+    const list = patient.rapports
+    const latestId = list[0]?.id
+    const chosen = list.find((r) => r.id === rapportId)
+    if (!chosen) return
+    setSelectedRapportId(rapportId)
+    setRapportError(null)
+    applyRapportToForm(chosen, formulairePayloadForRapport(patient))
+    if (rapportId === latestId) {
+      setRapportMode('edit')
+    } else {
+      setRapportMode('consult')
+    }
+  }
+
+  const startNouveauRapport = () => {
+    if (!patient?.rapports[0]) return
+    setConfirmNouveauOpen(false)
+    setRapportMode('nouveau')
+    setSelectedRapportId(patient.rapports[0].id)
+    applyRapportToForm(patient.rapports[0], formulairePayloadForRapport(patient))
+    setRapportError(null)
+  }
+
+  const cancelNouveauRapport = () => {
+    if (!patient?.rapports[0]) {
+      setRapportMode('edit')
+      return
+    }
+    setRapportMode('edit')
+    setSelectedRapportId(patient.rapports[0].id)
+    applyRapportToForm(patient.rapports[0], formulairePayloadForRapport(patient))
+    setRapportError(null)
+  }
+
+  const handleDeleteRapport = async () => {
+    if (!id || !selectedRapport) return
+    setDeletingRapport(true)
+    setDeleteRapportError(null)
+    try {
+      await medecinApi.deleteRapport(id, selectedRapport.id)
+      setConfirmDeleteOpen(false)
+      setRapportMode('edit')
+      void load()
+    } catch (e) {
+      setDeleteRapportError(e instanceof Error ? e.message : 'Suppression impossible.')
+    } finally {
+      setDeletingRapport(false)
+    }
+  }
 
   const handleSaveRapport = async () => {
     if (!id) return
@@ -219,10 +354,12 @@ export default function DossierPatientPage() {
           examensAutreText.trim() ? `${EXAMEN_AUTRE_PREFIX} ${examensAutreText.trim()}` : 'Autre'
         )
       }
+      const createNew = rapportMode === 'nouveau' || !patient?.rapports?.[0]
       await medecinApi.upsertRapport(id, {
         diagnostic: diagnostic || undefined,
         examensDemandes: examensPayload,
         interventionsRecommandees: interventions.split('\n').map((s) => s.trim()).filter(Boolean),
+        valeurMedicale: valeur || undefined,
         forfaitPropose: Number(forfait),
         nuitsPreoperatoires: Number(nuitsPreoperatoires),
         nuitsClinique: Number(nuitsClinique),
@@ -232,12 +369,16 @@ export default function DossierPatientPage() {
           (Number(nuitsPreoperatoires) || 0)
           + (Number(nuitsClinique) || 0)
           + (Number(nuitsHotel) || 0),
+        nbAdultesSejour: nbAdultesSejour === '' ? undefined : Number(nbAdultesSejour),
+        nbEnfantsSejour: nbEnfantsSejour === '' ? undefined : Number(nbEnfantsSejour),
         anesthesieGenerale,
         drainage: drainage ?? undefined,
         nbSeancesDrainage: drainage === true ? Number(nbSeancesDrainage) : null,
         notes: notes || undefined,
+        nouveauRapport: createNew,
       })
       setSaved(true)
+      setRapportMode('edit')
       setTimeout(() => setSaved(false), 3000)
       void load()
     } catch (e) {
@@ -283,7 +424,18 @@ export default function DossierPatientPage() {
   }
 
   const formulaire = patient.formulaires?.[0]
-  const rapport    = patient.rapports?.[0]
+  const rapports = patient.rapports ?? []
+  const latestRapport = rapports[0] ?? null
+  const selectedRapport =
+    rapports.find((r) => r.id === selectedRapportId) ?? latestRapport
+  const selectedVersionNum = selectedRapport
+    ? rapportVersionNumber(rapports, selectedRapport.id)
+    : 0
+  const nextVersionNum = rapports.length + 1
+  const sejourCliniqueTotal = (Number(nuitsPreoperatoires) || 0) + (Number(nuitsClinique) || 0)
+  const sejourTunisieAuto = sejourCliniqueTotal + (Number(nuitsHotel) || 0)
+  const rapportReadOnly = rapportMode === 'consult'
+  const canEditFields = rapportMode === 'edit' || rapportMode === 'nouveau' || !latestRapport
   const rendezvous: RendezVous[] = patient.rendezvous ?? (patient.agendaEvents ?? [])
     .filter((ev) => ev.type === 'rdv')
     .map((ev) => {
@@ -301,6 +453,10 @@ export default function DossierPatientPage() {
         statut: (ev.statut ?? 'planifie') as 'planifie' | 'confirme' | 'annule',
       } as RendezVous
     })
+
+  const rapportVersionsChrono = [...rapports].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  )
 
   return (
     <div className="max-w-5xl mx-auto space-y-0">
@@ -474,42 +630,237 @@ export default function DossierPatientPage() {
 
         {/* ── Rapport médical ── */}
         <TabsContent value="rapport">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
+          <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+            {/* Versions */}
+            <Card className="h-fit lg:sticky lg:top-24">
+              <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Stethoscope className="h-4 w-4 text-brand-600" />
-                  Rapport médical
-                  {rapport && <Badge variant="success" className="text-xs">Existant</Badge>}
+                  <History className="h-4 w-4 text-brand-600" />
+                  Versions
                 </CardTitle>
-                <Button
-                  variant="brand"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={saving || !forfait || Number(forfait) <= 0 || nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '' || vetementContention === null || (drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1))}
-                  title={
-                    !forfait || Number(forfait) <= 0 ? 'Forfait médical requis'
-                    : nuitsPreoperatoires === '' ? 'Nuit préparatoire en clinique requise'
-                    : nuitsClinique === '' ? 'Nuits postopératoires requises'
-                    : nuitsHotel === '' ? 'Nuit de convalescence à l\'hôtel requise'
-                    : vetementContention === null ? 'Vêtement de contention requis'
-                    : drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1) ? 'Nombre de séances de drainage requis'
-                    : undefined
-                  }
-                  onClick={handleSaveRapport}
-                >
-                  {saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-                  {saving ? 'Sauvegarde...' : saved ? 'Sauvegardé !' : 'Sauvegarder'}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {rapportError && (
-                <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4 shrink-0" /> {rapportError}
-                </div>
-              )}
+                <p className="text-[11px] text-muted-foreground font-normal">
+                  Consultez l’historique complet. Seul le rapport actuel est modifiable.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-2 pt-0">
+                {rapports.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-3">Aucun rapport pour l’instant.</p>
+                ) : (
+                  <div className="flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0">
+                    {rapportMode === 'nouveau' && (
+                      <div className="min-w-[160px] lg:min-w-0 rounded-xl border border-dashed border-[#81572d]/50 bg-[#81572d]/5 px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-[#81572d]">R{nextVersionNum}</span>
+                          <Badge className="text-[10px] bg-amber-100 text-amber-900 border-amber-200">Brouillon</Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">En cours de rédaction</p>
+                      </div>
+                    )}
+                    {rapports.map((r, index) => {
+                      const version = rapportVersionNumber(rapports, r.id)
+                      const isLatest = index === 0
+                      const isSelected =
+                        rapportMode !== 'nouveau' && selectedRapportId === r.id
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => handleSelectRapportVersion(r.id)}
+                          className={cn(
+                            'min-w-[160px] lg:min-w-0 text-left rounded-xl border px-3 py-2.5 transition-colors',
+                            isSelected
+                              ? 'border-brand-300 bg-brand-50 ring-1 ring-brand-200'
+                              : 'border-border hover:bg-slate-50',
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-900">R{version}</span>
+                            {isLatest ? (
+                              <Badge variant="success" className="text-[10px]">Actuel</Badge>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5">
+                                <Lock className="h-2.5 w-2.5" /> Archivé
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            {formatDate(r.updatedAt ?? r.createdAt)}
+                          </p>
+                          {r.forfaitPropose != null && (
+                            <p className="text-[10px] text-slate-600 mt-0.5 truncate">
+                              Forfait {formatCurrency(r.forfaitPropose)}
+                            </p>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
+            {/* Éditeur / consultation */}
+            <Card>
+              <CardHeader className="space-y-3">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
+                      <Stethoscope className="h-4 w-4 text-brand-600" />
+                      {rapportMode === 'nouveau'
+                        ? `Nouveau rapport · R${nextVersionNum}`
+                        : selectedRapport
+                          ? `Rapport médical · R${selectedVersionNum}`
+                          : 'Rapport médical'}
+                      {rapportMode === 'consult' && (
+                        <Badge className="text-[10px] bg-slate-100 text-slate-700 border-slate-200 gap-1">
+                          <Eye className="h-3 w-3" /> Consultation
+                        </Badge>
+                      )}
+                      {rapportMode === 'edit' && latestRapport && (
+                        <Badge className="text-[10px] bg-sky-50 text-sky-800 border-sky-200 gap-1">
+                          <Pencil className="h-3 w-3" /> Édition
+                        </Badge>
+                      )}
+                      {rapportMode === 'nouveau' && (
+                        <Badge className="text-[10px] bg-amber-100 text-amber-900 border-amber-200">
+                          Nouvelle version
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      {rapportMode === 'nouveau'
+                        ? 'Les versions précédentes et les devis déjà créés restent conservés.'
+                        : rapportMode === 'consult'
+                          ? 'Version archivée — lecture seule. Créez un nouveau rapport pour mettre à jour le dossier.'
+                          : latestRapport
+                            ? 'Correction du rapport actuel (écrase uniquement cette version).'
+                            : 'Premier rapport médical du dossier.'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {latestRapport && rapportMode !== 'nouveau' && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        disabled={saving}
+                        onClick={() => setConfirmNouveauOpen(true)}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Nouveau rapport
+                      </Button>
+                    )}
+                    {rapportMode === 'nouveau' && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={saving}
+                        onClick={cancelNouveauRapport}
+                      >
+                        Annuler
+                      </Button>
+                    )}
+                    {rapportMode === 'consult' && latestRapport && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => handleSelectRapportVersion(latestRapport.id)}
+                      >
+                        Revenir à l’actuel
+                      </Button>
+                    )}
+                    {selectedRapport && rapportMode !== 'nouveau' && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/5"
+                        disabled={saving || deletingRapport}
+                        onClick={() => {
+                          setDeleteRapportError(null)
+                          setConfirmDeleteOpen(true)
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Supprimer
+                      </Button>
+                    )}
+                    {canEditFields && (
+                      <Button
+                        variant="brand"
+                        size="sm"
+                        className="gap-1.5"
+                        disabled={saving || !forfait || Number(forfait) <= 0 || nuitsPreoperatoires === '' || nuitsClinique === '' || nuitsHotel === '' || vetementContention === null || (drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1))}
+                        title={
+                          !forfait || Number(forfait) <= 0 ? 'Forfait médical requis'
+                          : nuitsPreoperatoires === '' ? 'Nuit préparatoire en clinique requise'
+                          : nuitsClinique === '' ? 'Nuits postopératoires requises'
+                          : nuitsHotel === '' ? 'Nuit de convalescence à l\'hôtel requise'
+                          : vetementContention === null ? 'Vêtement de contention requis'
+                          : drainage === true && (!nbSeancesDrainage || Number(nbSeancesDrainage) < 1) ? 'Nombre de séances de drainage requis'
+                          : undefined
+                        }
+                        onClick={() => void handleSaveRapport()}
+                      >
+                        {saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                        {saving
+                          ? 'Enregistrement…'
+                          : saved
+                            ? 'Enregistré'
+                            : rapportMode === 'nouveau'
+                              ? `Générer R${nextVersionNum}`
+                              : latestRapport
+                                ? 'Enregistrer la correction'
+                                : 'Générer le rapport'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {rapportMode === 'nouveau' && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-950 leading-relaxed">
+                    <p className="font-semibold mb-0.5">Création d’une nouvelle version (R{nextVersionNum})</p>
+                    <p>
+                      Prérempli depuis R{rapports.length}. L’ancien rapport reste consultable dans l’historique.
+                      Un nouveau devis pourra ensuite être créé sans écraser le précédent.
+                    </p>
+                  </div>
+                )}
+                {rapportMode === 'consult' && selectedRapport && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
+                    <p>
+                      Vous consultez <strong>R{selectedVersionNum}</strong> du {formatDate(selectedRapport.createdAt)}.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="brand"
+                      className="h-8 gap-1.5 shrink-0"
+                      onClick={() => {
+                        applyRapportToForm(selectedRapport, formulairePayloadForRapport(patient))
+                        setRapportMode('nouveau')
+                        setConfirmNouveauOpen(false)
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Nouveau à partir de cette version
+                    </Button>
+                  </div>
+                )}
+              </CardHeader>
+
+              <CardContent className={cn('space-y-5', rapportReadOnly && 'opacity-[0.92]')}>
+                {rapportError && (
+                  <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0" /> {rapportError}
+                  </div>
+                )}
+
+                <fieldset disabled={!canEditFields} className="space-y-5 border-0 p-0 m-0 min-w-0">
               <div className="space-y-2">
                 <Label>Diagnostic</Label>
                 <Textarea
@@ -530,7 +881,7 @@ export default function DossierPatientPage() {
                         key={opt}
                         className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
                           checked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
-                        }`}
+                        } ${!canEditFields ? 'pointer-events-none' : ''}`}
                       >
                         <input
                           type="checkbox"
@@ -549,26 +900,26 @@ export default function DossierPatientPage() {
                   <label
                     className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
                       examensAutreChecked ? 'border-sky-300 bg-sky-50/50' : 'border-border hover:bg-muted/30'
-                    }`}
+                    } ${!canEditFields ? 'pointer-events-none' : ''}`}
                   >
                     <input
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
                       checked={examensAutreChecked}
-                      onChange={(e) => {
-                        setExamensAutreChecked(e.target.checked)
-                        if (!e.target.checked) setExamensAutreText('')
-                      }}
+                      onChange={(e) => setExamensAutreChecked(e.target.checked)}
                     />
-                    <span className="text-sm text-foreground leading-relaxed">Autre</span>
+                    <span className="flex-1 space-y-2">
+                      <span className="text-sm text-foreground">Autre</span>
+                      {examensAutreChecked && (
+                        <Input
+                          value={examensAutreText}
+                          onChange={(e) => setExamensAutreText(e.target.value)}
+                          placeholder="Précisez l’examen…"
+                          className="h-9 text-sm"
+                        />
+                      )}
+                    </span>
                   </label>
-                  {examensAutreChecked && (
-                    <Input
-                      value={examensAutreText}
-                      onChange={(e) => setExamensAutreText(e.target.value)}
-                      placeholder="Préciser l'examen complémentaire..."
-                    />
-                  )}
                 </div>
               </div>
 
@@ -577,12 +928,12 @@ export default function DossierPatientPage() {
                 <Textarea
                   value={interventions}
                   onChange={(e) => setInterventions(e.target.value)}
-                  placeholder="Rhinoplastie&#10;Blepharoplastie..."
-                  className="min-h-[80px]"
+                  placeholder={"Ex:\nAugmentation mammaire\nLiposuccion abdomen"}
+                  className="min-h-[90px]"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="flex items-center gap-1">
                     Forfait proposé (TND)
@@ -590,99 +941,138 @@ export default function DossierPatientPage() {
                   </Label>
                   <Input
                     type="number"
+                    min={0}
+                    step={1}
                     value={forfait}
                     onChange={(e) => setForfait(e.target.value)}
-                    placeholder="Ex: 5000"
+                    placeholder="Ex: 4500"
                     className={!forfait || Number(forfait) <= 0 ? 'border-amber-300 focus:border-amber-500' : ''}
                   />
                 </div>
-              </div>
-
-              <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3 sm:p-4">
-                <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">Détails du séjour</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1">
-                      Nuit préparatoire en clinique
-                      <span className="text-destructive font-bold">*</span>
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={30}
-                      value={nuitsPreoperatoires}
-                      onChange={(e) => setNuitsPreoperatoires(e.target.value)}
-                      placeholder="Ex: 1"
-                      className={nuitsPreoperatoires === '' ? 'border-amber-300 focus:border-amber-500' : ''}
-                    />
-                    <p className="text-[11px] text-muted-foreground">Avant l'opération</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1">
-                      Nuits postopératoires
-                      <span className="text-destructive font-bold">*</span>
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={60}
-                      value={nuitsClinique}
-                      onChange={(e) => setNuitsClinique(e.target.value)}
-                      placeholder="Ex: 2"
-                      className={nuitsClinique === '' ? 'border-amber-300 focus:border-amber-500' : ''}
-                    />
-                    <p className="text-[11px] text-muted-foreground">Après l'opération</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1">
-                      Nuit de convalescence à l&apos;hôtel
-                      <span className="text-destructive font-bold">*</span>
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={60}
-                      value={nuitsHotel}
-                      onChange={(e) => setNuitsHotel(e.target.value)}
-                      placeholder="Ex: 4"
-                      className={nuitsHotel === '' ? 'border-amber-300 focus:border-amber-500' : ''}
-                    />
-                    <p className="text-[11px] text-muted-foreground">Après la clinique</p>
-                  </div>
-                </div>
-                <div className="space-y-2 max-w-xs">
-                  <Label className="flex items-center gap-2">
-                    Nombre de séjour global (Tunisie)
-                    <span className="text-[10px] font-medium bg-brand-50 text-brand-600 border border-brand-200 rounded-full px-2 py-0.5">
-                      Auto
-                    </span>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={90}
-                    value={
-                      (Number(nuitsPreoperatoires) || 0)
-                      + (Number(nuitsClinique) || 0)
-                      + (Number(nuitsHotel) || 0)
-                    }
-                    readOnly
-                    tabIndex={-1}
-                    placeholder="Calculé automatiquement"
-                    className="bg-muted/50 cursor-default select-none font-semibold text-brand-700"
-                    title="Auto : préop + postop + hôtel"
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Valorisation médicale</Label>
+                  <Textarea
+                    value={valeur}
+                    onChange={(e) => setValeur(e.target.value)}
+                    placeholder="Description technique des actes…"
+                    className="min-h-[70px]"
                   />
-                  <p className="text-[11px] text-muted-foreground">Auto : préop + postop + hôtel</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-4 rounded-xl border border-border bg-slate-50/60 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Plan de séjour</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Clinique {sejourCliniqueTotal} · Hôtel {nuitsHotel || '—'} · Total {sejourTunisieAuto} nuits
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Clinique</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-1">
+                        Nuit préparatoire
+                        <span className="text-destructive font-bold">*</span>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={30}
+                        value={nuitsPreoperatoires}
+                        onChange={(e) => setNuitsPreoperatoires(e.target.value)}
+                        placeholder="Ex: 1"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-1">
+                        Nuits postop.
+                        <span className="text-destructive font-bold">*</span>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={60}
+                        value={nuitsClinique}
+                        onChange={(e) => setNuitsClinique(e.target.value)}
+                        placeholder="Ex: 2"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    Total clinique : <strong>{sejourCliniqueTotal}</strong> nuit(s)
+                  </p>
+                </div>
+
+                <div className="border-t border-border pt-3">
+                  <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Hôtel</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-1">
+                        Nuits convalescence
+                        <span className="text-destructive font-bold">*</span>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={60}
+                        value={nuitsHotel}
+                        onChange={(e) => setNuitsHotel(e.target.value)}
+                        placeholder="Ex: 4"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Total Tunisie</Label>
+                      <Input
+                        type="number"
+                        readOnly
+                        value={String(sejourTunisieAuto)}
+                        className="bg-white font-semibold"
+                        title="Calculé automatiquement : clinique + hôtel"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Auto : clinique + hôtel</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-border pt-3">
+                  <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Accompagnants</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Adultes accompagnants</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={20}
+                        placeholder="0"
+                        value={nbAdultesSejour}
+                        onChange={(e) => setNbAdultesSejour(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Enfants (2–12 ans)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={20}
+                        placeholder="0"
+                        value={nbEnfantsSejour}
+                        onChange={(e) => setNbEnfantsSejour(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">Depuis le formulaire — sans compter la patiente.</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="flex items-center gap-1">
                     Vêtement de contention
                     <span className="text-destructive font-bold">*</span>
                   </Label>
-                  <div className={`flex items-center gap-2 p-2 rounded-lg border ${vetementContention === null ? 'border-amber-300' : 'border-transparent'}`}>
+                  <div className="flex gap-2">
                     <Button
                       type="button"
                       size="sm"
@@ -699,18 +1089,15 @@ export default function DossierPatientPage() {
                     >
                       Non
                     </Button>
-                    {vetementContention === null && (
-                      <span className="text-xs text-amber-600 ml-1">À préciser</span>
-                    )}
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Anesthésie générale</Label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex gap-2">
                     <Button
                       type="button"
                       size="sm"
-                      variant={anesthesieGenerale === true ? 'brand' : 'outline'}
+                      variant={anesthesieGenerale ? 'brand' : 'outline'}
                       onClick={() => setAnesthesieGenerale(true)}
                     >
                       Oui
@@ -718,7 +1105,7 @@ export default function DossierPatientPage() {
                     <Button
                       type="button"
                       size="sm"
-                      variant={anesthesieGenerale === false ? 'brand' : 'outline'}
+                      variant={!anesthesieGenerale ? 'brand' : 'outline'}
                       onClick={() => setAnesthesieGenerale(false)}
                     >
                       Non
@@ -727,7 +1114,7 @@ export default function DossierPatientPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Drainage</Label>
-                  <div className="flex items-center gap-2 p-2 rounded-lg border border-transparent">
+                  <div className="flex gap-2">
                     <Button
                       type="button"
                       size="sm"
@@ -774,15 +1161,47 @@ export default function DossierPatientPage() {
                   className="min-h-[80px]"
                 />
               </div>
+                </fieldset>
 
-              {rapport && (
-                <p className="text-xs text-muted-foreground">
-                  Dernière modification : {formatDate(rapport.createdAt)} · Dr. {user?.name}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+                {selectedRapport && rapportMode !== 'nouveau' && (
+                  <p className="text-xs text-muted-foreground">
+                    R{selectedVersionNum} · créé le {formatDate(selectedRapport.createdAt)}
+                    {selectedRapport.updatedAt && selectedRapport.updatedAt !== selectedRapport.createdAt
+                      ? ` · mis à jour le ${formatDate(selectedRapport.updatedAt)}`
+                      : ''}
+                    {user?.name ? ` · Dr. ${user.name}` : ''}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <ConfirmDialog
+            open={confirmNouveauOpen}
+            onClose={() => setConfirmNouveauOpen(false)}
+            title="Créer un nouveau rapport ?"
+            description={`Une nouvelle version (R${nextVersionNum}) sera ajoutée. R${rapports.length || 1} restera consultable. Les devis déjà émis restent inchangés — un nouveau devis pourra être créé ensuite.`}
+            confirmLabel={`Créer R${nextVersionNum}`}
+            confirmVariant="brand"
+            onConfirm={startNouveauRapport}
+          />
+          <ConfirmDialog
+            open={confirmDeleteOpen}
+            onClose={() => {
+              if (deletingRapport) return
+              setConfirmDeleteOpen(false)
+              setDeleteRapportError(null)
+            }}
+            title={`Supprimer le rapport R${selectedVersionNum} ?`}
+            description="Cette action est définitive. Les devis déjà émis restent conservés (lien rapport retiré)."
+            confirmLabel="Supprimer le rapport"
+            confirmVariant="destructive"
+            loading={deletingRapport}
+            error={deleteRapportError}
+            onConfirm={() => void handleDeleteRapport()}
+          />
         </TabsContent>
+
 
         {/* ── Suivi ── */}
         <TabsContent value="suivi">
@@ -794,7 +1213,11 @@ export default function DossierPatientPage() {
                   {[
                     { date: patient.user.createdAt, label: 'Compte créé', icon: '👤' },
                     formulaire?.submittedAt ? { date: formulaire.submittedAt, label: 'Formulaire soumis', icon: '📋' } : null,
-                    rapport ? { date: rapport.createdAt, label: `Rapport rédigé par Dr. ${user?.name}`, icon: '🩺' } : null,
+                    ...rapportVersionsChrono.map((r) => ({
+                      date: r.createdAt,
+                      label: `Rapport médical R${rapportVersionNumber(rapports, r.id)}${r.id === latestRapport?.id ? ' (actuel)' : ''}${user?.name ? ` · Dr. ${user.name}` : ''}`,
+                      icon: '🩺',
+                    })),
                     ...patient.devis.map((d) => ({ date: d.dateCreation, label: `Devis ${d.statut} — ${formatCurrency(d.total)}`, icon: '📄' })),
                     ...rendezvous.map((r) => ({ date: r.date, label: `RDV ${r.type} — ${r.statut}`, icon: '📅' })),
                   ]

@@ -233,6 +233,8 @@ model Devis {
   id             String      @id @default(uuid())
   patientId      String      @map("patient_id")
   gestionnaireId String      @map("gestionnaire_id")
+  /** Rapport médical source de cette version de devis (figé à la création). */
+  rapportId      String?     @map("rapport_id")
   /** Référence affichée : MC-MM-NNN-AAAA */
   numeroDevis    String?     @unique @map("numero_devis")
   statut         DevisStatut @default(brouillon)
@@ -253,6 +255,7 @@ model Devis {
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   @@index([deletedAt])
+  @@index([rapportId])
   @@map("devis")
 }
 
@@ -340,6 +343,8 @@ model Message {
   pinned          Boolean   @default(false)
   pinnedAt        DateTime? @map("pinned_at")
   pinnedById      String?   @map("pinned_by_id")
+  /** Visible uniquement équipe (médecin / gestionnaire) — jamais la patiente. */
+  staffOnly       Boolean   @default(false) @map("staff_only")
 
   patient    Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
   expediteur User            @relation(fields: [expediteurId], references: [id], onDelete: Cascade)
@@ -347,6 +352,7 @@ model Message {
 
   @@index([patientId, dateEnvoi])
   @@index([patientId, pinned])
+  @@index([patientId, staffOnly])
   @@map("messages")
 }
 

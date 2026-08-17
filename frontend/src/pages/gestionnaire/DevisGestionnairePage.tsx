@@ -1163,6 +1163,8 @@ export default function DevisGestionnairePage() {
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const draftSaveInFlightRef = useRef(false)
   const draftSavePendingRef = useRef(false)
+  /** Une seule nouvelle version à l’ouverture « nouveau devis » ; les auto-saves suivants mettent à jour. */
+  const createNewVersionOnceRef = useRef(false)
   const persistDraftSilentRef = useRef<() => Promise<boolean>>(async () => false)
   const [modalReady, setModalReady] = useState(false)
 
@@ -1283,6 +1285,7 @@ export default function DevisGestionnairePage() {
     setPatientDetail(null)
     setShowModal(false)
     setIsEditingExisting(false)
+    createNewVersionOnceRef.current = false
     setSent(false)
     setSavedDraft(false)
     // location.key : reclic sidebar sur /devis alors qu’un dossier est ouvert
@@ -1436,6 +1439,7 @@ export default function DevisGestionnairePage() {
       setDrainageNb(syncFromRapport ? defaultDrainageNbFromRapport(rap) : (p.drainageNb ?? defaultDrainageNbFromRapport(rap)))
       setContentionDetail(p.contentionDetail ?? '')
       setIsEditingExisting(true)
+      createNewVersionOnceRef.current = false
     } else {
       setLignes(
         buildDefaultLignes({
@@ -1458,6 +1462,7 @@ export default function DevisGestionnairePage() {
       setDrainageNb(defaultDrainageNbFromRapport(rap))
       setContentionDetail('')
       setIsEditingExisting(false)
+      createNewVersionOnceRef.current = devisVersions.length > 0
     }
     setSent(false); setSavedDraft(false)
     setModalError(null)
@@ -1499,8 +1504,8 @@ export default function DevisGestionnairePage() {
           contentionDetail,
         }) || null,
       currency,
-      // Nouvelle fiche (pas édition) + devis déjà présents → nouvelle version (v1 conservée)
-      nouvelleVersion: !isEditingExisting && devisVersions.length > 0,
+      // Nouvelle fiche : 1er save = nouvelle version ; les suivants mettent à jour ce brouillon
+      nouvelleVersion: createNewVersionOnceRef.current && devisVersions.length > 0,
       rapportId: latestRapportId,
     }
   }
@@ -1604,6 +1609,8 @@ export default function DevisGestionnairePage() {
         const rest = (prev.devis ?? []).filter((d) => d.id !== savedDevis.id)
         return { ...prev, devis: [savedDevis, ...rest] }
       })
+      createNewVersionOnceRef.current = false
+      setIsEditingExisting(true)
       setSavedDraft(true)
       window.setTimeout(() => setSavedDraft(false), 2200)
 

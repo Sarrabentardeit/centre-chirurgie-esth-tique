@@ -550,16 +550,17 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
     orderBy: { dateCreation: 'desc' },
   })
 
-  const forceNewVersion = input.nouvelleVersion === true
-  // Si un brouillon existe mais pour un autre rapport → nouvelle version (ne pas écraser v1)
+  // Un seul brouillon actif par rapport : les auto-saves le mettent à jour.
+  // Nouvelle version seulement s’il n’y a pas de brouillon, ou s’il appartient à un autre rapport.
   const draftForOtherRapport =
     !!draft &&
     !!rapportId &&
     !!draft.rapportId &&
     draft.rapportId !== rapportId
+  const shouldCreateNew = !draft || draftForOtherRapport
 
   let devis
-  if (draft && !forceNewVersion && !draftForOtherRapport) {
+  if (!shouldCreateNew && draft) {
     const updateData: Parameters<typeof prisma.devis.update>[0]['data'] = {
       gestionnaireId,
       lignes: lignesJson,
@@ -683,13 +684,6 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
   await prisma.patient.update({
     where: { id: patient.id },
     data: { status: 'devis_envoye' },
-  })
-
-  await notifyGestionnaires({
-    type: 'success',
-    titre: 'Devis envoyé au patient',
-    message: `Le devis de ${patient.user.fullName} (${devis.numeroDevis ?? patient.dossierNumber}) a été envoyé.`,
-    lienAction: `/gestionnaire/devis/${patient.id}`,
   })
 
   const templates = await getTemplateMap()

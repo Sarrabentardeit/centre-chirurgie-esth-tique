@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
-import { sendPatientChatMessageEmail } from '../../lib/mailer.js'
+import { sendPatientChatMessageEmail, sendNotificationEmail } from '../../lib/mailer.js'
 import {
   publishChatToStaff,
   publishChatToUser,
@@ -15,19 +15,44 @@ import type { MarkReadInput, SendMessageInput } from './chat.schema.js'
 async function publishThreadEvent(
   patientId: string,
   event: ChatRealtimeEvent,
+  opts?: { includePatient?: boolean; staffRoles?: UserRole[] },
 ) {
+  const includePatient = opts?.includePatient !== false
+  const staffRoles = opts?.staffRoles ?? (['medecin', 'gestionnaire'] as UserRole[])
   const [patient, staff] = await Promise.all([
-    prisma.patient.findUnique({ where: { id: patientId }, select: { userId: true } }),
-    prisma.user.findMany({
-      where: { role: { in: ['medecin', 'gestionnaire'] } },
-      select: { id: true },
-    }),
+    includePatient
+      ? prisma.patient.findUnique({ where: { id: patientId }, select: { userId: true } })
+      : Promise.resolve(null),
+    staffRoles.length > 0
+      ? prisma.user.findMany({
+          where: { role: { in: staffRoles } },
+          select: { id: true },
+        })
+      : Promise.resolve([]),
   ])
   const userIds = [
     ...(patient ? [patient.userId] : []),
     ...staff.map((s) => s.id),
   ]
+  if (userIds.length === 0) return
   publishChatToUsers(userIds, event)
+}
+
+async function lastPublicStaffRole(patientId: string): Promise<'medecin' | 'gestionnaire' | null> {
+  const last = await prisma.message.findFirst({
+    where: {
+      patientId,
+      staffOnly: false,
+      deletedForAll: false,
+      expediteurRole: { in: ['medecin', 'gestionnaire'] },
+    },
+    orderBy: { dateEnvoi: 'desc' },
+    select: { expediteurRole: true },
+  })
+  if (last?.expediteurRole === 'medecin' || last?.expediteurRole === 'gestionnaire') {
+    return last.expediteurRole
+  }
+  return null
 }
 
 /** True si le message chat est le PDF d’un devis (pièce jointe sendDevis). */
@@ -361,6 +386,38 @@ async function getAccessibleMessage(userId: string, role: UserRole, messageId: s
   return message
 }
 
+async function firstMedecinPublicMessageAt(patientId: string): Promise<Date | null> {
+  const first = await prisma.message.findFirst({
+    where: {
+      patientId,
+      expediteurRole: 'medecin',
+      staffOnly: false,
+      deletedForAll: false,
+    },
+    orderBy: { dateEnvoi: 'asc' },
+    select: { dateEnvoi: true },
+  })
+  return first?.dateEnvoi ?? null
+}
+
+/** Dossiers où le Dr a déjà écrit à la patiente (les fils Houda restent invisibles). */
+async function medecinStartedPatientThreads(): Promise<Map<string, Date>> {
+  const rows = await prisma.message.groupBy({
+    by: ['patientId'],
+    where: {
+      expediteurRole: 'medecin',
+      staffOnly: false,
+      deletedForAll: false,
+    },
+    _min: { dateEnvoi: true },
+  })
+  const map = new Map<string, Date>()
+  for (const r of rows) {
+    if (r._min.dateEnvoi) map.set(r.patientId, r._min.dateEnvoi)
+  }
+  return map
+}
+
 async function notifyStaffNewPatientMessage(input: {
   patientId: string
   patientName: string
@@ -374,18 +431,66 @@ async function notifyStaffNewPatientMessage(input: {
   const titre = 'Nouveau message chat'
   const message = `${input.patientName} (${input.dossierNumber}) : ${input.preview.slice(0, 120)}`
 
+  // Dr : uniquement si la patiente lui répond (dernier message équipe = médecin), pas le fil Houda
+  const lastStaff = await lastPublicStaffRole(input.patientId)
+  const notifyDoctor = lastStaff === 'medecin'
+  const recipients = staff.filter((u) => u.role === 'gestionnaire' || notifyDoctor)
+
   await Promise.all([
-    ...staff.map((u) =>
+    ...recipients.map((u) =>
       createUserNotification({
         userId: u.id,
         type: 'info',
         titre,
         message,
-        lienAction: u.role === 'medecin' ? '/medecin/chat' : '/gestionnaire/chat',
+        lienAction: u.role === 'medecin' ? '/medecin/chat?channel=patient' : '/gestionnaire/chat?channel=patient',
         kind: 'chat',
       }).catch(() => undefined)
     ),
   ])
+}
+
+async function notifyStaffPeerInternalMessage(input: {
+  senderRole: UserRole
+  patientName: string
+  dossierNumber: string
+  preview: string
+  /** Email au Dr uniquement si Houda lui écrit (pas l’inverse, pas le fil patiente). */
+  email?: boolean
+}) {
+  const peerRole: UserRole = input.senderRole === 'medecin' ? 'gestionnaire' : 'medecin'
+  const peers = await prisma.user.findMany({
+    where: { role: peerRole },
+    select: { id: true, role: true, email: true },
+  })
+  if (peers.length === 0) return
+  const titre = input.senderRole === 'gestionnaire' ? 'Message de Houda' : 'Message du Dr Chennoufi'
+  const message = `${input.patientName} (${input.dossierNumber}) : ${input.preview.slice(0, 120)}`
+  const lienAction = peerRole === 'medecin' ? '/medecin/chat?channel=equipe' : '/gestionnaire/chat?channel=equipe'
+  await Promise.all(
+    peers.map((u) =>
+      createUserNotification({
+        userId: u.id,
+        type: 'info',
+        titre,
+        message,
+        lienAction,
+        kind: 'chat',
+      }).catch(() => undefined),
+    ),
+  )
+  if (input.email && input.senderRole === 'gestionnaire') {
+    await sendNotificationEmail({
+      titre,
+      message,
+      lienAction,
+      audience: 'medecin',
+      extraTo: peers.map((p) => p.email),
+      ctaLabel: 'Ouvrir le chat →',
+    }).catch((err) => {
+      console.warn('[chat] Email médecin (message Houda) non envoyé', err)
+    })
+  }
 }
 
 async function notifyPatientNewStaffMessage(input: {
@@ -527,14 +632,19 @@ export async function listConversations(
     }
   }
 
-  /** Médecin : chat patients = uniquement patient ↔ médecin (pas les messages gestionnaire). */
+  /** Médecin : uniquement les dossiers où il a lui-même écrit (pas l’historique Houda). */
   const medecinPatientOnly = role === 'medecin'
+  const medecinStarted = medecinPatientOnly ? await medecinStartedPatientThreads() : null
+  if (medecinPatientOnly && medecinStarted && medecinStarted.size === 0) {
+    return { conversations: [] }
+  }
 
   const threadWhere = medecinPatientOnly
     ? {
         staffOnly: false,
         deletedForAll: false,
-        expediteurRole: { in: ['patient', 'medecin'] },
+        expediteurRole: { in: ['patient', 'medecin'] as const },
+        patientId: { in: [...medecinStarted!.keys()] },
       }
     : { staffOnly: false, deletedForAll: false }
 
@@ -561,6 +671,14 @@ export async function listConversations(
         deletedForAll: false,
         staffOnly: false,
         expediteurRole: 'patient',
+        ...(medecinPatientOnly && medecinStarted
+          ? {
+              OR: [...medecinStarted.entries()].map(([id, at]) => ({
+                patientId: id,
+                dateEnvoi: { gte: at },
+              })),
+            }
+          : {}),
       },
       _count: { id: true },
     }),
@@ -574,6 +692,9 @@ export async function listConversations(
                   staffOnly: false,
                   deletedForAll: false,
                   expediteurRole: { in: ['patient', 'medecin'] },
+                  ...(medecinStarted?.get(id)
+                    ? { dateEnvoi: { gte: medecinStarted.get(id) } }
+                    : {}),
                 }
               : { staffOnly: false, deletedForAll: false }),
           },
@@ -685,11 +806,21 @@ export async function getMessages(
                 }
               : {}
 
+  let medecinVisibleFrom: Date | undefined
+  if (role === 'medecin' && channel !== 'equipe') {
+    const from = await firstMedecinPublicMessageAt(patientId)
+    if (!from) {
+      return { patientId, messages: [] }
+    }
+    medecinVisibleFrom = from
+  }
+
   const messages = await prisma.message.findMany({
     where: {
       patientId,
       hiddenBy: { none: { userId } },
       ...staffFilter,
+      ...(medecinVisibleFrom ? { dateEnvoi: { gte: medecinVisibleFrom } } : {}),
     },
     orderBy: { dateEnvoi: 'asc' },
     include: {
@@ -769,7 +900,6 @@ export async function sendMessage(
       preview,
     })
   } else if (staffOnly) {
-    // Interne : marquer lus les messages équipe de l’autre, ne pas notifier la patiente
     await prisma.message.updateMany({
       where: {
         patientId,
@@ -779,6 +909,13 @@ export async function sendMessage(
         expediteurId: { not: userId },
       },
       data: { lu: true },
+    })
+    void notifyStaffPeerInternalMessage({
+      senderRole: role,
+      patientName: patient.user.fullName,
+      dossierNumber: patient.dossierNumber,
+      preview,
+      email: role === 'gestionnaire',
     })
   } else {
     await prisma.message.updateMany({
@@ -802,13 +939,36 @@ export async function sendMessage(
   }
 
   const mapped = mapMessage(message)
-  void publishThreadEvent(patientId, {
-    type: 'chat:message',
+  const lastStaff = role === 'patient' ? await lastPublicStaffRole(patientId) : null
+  const staffRoles: UserRole[] = staffOnly
+    ? ['medecin', 'gestionnaire']
+    : role === 'patient'
+      ? lastStaff === 'medecin'
+        ? ['medecin', 'gestionnaire']
+        : ['gestionnaire']
+      : role === 'medecin'
+        ? ['medecin', 'gestionnaire']
+        : ['gestionnaire']
+
+  void publishThreadEvent(
     patientId,
-    messageId: mapped.id,
-    senderId: userId,
-  })
-  publishChatToStaff({ type: 'chat:unread', patientId })
+    {
+      type: 'chat:message',
+      patientId,
+      messageId: mapped.id,
+      senderId: userId,
+    },
+    { includePatient: !staffOnly, staffRoles },
+  )
+  publishChatToUsers(
+    (
+      await prisma.user.findMany({
+        where: { role: { in: staffRoles } },
+        select: { id: true },
+      })
+    ).map((u) => u.id),
+    { type: 'chat:unread', patientId },
+  )
   if (role !== 'patient' && !staffOnly) {
     publishChatToUser(patient.user.id, { type: 'chat:unread', patientId })
   }
@@ -916,32 +1076,35 @@ export async function getUnreadCount(userId: string, role: UserRole) {
     return { unread }
   }
 
-  // Médecin : messages patiente + demandes internes gestionnaire
+  // Médecin : uniquement ses fils patiente + demandes internes Houda
   // Gestionnaire : messages patiente + réponses internes médecin
-  const unread = await prisma.message.count({
-    where: {
-      lu: false,
-      deletedForAll: false,
-      OR: [
-        { staffOnly: false, expediteurRole: 'patient' },
-        {
-          staffOnly: true,
-          expediteurRole: role === 'medecin' ? 'gestionnaire' : 'medecin',
-        },
-      ],
-    },
-  })
-
   const peerRole = role === 'medecin' ? 'gestionnaire' : 'medecin'
+  const medecinStarted = role === 'medecin' ? await medecinStartedPatientThreads() : null
+  const medecinPatientUnreadWhere =
+    role === 'medecin'
+      ? medecinStarted && medecinStarted.size > 0
+        ? {
+            lu: false,
+            deletedForAll: false,
+            staffOnly: false,
+            expediteurRole: 'patient' as const,
+            OR: [...medecinStarted.entries()].map(([id, at]) => ({
+              patientId: id,
+              dateEnvoi: { gte: at },
+            })),
+          }
+        : null
+      : {
+          lu: false,
+          deletedForAll: false,
+          staffOnly: false,
+          expediteurRole: 'patient' as const,
+        }
+
   const [patientUnread, equipeUnread, medecinInPatientUnread] = await Promise.all([
-    prisma.message.count({
-      where: {
-        lu: false,
-        deletedForAll: false,
-        staffOnly: false,
-        expediteurRole: 'patient',
-      },
-    }),
+    medecinPatientUnreadWhere
+      ? prisma.message.count({ where: medecinPatientUnreadWhere })
+      : Promise.resolve(0),
     prisma.message.count({
       where: {
         lu: false,
@@ -963,7 +1126,7 @@ export async function getUnreadCount(userId: string, role: UserRole) {
   ])
 
   return {
-    unread,
+    unread: patientUnread + equipeUnread,
     patientUnread,
     equipeUnread,
     /** Messages médecin non lus dans le canal patiente (filtre « Médecin »). */
@@ -1013,13 +1176,23 @@ export async function sendStaffOnlyMessage(
   await prisma.$executeRaw`UPDATE messages SET dossier_link = true WHERE id = ${message.id}`.catch(() => undefined)
 
   const mapped = { ...mapMessage(message), dossierLink: true }
-  void publishThreadEvent(patientId, {
-    type: 'chat:message',
+  void publishThreadEvent(
     patientId,
-    messageId: mapped.id,
-    senderId: actorId,
-  })
+    {
+      type: 'chat:message',
+      patientId,
+      messageId: mapped.id,
+      senderId: actorId,
+    },
+    { includePatient: false, staffRoles: ['medecin', 'gestionnaire'] },
+  )
   publishChatToStaff({ type: 'chat:unread', patientId })
+  void notifyStaffPeerInternalMessage({
+    senderRole: expediteurRole,
+    patientName: patient.user.fullName,
+    dossierNumber: patient.dossierNumber,
+    preview: text.slice(0, 120),
+  })
 
   return { message: mapped, patient }
 }

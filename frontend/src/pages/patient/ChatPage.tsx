@@ -189,6 +189,10 @@ export default function ChatPage() {
   const skipAutoReadUntilRef = useRef(0)
   const conversationsRef = useRef<ChatConversation[]>([])
   const loadSeqRef = useRef(0)
+  const convSeqRef = useRef(0)
+  const staffTabRef = useRef(staffTab)
+  const lastPatientIdRef = useRef('')
+  staffTabRef.current = staffTab
 
   useEffect(() => {
     conversationsRef.current = conversations
@@ -237,31 +241,34 @@ export default function ChatPage() {
 
   const loadConversations = useCallback(async (opts?: { keepSelection?: boolean }) => {
     if (!isStaff) return
+    const tab = staffTabRef.current
+    if (tab === 'nouveau') return
+    const channel = tab === 'equipe' ? 'equipe' : 'patient'
+    const seq = ++convSeqRef.current
     try {
-      const channel = staffTab === 'equipe' ? 'equipe' : 'patient'
       const res = await chatApi.getConversations(channel)
+      if (seq !== convSeqRef.current) return
+      if (staffTabRef.current !== tab) return
       setConversations(res.conversations)
-      if (staffTab === 'equipe') {
+      if (tab === 'equipe') {
         setSelectedPatientId(EQUIPE_THREAD_ID)
         if (!opts?.keepSelection) setMobileShowThread(true)
         return
       }
-      if (staffTab === 'nouveau') {
-        // Ne pas forcer une conversation existante pendant le choix d’une nouvelle patiente
-        return
-      }
       const fromUrl = searchParams.get('patientId')
       setSelectedPatientId((prev) => {
-        // Garder la sélection courante (y compris une patiente sans message encore)
         const validPrev = prev && prev !== EQUIPE_THREAD_ID ? prev : ''
+        if (opts?.keepSelection && validPrev) return validPrev
         if (validPrev) return validPrev
+        if (lastPatientIdRef.current) return lastPatientIdRef.current
         if (fromUrl && fromUrl !== EQUIPE_THREAD_ID) return fromUrl
         return res.conversations[0]?.patientId || ''
       })
     } catch (e) {
+      if (seq !== convSeqRef.current) return
       setError(e instanceof Error ? e.message : 'Impossible de charger les conversations.')
     }
-  }, [isStaff, searchParams, staffTab])
+  }, [isStaff, searchParams])
 
   const refreshChannelBadges = useCallback(async () => {
     if (!isStaff) return
@@ -296,6 +303,13 @@ export default function ChatPage() {
   useEffect(() => {
     const fromUrl = searchParams.get('patientId')
     const ch = searchParams.get('channel')
+    if (ch === 'nouveau') {
+      setStaffTab('nouveau')
+      setSelectedPatientId('')
+      setMessages([])
+      setLoading(false)
+      return
+    }
     if (ch === 'equipe') {
       setStaffTab('equipe')
       setSelectedPatientId(EQUIPE_THREAD_ID)
@@ -304,8 +318,12 @@ export default function ChatPage() {
       if (fromUrl && fromUrl !== EQUIPE_THREAD_ID) setEquipeFocusPatientId(fromUrl)
       return
     }
+    if (ch === 'patient') {
+      setStaffTab('patient')
+    }
     if (fromUrl && isStaff && fromUrl !== EQUIPE_THREAD_ID) {
-      setSelectedPatientId((prev) => (prev === EQUIPE_THREAD_ID ? prev : (prev || fromUrl)))
+      lastPatientIdRef.current = fromUrl
+      setSelectedPatientId((prev) => (prev === EQUIPE_THREAD_ID ? fromUrl : (prev || fromUrl)))
     }
   }, [searchParams, isStaff])
 
@@ -324,22 +342,23 @@ export default function ChatPage() {
   }, [isStaff])
 
   const loadMessages = useCallback(async (patientId?: string, silent = false) => {
-    const seq = ++loadSeqRef.current
-    const channel = isPatient ? 'all' : staffTab === 'equipe' ? 'equipe' : 'patient'
+    const tab = staffTabRef.current
+    const channel = isPatient ? 'all' : tab === 'equipe' ? 'equipe' : 'patient'
     const requestPatientId = isPatient
       ? undefined
-      : staffTab === 'equipe'
+      : tab === 'equipe'
         ? EQUIPE_THREAD_ID
         : patientId && patientId !== EQUIPE_THREAD_ID
           ? patientId
           : undefined
 
-    if (!isPatient && !requestPatientId) {
+    if (!isPatient && (tab === 'nouveau' || !requestPatientId)) {
       setMessages([])
       setLoading(false)
       return
     }
 
+    const seq = ++loadSeqRef.current
     if (!silent) setLoading(true)
     try {
       const res = await chatApi.getMessages(requestPatientId, channel)
@@ -357,7 +376,7 @@ export default function ChatPage() {
       }
       lastMessageIdRef.current = last?.id ?? null
       setMessages(res.messages)
-      if (staffTab === 'equipe' && isStaff) {
+      if (tab === 'equipe' && isStaff) {
         setEquipeFocusPatientId((prev) => {
           if (prev) return prev
           const fromUrl = searchParams.get('patientId')
@@ -415,22 +434,27 @@ export default function ChatPage() {
     void loadDirectory()
   }, [loadConversations, loadDirectory])
 
-  // Changement Patient ↔ Équipe / Nouvelle : recharger la liste
+  // Changement Patient ↔ Équipe / Nouvelle : recharger la liste du bon canal
   useEffect(() => {
     if (!isStaff) return
     setListFilter('all')
+    setThreadSearch('')
+    setShowThreadSearch(false)
+    setSearchPatient('')
     if (staffTab === 'equipe') {
       setSelectedPatientId(EQUIPE_THREAD_ID)
       setMessages([])
       setLoading(true)
+      void loadConversations({ keepSelection: true })
     } else if (staffTab === 'nouveau') {
+      setSelectedPatientId('')
       setMessages([])
       setLoading(false)
     } else {
       setMessages([])
       setLoading(true)
+      void loadConversations({ keepSelection: true })
     }
-    void loadConversations({ keepSelection: true })
   }, [staffTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -541,7 +565,6 @@ export default function ChatPage() {
 
   const selectPatient = (patientId: string) => {
     setListFilter('all')
-    // Fil unifié Demandes
     if (patientId === EQUIPE_THREAD_ID) {
       setStaffTab('equipe')
       setSelectedPatientId(EQUIPE_THREAD_ID)
@@ -558,9 +581,9 @@ export default function ChatPage() {
       return
     }
 
+    lastPatientIdRef.current = patientId
     setSelectedPatientId(patientId)
     setMobileShowThread(true)
-    // « Nouvelle » (ou autre) → chat patients médecin ↔ patiente
     if (staffTab === 'nouveau' || staffTab === 'equipe') {
       setStaffTab('patient')
     }
@@ -569,7 +592,6 @@ export default function ChatPage() {
     setThreadSearch('')
     setShowThreadSearch(false)
     clearPendingFile()
-    // Synchroniser l’URL pour ne pas retomber sur un ancien patientId
     navigate(
       {
         pathname: window.location.pathname,
@@ -583,6 +605,9 @@ export default function ChatPage() {
   const goToStaffTab = (tab: StaffTab) => {
     setListFilter('all')
     setError(null)
+    if (staffTab === 'patient' && selectedPatientId && selectedPatientId !== EQUIPE_THREAD_ID) {
+      lastPatientIdRef.current = selectedPatientId
+    }
     setStaffTab(tab)
     if (tab === 'equipe') {
       setSelectedPatientId(EQUIPE_THREAD_ID)
@@ -593,8 +618,26 @@ export default function ChatPage() {
       )
       return
     }
+    if (tab === 'nouveau') {
+      setSelectedPatientId('')
+      setMessages([])
+      setLoading(false)
+      setMobileShowThread(false)
+      navigate(
+        { pathname: window.location.pathname, search: '?channel=nouveau' },
+        { replace: true },
+      )
+      return
+    }
+    const restore = lastPatientIdRef.current
+    if (restore) setSelectedPatientId(restore)
     navigate(
-      { pathname: window.location.pathname, search: tab === 'patient' ? '?channel=patient' : '' },
+      {
+        pathname: window.location.pathname,
+        search: restore
+          ? `?patientId=${encodeURIComponent(restore)}&channel=patient`
+          : '?channel=patient',
+      },
       { replace: true },
     )
   }
@@ -793,16 +836,32 @@ export default function ChatPage() {
   }
 
   const filteredConversations = useMemo(() => {
+    if (staffTab === 'equipe') {
+      const equipe = conversations.filter((c) => c.patientId === EQUIPE_THREAD_ID || c.unified)
+      if (equipe.length > 0) return equipe
+      return [{
+        patientId: EQUIPE_THREAD_ID,
+        dossierNumber: 'Équipe',
+        fullName: isMedecin ? 'Houda' : 'Dr Chennoufi',
+        email: isMedecin ? 'Gestionnaire' : 'Médecin',
+        unreadCount: equipeUnread,
+        lastMessageAt: new Date(0).toISOString(),
+        lastMessagePreview: '',
+        lastExpediteurRole: null,
+        channel: 'equipe' as const,
+        unified: true,
+      }]
+    }
     const q = searchPatient.trim()
     let list = q ? conversations.filter((c) => matchesQuery(q, c)) : conversations
-    if (staffTab !== 'equipe' && listFilter === 'unread') {
+    if (listFilter === 'unread') {
       list = list.filter((c) => c.unreadCount > 0)
     }
     return [...list].sort((a, b) => {
       if (b.unreadCount !== a.unreadCount) return b.unreadCount - a.unreadCount
       return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
     })
-  }, [conversations, searchPatient, listFilter, staffTab])
+  }, [conversations, searchPatient, listFilter, staffTab, isMedecin, equipeUnread])
 
   const newPatients = useMemo(() => {
     const fromConv = new Set(conversations.map((c) => c.patientId))
@@ -860,7 +919,7 @@ export default function ChatPage() {
         : activeDirectory
           ? `${activeDirectory.dossierNumber} · ${activeDirectory.email}`
           : isMedecin
-            ? 'Conversation privée avec la patiente'
+            ? 'Écrire à la patiente (sans le fil Houda)'
             : 'Chat avec la patiente'
 
   const openPatientDossier = (patientId?: string) => {
@@ -903,7 +962,7 @@ export default function ChatPage() {
                 : staffTab === 'nouveau'
                   ? 'Nouvelle conversation'
                   : isMedecin
-                    ? 'Chat médecin ↔ patiente'
+                    ? 'Écrire à une patiente'
                     : 'Canal patiente'}
               {staffTab === 'patient' && (
                 <>
@@ -1317,8 +1376,8 @@ export default function ChatPage() {
                   : staffTab === 'equipe'
                     ? 'Canal interne — invisible pour la patiente.'
                     : isMedecin
-                      ? 'Conversation privée avec la patiente uniquement.'
-                      : 'Échanges avec la patiente. Les demandes internes sont dans « Équipe ».'}
+                      ? 'Fil privé avec la patiente. Les messages de Houda ne s’affichent pas ici. Utilisez « Nouvelle » pour lui écrire.'
+                      : 'Échanges avec la patiente. Les demandes internes sont dans « Dr ».'}
               </p>
             </div>
           ) : (
@@ -1581,11 +1640,13 @@ export default function ChatPage() {
             placeholder={
               isStaff && !selectedPatientId
                 ? 'Sélectionnez une patiente…'
-                : isStaff && staffTab === 'equipe'
+                  : isStaff && staffTab === 'equipe'
                   ? isMedecin
-                    ? 'Répondre à la gestionnaire… (Entrée pour envoyer)'
+                    ? 'Répondre à Houda… (Entrée pour envoyer)'
                     : 'Écrire au médecin… (Entrée pour envoyer)'
-                  : 'Écrire un message… (Entrée pour envoyer)'
+                  : isMedecin
+                    ? 'Écrire à la patiente… (Entrée pour envoyer)'
+                    : 'Écrire un message… (Entrée pour envoyer)'
             }
             disabled={sending || uploading || (isStaff && !selectedPatientId)}
             className="min-h-11 max-h-32 resize-none flex-1 rounded-xl text-sm py-2.5"

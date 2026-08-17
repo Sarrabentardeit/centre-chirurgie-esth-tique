@@ -643,7 +643,7 @@ export async function listConversations(
     ? {
         staffOnly: false,
         deletedForAll: false,
-        expediteurRole: { in: ['patient', 'medecin'] as const },
+        expediteurRole: { in: ['patient', 'medecin'] as string[] },
         patientId: { in: [...medecinStarted!.keys()] },
       }
     : { staffOnly: false, deletedForAll: false }
@@ -732,7 +732,7 @@ export async function listConversations(
         fullName: p.user.fullName,
         email: p.user.email,
         unreadCount: unreadMap.get(p.id) ?? 0,
-        lastMessageAt: (last?.dateEnvoi ?? g._max.dateEnvoi ?? new Date()).toISOString(),
+        lastMessageAt: (last?.dateEnvoi ?? g._max?.dateEnvoi ?? new Date()).toISOString(),
         lastMessagePreview: preview.slice(0, 100),
         lastExpediteurRole: last?.expediteurRole ?? null,
         channel: 'patient' as const,

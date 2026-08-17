@@ -442,6 +442,8 @@ export interface ChatMessage {
   pinnedAt?: string | null
   /** Message interne équipe — invisible pour la patiente. */
   staffOnly?: boolean
+  /** Bouton ouvrir dossier (messages auto uniquement). */
+  dossierLink?: boolean
   /** Contexte dossier (fil unifié Équipe). */
   patientNom?: string | null
   dossierNumber?: string | null
@@ -473,7 +475,13 @@ export interface ChatPatientOption {
 
 export const chatApi = {
   getUnread: () =>
-    request<{ ok: true; unread: number }>('/chat/unread'),
+    request<{
+      ok: true
+      unread: number
+      patientUnread?: number
+      equipeUnread?: number
+      medecinUnread?: number
+    }>('/chat/unread'),
 
   getConversations: (channel: 'patient' | 'equipe' = 'patient') =>
     request<{ ok: true; conversations: ChatConversation[] }>(

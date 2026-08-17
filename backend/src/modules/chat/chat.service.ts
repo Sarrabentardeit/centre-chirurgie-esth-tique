@@ -270,6 +270,7 @@ function mapMessage(m: {
   pinned?: boolean
   pinnedAt?: Date | null
   staffOnly?: boolean
+  dossierLink?: boolean
   expediteur?: { fullName: string } | null
   patient?: {
     dossierNumber: string
@@ -297,6 +298,7 @@ function mapMessage(m: {
     pinned: Boolean(m.pinned),
     pinnedAt: m.pinnedAt?.toISOString() ?? null,
     staffOnly,
+    dossierLink: staffOnly && Boolean(m.dossierLink),
     patientNom: m.patient?.user.fullName ?? null,
     dossierNumber: m.patient?.dossierNumber ?? null,
   }
@@ -929,7 +931,44 @@ export async function getUnreadCount(userId: string, role: UserRole) {
       ],
     },
   })
-  return { unread }
+
+  const peerRole = role === 'medecin' ? 'gestionnaire' : 'medecin'
+  const [patientUnread, equipeUnread, medecinInPatientUnread] = await Promise.all([
+    prisma.message.count({
+      where: {
+        lu: false,
+        deletedForAll: false,
+        staffOnly: false,
+        expediteurRole: 'patient',
+      },
+    }),
+    prisma.message.count({
+      where: {
+        lu: false,
+        deletedForAll: false,
+        staffOnly: true,
+        expediteurRole: peerRole,
+      },
+    }),
+    role === 'gestionnaire'
+      ? prisma.message.count({
+          where: {
+            lu: false,
+            deletedForAll: false,
+            staffOnly: false,
+            expediteurRole: 'medecin',
+          },
+        })
+      : Promise.resolve(0),
+  ])
+
+  return {
+    unread,
+    patientUnread,
+    equipeUnread,
+    /** Messages médecin non lus dans le canal patiente (filtre « Médecin »). */
+    medecinUnread: medecinInPatientUnread,
+  }
 }
 
 /**
@@ -937,9 +976,10 @@ export async function getUnreadCount(userId: string, role: UserRole) {
  * Invisible pour la patiente.
  */
 export async function sendStaffOnlyMessage(
-  gestionnaireId: string,
+  actorId: string,
   patientId: string,
   contenu: string,
+  expediteurRole: 'gestionnaire' | 'medecin' = 'gestionnaire',
 ) {
   const text = contenu.trim()
   if (!text) throw new AppError(400, 'EMPTY_MESSAGE', 'Le message ne peut pas être vide.')
@@ -953,8 +993,8 @@ export async function sendStaffOnlyMessage(
   const message = await prisma.message.create({
     data: {
       patientId,
-      expediteurId: gestionnaireId,
-      expediteurRole: 'gestionnaire',
+      expediteurId: actorId,
+      expediteurRole,
       contenu: text,
       lu: false,
       staffOnly: true,
@@ -970,12 +1010,14 @@ export async function sendStaffOnlyMessage(
     },
   })
 
-  const mapped = mapMessage(message)
+  await prisma.$executeRaw`UPDATE messages SET dossier_link = true WHERE id = ${message.id}`.catch(() => undefined)
+
+  const mapped = { ...mapMessage(message), dossierLink: true }
   void publishThreadEvent(patientId, {
     type: 'chat:message',
     patientId,
     messageId: mapped.id,
-    senderId: gestionnaireId,
+    senderId: actorId,
   })
   publishChatToStaff({ type: 'chat:unread', patientId })
 

@@ -17,6 +17,7 @@ import {
 import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
+import { sendStaffOnlyMessage } from '../chat/chat.service.js'
 
 function notifyGestionnaires(input: {
   titre: string
@@ -583,7 +584,10 @@ export async function updatePatientStatus(
   patientId: string,
   input: UpdatePatientStatusInput,
 ) {
-  const patient = await prisma.patient.findUnique({ where: { id: patientId } })
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    include: { user: { select: { fullName: true } } },
+  })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
   const goingToAbstention = input.status === 'abstention' && patient.status !== 'abstention'
@@ -610,6 +614,29 @@ export async function updatePatientStatus(
     before: { status: patient.status },
     after: { status: updated.status },
   }).catch(() => undefined)
+
+  if (goingToAbstention) {
+    const fullName = patient.user.fullName
+    const dossier = patient.dossierNumber
+    const chatMessage =
+      `Dossier classé en abstention.\n\n` +
+      `Patiente : ${fullName} (${dossier}).\n\n` +
+      `Merci de traiter cette décision (message à la patiente si besoin). Les anciens rapports et devis restent en historique.`
+
+    await sendStaffOnlyMessage(actorId, patientId, chatMessage, 'medecin').catch((err) => {
+      console.warn('[updatePatientStatus] Message interne abstention non envoyé', err)
+    })
+
+    await notifyGestionnaires({
+      type: 'warning',
+      titre: 'Dossier classé en abstention',
+      message: `Le Dr Chennoufi a classé le dossier de ${fullName} (${dossier}) en abstention. Merci de le traiter.`,
+      lienAction: `/gestionnaire/devis/${patientId}`,
+      email: true,
+    }).catch((err) => {
+      console.warn('[updatePatientStatus] Notification abstention gestionnaire non envoyée', err)
+    })
+  }
 
   return { patient: updated }
 }

@@ -349,6 +349,8 @@ model Message {
   pinnedById      String?   @map("pinned_by_id")
   /** Visible uniquement équipe (médecin / gestionnaire) — jamais la patiente. */
   staffOnly       Boolean   @default(false) @map("staff_only")
+  /** Bouton « Ouvrir le dossier » — messages automatiques uniquement. */
+  dossierLink     Boolean   @default(false) @map("dossier_link")
 
   patient    Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
   expediteur User            @relation(fields: [expediteurId], references: [id], onDelete: Cascade)

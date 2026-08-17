@@ -59,6 +59,42 @@ function roleLabel(role: string) {
   return 'Patiente'
 }
 
+function lastSenderShort(role: string | null | undefined, myRole?: string) {
+  if (!role) return null
+  if (myRole && role === myRole) return 'Vous'
+  if (role === 'medecin') return 'Dr'
+  if (role === 'patient') return 'Patiente'
+  if (role === 'gestionnaire') return 'Houda'
+  return roleLabel(role)
+}
+
+function UnreadBadge({ count, className }: { count: number; className?: string }) {
+  if (count <= 0) return null
+  return (
+    <span
+      className={cn(
+        'ml-1 inline-flex min-w-[16px] h-4 px-1 items-center justify-center rounded-full bg-red-600 text-white text-[9px] font-bold leading-none',
+        className,
+      )}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
+/** Bouton dossier : messages auto (abstention, demande rapport), pas un « salut ». */
+function isDossierActionMessage(m: { dossierLink?: boolean; contenu?: string; staffOnly?: boolean }) {
+  if (!m.staffOnly) return false
+  if (m.dossierLink) return true
+  const t = (m.contenu ?? '').toLowerCase()
+  return (
+    t.includes('dossier classé en abstention')
+    || t.includes('nouveau rapport')
+    || t.includes('pouvez-vous générer')
+    || t.includes('le devis v1 reste conservé')
+  )
+}
+
 function relativeTime(iso: string) {
   const d = new Date(iso).getTime()
   const diff = Date.now() - d
@@ -129,6 +165,8 @@ export default function ChatPage() {
     return useAuthStore.getState().user?.role === 'medecin' ? 'equipe' : 'patient'
   })
   const [listFilter, setListFilter] = useState<ListFilter>('all')
+  const [equipeUnread, setEquipeUnread] = useState(0)
+  const [patientUnread, setPatientUnread] = useState(0)
   const [pendingFile, setPendingFile] = useState<{ file: File; previewUrl?: string } | null>(null)
   const [menu, setMenu] = useState<{
     messageId: string
@@ -150,6 +188,7 @@ export default function ChatPage() {
   const searchTimerRef = useRef<number | null>(null)
   const skipAutoReadUntilRef = useRef(0)
   const conversationsRef = useRef<ChatConversation[]>([])
+  const loadSeqRef = useRef(0)
 
   useEffect(() => {
     conversationsRef.current = conversations
@@ -224,19 +263,49 @@ export default function ChatPage() {
     }
   }, [isStaff, searchParams, staffTab])
 
+  const refreshChannelBadges = useCallback(async () => {
+    if (!isStaff) return
+    try {
+      const r = await chatApi.getUnread()
+      setPatientUnread(r.patientUnread ?? 0)
+      setEquipeUnread(r.equipeUnread ?? 0)
+    } catch {
+      /* silencieux */
+    }
+  }, [isStaff])
+
+  useEffect(() => {
+    if (!isStaff) return
+    void refreshChannelBadges()
+  }, [isStaff, refreshChannelBadges, staffTab, conversations])
+
+  useEffect(() => {
+    if (!isStaff || isMedecin) return
+    if (searchParams.get('channel')) return
+    if (searchParams.get('patientId')) return
+    void chatApi.getUnread().then((r) => {
+      if ((r.equipeUnread ?? 0) > 0) {
+        setStaffTab('equipe')
+        setSelectedPatientId(EQUIPE_THREAD_ID)
+        setListFilter('all')
+        setMobileShowThread(true)
+      }
+    }).catch(() => undefined)
+  }, [isStaff, isMedecin, searchParams])
+
   useEffect(() => {
     const fromUrl = searchParams.get('patientId')
     const ch = searchParams.get('channel')
     if (ch === 'equipe') {
       setStaffTab('equipe')
       setSelectedPatientId(EQUIPE_THREAD_ID)
+      setListFilter('all')
       setMobileShowThread(true)
       if (fromUrl && fromUrl !== EQUIPE_THREAD_ID) setEquipeFocusPatientId(fromUrl)
       return
     }
-    // Ne pas écraser une sélection déjà faite (ex. Nouvelle → patiente)
     if (fromUrl && isStaff && fromUrl !== EQUIPE_THREAD_ID) {
-      setSelectedPatientId((prev) => (prev && prev !== EQUIPE_THREAD_ID ? prev : fromUrl))
+      setSelectedPatientId((prev) => (prev === EQUIPE_THREAD_ID ? prev : (prev || fromUrl)))
     }
   }, [searchParams, isStaff])
 
@@ -255,14 +324,28 @@ export default function ChatPage() {
   }, [isStaff])
 
   const loadMessages = useCallback(async (patientId?: string, silent = false) => {
+    const seq = ++loadSeqRef.current
+    const channel = isPatient ? 'all' : staffTab === 'equipe' ? 'equipe' : 'patient'
+    const requestPatientId = isPatient
+      ? undefined
+      : staffTab === 'equipe'
+        ? EQUIPE_THREAD_ID
+        : patientId && patientId !== EQUIPE_THREAD_ID
+          ? patientId
+          : undefined
+
+    if (!isPatient && !requestPatientId) {
+      setMessages([])
+      setLoading(false)
+      return
+    }
+
     if (!silent) setLoading(true)
     try {
-      const channel = isPatient ? 'all' : staffTab === 'equipe' ? 'equipe' : 'patient'
-      const res = await chatApi.getMessages(isPatient ? undefined : patientId, channel as 'patient' | 'equipe' | 'all')
+      const res = await chatApi.getMessages(requestPatientId, channel)
+      if (seq !== loadSeqRef.current) return
       const last = res.messages[res.messages.length - 1]
       const prevLastId = lastMessageIdRef.current
-      // Son Messenger si un nouveau message arrive pendant que le fil est ouvert
-      // (SSE peut déjà avoir joué hors page chat — debounce dans playMessageSound)
       if (
         silent &&
         prevLastId &&
@@ -285,14 +368,19 @@ export default function ChatPage() {
       }
       const canAutoRead = Date.now() >= skipAutoReadUntilRef.current
       if (canAutoRead) {
-        if (isStaff && patientId) {
-          const markId = staffTab === 'equipe' ? EQUIPE_THREAD_ID : patientId
-          const prevUnread = conversationsRef.current.find((c) => c.patientId === markId)?.unreadCount
+        if (isStaff && requestPatientId) {
+          const prevUnread = conversationsRef.current.find((c) => c.patientId === requestPatientId)?.unreadCount
             ?? conversationsRef.current.reduce((n, c) => n + c.unreadCount, 0)
-          await chatApi.markRead(markId, staffTab === 'equipe' ? 'equipe' : 'patient')
+          await chatApi.markRead(requestPatientId, channel === 'equipe' ? 'equipe' : 'patient')
+          if (seq !== loadSeqRef.current) return
+          if (channel === 'equipe') setEquipeUnread(0)
+          else setPatientUnread(0)
+          void refreshChannelBadges()
           setConversations((prev) =>
             prev.map((c) =>
-              staffTab === 'equipe' || c.patientId === patientId ? { ...c, unreadCount: 0 } : c,
+              channel === 'equipe' || c.patientId === requestPatientId
+                ? { ...c, unreadCount: 0 }
+                : c,
             ),
           )
           if (!silent && prevUnread > 0) {
@@ -303,6 +391,7 @@ export default function ChatPage() {
         } else if (isPatient) {
           const hadUnread = res.messages.some((m) => !m.lu && m.expediteurId !== user?.id)
           await chatApi.markRead()
+          if (seq !== loadSeqRef.current) return
           if (!silent && hadUnread) {
             feedbackSuccess('Messages marqués comme lus')
           }
@@ -310,11 +399,12 @@ export default function ChatPage() {
       }
       setError(null)
     } catch (e) {
+      if (seq !== loadSeqRef.current) return
       if (!silent) setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
-      if (!silent) setLoading(false)
+      if (seq === loadSeqRef.current && !silent) setLoading(false)
     }
-  }, [isPatient, isStaff, user?.id, staffTab])
+  }, [isPatient, isStaff, user?.id, staffTab, refreshChannelBadges, searchParams])
 
   useEffect(() => {
     lastMessageIdRef.current = null
@@ -325,10 +415,21 @@ export default function ChatPage() {
     void loadDirectory()
   }, [loadConversations, loadDirectory])
 
-  // Changement Patient ↔ Équipe / Nouvelle : recharger la liste (sans écraser un patient déjà choisi via URL)
+  // Changement Patient ↔ Équipe / Nouvelle : recharger la liste
   useEffect(() => {
     if (!isStaff) return
-    if (staffTab !== 'nouveau') setMessages([])
+    setListFilter('all')
+    if (staffTab === 'equipe') {
+      setSelectedPatientId(EQUIPE_THREAD_ID)
+      setMessages([])
+      setLoading(true)
+    } else if (staffTab === 'nouveau') {
+      setMessages([])
+      setLoading(false)
+    } else {
+      setMessages([])
+      setLoading(true)
+    }
     void loadConversations({ keepSelection: true })
   }, [staffTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -439,6 +540,7 @@ export default function ChatPage() {
   }
 
   const selectPatient = (patientId: string) => {
+    setListFilter('all')
     // Fil unifié Demandes
     if (patientId === EQUIPE_THREAD_ID) {
       setStaffTab('equipe')
@@ -476,6 +578,25 @@ export default function ChatPage() {
       { replace: true },
     )
     window.setTimeout(() => inputRef.current?.focus(), 80)
+  }
+
+  const goToStaffTab = (tab: StaffTab) => {
+    setListFilter('all')
+    setError(null)
+    setStaffTab(tab)
+    if (tab === 'equipe') {
+      setSelectedPatientId(EQUIPE_THREAD_ID)
+      setMobileShowThread(true)
+      navigate(
+        { pathname: window.location.pathname, search: '?channel=equipe' },
+        { replace: true },
+      )
+      return
+    }
+    navigate(
+      { pathname: window.location.pathname, search: tab === 'patient' ? '?channel=patient' : '' },
+      { replace: true },
+    )
   }
 
   const onPickFile = (file: File | null) => {
@@ -674,12 +795,14 @@ export default function ChatPage() {
   const filteredConversations = useMemo(() => {
     const q = searchPatient.trim()
     let list = q ? conversations.filter((c) => matchesQuery(q, c)) : conversations
-    if (listFilter === 'unread') list = list.filter((c) => c.unreadCount > 0)
+    if (staffTab !== 'equipe' && listFilter === 'unread') {
+      list = list.filter((c) => c.unreadCount > 0)
+    }
     return [...list].sort((a, b) => {
       if (b.unreadCount !== a.unreadCount) return b.unreadCount - a.unreadCount
       return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
     })
-  }, [conversations, searchPatient, listFilter])
+  }, [conversations, searchPatient, listFilter, staffTab])
 
   const newPatients = useMemo(() => {
     const fromConv = new Set(conversations.map((c) => c.patientId))
@@ -815,31 +938,33 @@ export default function ChatPage() {
         <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100/80">
           <button
             type="button"
-            onClick={() => setStaffTab(isMedecin ? 'equipe' : 'patient')}
+            onClick={() => goToStaffTab(isMedecin ? 'equipe' : 'patient')}
             className={cn(
-              'h-9 rounded-lg text-[11px] font-semibold transition-colors',
+              'h-9 rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center justify-center',
               (isMedecin ? staffTab === 'equipe' : staffTab === 'patient')
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-muted-foreground hover:text-slate-700',
             )}
           >
-            {isMedecin ? 'Demandes' : 'Patiente'}
+            {isMedecin ? 'Demandes' : 'Patientes'}
+            <UnreadBadge count={isMedecin ? equipeUnread : patientUnread} />
           </button>
           <button
             type="button"
-            onClick={() => setStaffTab(isMedecin ? 'patient' : 'equipe')}
+            onClick={() => goToStaffTab(isMedecin ? 'patient' : 'equipe')}
             className={cn(
-              'h-9 rounded-lg text-[11px] font-semibold transition-colors',
+              'h-9 rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center justify-center',
               (isMedecin ? staffTab === 'patient' : staffTab === 'equipe')
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-muted-foreground hover:text-slate-700',
             )}
           >
-            {isMedecin ? 'Patients' : 'Équipe'}
+            {isMedecin ? 'Patients' : 'Dr'}
+            <UnreadBadge count={isMedecin ? patientUnread : equipeUnread} />
           </button>
           <button
             type="button"
-            onClick={() => setStaffTab('nouveau')}
+            onClick={() => goToStaffTab('nouveau')}
             className={cn(
               'h-9 rounded-lg text-[11px] font-semibold transition-colors',
               staffTab === 'nouveau'
@@ -851,7 +976,7 @@ export default function ChatPage() {
           </button>
         </div>
 
-        {(staffTab === 'patient' || staffTab === 'equipe') && (
+        {staffTab === 'patient' && (
           <div className="flex items-center gap-1.5 mt-2.5">
             <Filter className="h-3.5 w-3.5 text-muted-foreground" />
             <button
@@ -913,7 +1038,7 @@ export default function ChatPage() {
               <button
                 type="button"
                 className="mt-3 text-xs font-semibold text-brand-700 hover:underline"
-                onClick={() => setStaffTab('nouveau')}
+                onClick={() => goToStaffTab('nouveau')}
               >
                 Démarrer une conversation →
               </button>
@@ -921,7 +1046,10 @@ export default function ChatPage() {
             </div>
           ) : (
             <div className="space-y-0.5">
-              {filteredConversations.map((c) => (
+              {filteredConversations.map((c) => {
+                const fromDoctor = c.lastExpediteurRole === 'medecin'
+                const sender = lastSenderShort(c.lastExpediteurRole, user?.role)
+                return (
                 <button
                   key={c.patientId}
                   type="button"
@@ -930,7 +1058,9 @@ export default function ChatPage() {
                     'w-full text-left rounded-xl px-3 py-3 transition-all',
                     selectedPatientId === c.patientId
                       ? 'bg-brand-50 ring-1 ring-brand-200 shadow-sm'
-                      : 'hover:bg-slate-50',
+                      : fromDoctor && c.unreadCount > 0
+                        ? 'bg-sky-50/80 hover:bg-sky-50'
+                        : 'hover:bg-slate-50',
                   )}
                 >
                   <div className="flex items-start gap-3">
@@ -940,15 +1070,22 @@ export default function ChatPage() {
                           'text-xs font-bold',
                           staffTab === 'equipe'
                             ? 'bg-violet-100 text-violet-800'
-                            : 'bg-brand-100 text-brand-800',
+                            : fromDoctor
+                              ? 'bg-sky-100 text-sky-800'
+                              : 'bg-brand-100 text-brand-800',
                         )}>
                           {staffTab === 'equipe'
                             ? (isMedecin ? <Users className="h-4 w-4" /> : <Stethoscope className="h-4 w-4" />)
-                            : initials(c.fullName)}
+                            : fromDoctor
+                              ? <Stethoscope className="h-4 w-4" />
+                              : initials(c.fullName)}
                         </AvatarFallback>
                       </Avatar>
                       {c.unreadCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-brand-600 ring-2 ring-white" />
+                        <span className={cn(
+                          'absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white',
+                          fromDoctor ? 'bg-sky-600' : 'bg-brand-600',
+                        )} />
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -960,23 +1097,35 @@ export default function ChatPage() {
                           {relativeTime(c.lastMessageAt)}
                         </span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                        {staffTab === 'equipe'
-                          ? (isMedecin ? 'Gestionnaire' : 'Médecin')
-                          : c.dossierNumber}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                        {fromDoctor && (
+                          <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-sky-800 bg-sky-100 px-1.5 py-0.5 rounded-md">
+                            <Stethoscope className="h-2.5 w-2.5" />
+                            Dr
+                          </span>
+                        )}
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {staffTab === 'equipe'
+                            ? (sender ? `Dernier : ${sender}` : (isMedecin ? 'Gestionnaire' : 'Médecin'))
+                            : c.dossierNumber}
+                        </p>
+                      </div>
                       <p className={cn('text-[12px] truncate mt-1', c.unreadCount > 0 ? 'text-slate-700 font-medium' : 'text-muted-foreground')}>
-                        {c.lastMessagePreview || '—'}
+                        {sender ? `${sender} : ` : ''}{c.lastMessagePreview || '—'}
                       </p>
                     </div>
                     {c.unreadCount > 0 && (
-                      <span className="shrink-0 mt-1 rounded-full bg-brand-600 text-white text-[10px] font-bold min-w-5 h-5 px-1.5 flex items-center justify-center">
+                      <span className={cn(
+                        'shrink-0 mt-1 rounded-full text-white text-[10px] font-bold min-w-5 h-5 px-1.5 flex items-center justify-center',
+                        fromDoctor ? 'bg-sky-600' : 'bg-brand-600',
+                      )}>
                         {c.unreadCount > 99 ? '99+' : c.unreadCount}
                       </span>
                     )}
                   </div>
                 </button>
-              ))}
+                )
+              })}
             </div>
           )
         ) : directoryLoading && directory.length === 0 ? (
@@ -1156,9 +1305,11 @@ export default function ChatPage() {
                   ? 'Aucun message trouvé.'
                   : isPatient
                     ? 'Commencez la conversation avec l’équipe.'
-                    : selectedPatientId
-                      ? 'Envoyez le premier message.'
-                      : 'Sélectionnez une patiente.'}
+                    : staffTab === 'equipe'
+                      ? 'Aucun message interne pour le moment.'
+                      : selectedPatientId
+                        ? 'Envoyez le premier message.'
+                        : 'Sélectionnez une patiente.'}
               </p>
               <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
                 {isPatient
@@ -1186,6 +1337,7 @@ export default function ChatPage() {
               const deleted = Boolean(m.deletedForAll)
               const menuOpen = menu?.messageId === m.id
               const busy = actionBusyId === m.id
+              const dossierAction = isDossierActionMessage(m)
               return (
                 <div
                   id={`msg-${m.id}`}
@@ -1194,14 +1346,17 @@ export default function ChatPage() {
                 >
                   <Avatar className="h-8 w-8 shrink-0 mt-1">
                     <AvatarFallback className={cn(
-                      'text-[10px]',
-                      m.expediteurRole === 'medecin' ? 'bg-sky-100 text-sky-800' :
-                        m.expediteurRole === 'gestionnaire' ? 'bg-violet-100 text-violet-800' :
-                          'bg-slate-100 text-slate-700',
+                      'text-[10px] font-semibold',
+                      dossierAction && m.expediteurRole === 'medecin' ? 'bg-sky-100 text-sky-800' :
+                        dossierAction && m.expediteurRole === 'gestionnaire' ? 'bg-violet-100 text-violet-800' :
+                        own ? 'bg-brand-100 text-brand-800' :
+                          m.expediteurRole === 'medecin' ? 'bg-sky-100 text-sky-800' :
+                            m.expediteurRole === 'gestionnaire' ? 'bg-violet-100 text-violet-800' :
+                              'bg-slate-100 text-slate-700',
                     )}>
-                      {m.expediteurRole === 'medecin' ? <Stethoscope className="h-3.5 w-3.5" /> :
-                        m.expediteurRole === 'gestionnaire' ? <Users className="h-3.5 w-3.5" /> :
-                          <User className="h-3.5 w-3.5" />}
+                      {dossierAction && m.expediteurRole === 'medecin' ? <Stethoscope className="h-3.5 w-3.5" /> :
+                        dossierAction && m.expediteurRole === 'gestionnaire' ? <Users className="h-3.5 w-3.5" /> :
+                          initials(own ? (user?.name ?? 'Vous') : (m.expediteurNom ?? roleLabel(m.expediteurRole)))}
                     </AvatarFallback>
                   </Avatar>
                   <div className={cn('max-w-[88%] sm:max-w-[72%] flex flex-col space-y-1', own ? 'items-end' : 'items-start')}>
@@ -1210,16 +1365,23 @@ export default function ChatPage() {
                         {own ? 'Vous' : (m.expediteurNom ?? roleLabel(m.expediteurRole))}
                       </span>
                       {!own && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 font-medium">
+                        <span className={cn(
+                          'text-[10px] px-1.5 py-0.5 rounded-md font-semibold',
+                          m.expediteurRole === 'medecin'
+                            ? 'bg-sky-100 text-sky-800'
+                            : m.expediteurRole === 'patient'
+                              ? 'bg-slate-100 text-slate-600'
+                              : 'bg-violet-100 text-violet-800',
+                        )}>
                           {roleLabel(m.expediteurRole)}
                         </span>
                       )}
-                      {m.staffOnly && (
+                      {dossierAction && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 font-medium">
                           Interne
                         </span>
                       )}
-                      {m.staffOnly && (m.patientNom || m.dossierNumber) && (
+                      {dossierAction && (m.patientNom || m.dossierNumber) && (
                         <button
                           type="button"
                           className={cn(
@@ -1248,10 +1410,12 @@ export default function ChatPage() {
                         'rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words shadow-sm',
                         deleted
                           ? 'bg-slate-100 border border-dashed border-slate-300 text-slate-500 italic rounded-2xl'
-                          : m.staffOnly
+                          : dossierAction
                             ? 'bg-amber-50 border border-amber-200 text-slate-800 rounded-tl-md'
                           : own
                             ? 'bg-brand-700 text-white rounded-tr-md'
+                          : m.expediteurRole === 'medecin'
+                            ? 'bg-sky-50 border border-sky-200 text-slate-900 rounded-tl-md'
                             : 'bg-white border border-slate-200 text-slate-800 rounded-tl-md',
                       )}>
                         {deleted ? (
@@ -1318,17 +1482,20 @@ export default function ChatPage() {
                             {!!m.contenu?.startsWith('Pièce jointe') && !m.pieceJointeUrl && (
                               <p className="whitespace-pre-wrap">{m.contenu}</p>
                             )}
-                            {m.staffOnly && isStaff && (
-                              <button
+                            {isStaff && dossierAction && (
+                              <Button
                                 type="button"
-                                className="mt-2 text-xs font-semibold text-brand-800 underline underline-offset-2"
+                                variant="brand"
+                                size="sm"
+                                className="mt-2 h-8 gap-1.5"
                                 onClick={() => {
                                   setEquipeFocusPatientId(m.patientId)
                                   openPatientDossier(m.patientId)
                                 }}
                               >
-                                Ouvrir le dossier patient →
-                              </button>
+                                <FileText className="h-3.5 w-3.5" />
+                                Ouvrir le dossier
+                              </Button>
                             )}
                           </>
                         )}
@@ -1437,9 +1604,7 @@ export default function ChatPage() {
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1.5 px-1">
-          {isStaff && staffTab === 'equipe'
-            ? 'Message interne — la patiente ne le voit pas.'
-            : 'Pièces jointes : JPG, PNG, WEBP, PDF · max 12 Mo'}
+          Pièces jointes : JPG, PNG, WEBP, PDF · max 12 Mo
         </p>
       </footer>
     </section>

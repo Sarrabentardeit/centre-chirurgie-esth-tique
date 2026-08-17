@@ -81,8 +81,11 @@ async function syncPostOpReminders(userId: string, dateIntervention: Date) {
 function mapPatientListRow<T extends {
   dossierNumber: string
   devis?: Array<{ numeroDevis?: string | null }>
-}>(patient: T): T {
+  rapports?: unknown[]
+  _count?: { rapports?: number }
+}>(patient: T): T & { rapportsCount: number } {
   const numeroDevis = patient.devis?.[0]?.numeroDevis
+  const rapportsCount = patient._count?.rapports ?? patient.rapports?.length ?? 0
   return {
     ...patient,
     dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
@@ -90,6 +93,7 @@ function mapPatientListRow<T extends {
       ...d,
       numeroDevis: d.numeroDevis ?? undefined,
     })),
+    rapportsCount,
   }
 }
 
@@ -357,6 +361,7 @@ export async function getPatients(search?: string, status?: string) {
         formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
         devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' }, take: 1 },
         rapports: { orderBy: { createdAt: 'desc' }, take: 1 },
+        _count: { select: { rapports: true } },
       },
       orderBy: { updatedAt: 'desc' },
     }),
@@ -724,8 +729,8 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
   })
 
   // 1ère génération → rapport_genere
-  // Nouveau rapport (après devis) → rapport_genere (signal « créer un nouveau devis », v1 intacte)
-  // Correction du rapport courant (sans nouveau) → rapport_modifie + sync brouillon lié
+  // Nouveau rapport (R2+) → rapport_genere (Houda doit créer un nouveau devis ; v1 intacte)
+  // Correction du 1er rapport → rapport_modifie
   const PRE_RAPPORT_STATUSES = ['nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse']
   const DEVIS_FLOW_STATUSES = [
     'rapport_genere',
@@ -735,17 +740,25 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     'devis_accepte',
   ]
   const isAdditionalRapport = createNew && !!existing
-  if (PRE_RAPPORT_STATUSES.includes(patient.status) || isAdditionalRapport) {
+  const rapportsCount = await prisma.rapport.count({ where: { patientId } })
+  const needsNouveauDevis =
+    isAdditionalRapport
+    || (rapportsCount > 1 && ['devis_preparation', 'devis_envoye', 'devis_accepte'].includes(patient.status))
+
+  if (PRE_RAPPORT_STATUSES.includes(patient.status) || needsNouveauDevis) {
     await prisma.patient.update({
       where: { id: patientId },
       data: { status: 'rapport_genere' },
     })
   } else if (!createNew && existing && DEVIS_FLOW_STATUSES.includes(patient.status)) {
-    await prisma.patient.update({
-      where: { id: patientId },
-      data: { status: 'rapport_modifie' },
-    })
-    await syncBrouillonDevisFromRapport(patientId, rapport)
+    // Un 2e rapport déjà signalé : rester sur rapport_genere (liste « Non traités »).
+    if (patient.status !== 'rapport_genere') {
+      await prisma.patient.update({
+        where: { id: patientId },
+        data: { status: 'rapport_modifie' },
+      })
+      await syncBrouillonDevisFromRapport(patientId, rapport)
+    }
   }
 
   const p = await prisma.patient.findUnique({
@@ -753,13 +766,16 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     select: { dossierNumber: true, user: { select: { fullName: true } } },
   })
   if (p) {
-    const titre = isAdditionalRapport
-      ? 'Nouveau rapport médical généré'
+    const announceNouveau = isAdditionalRapport || needsNouveauDevis
+    const titre = announceNouveau
+      ? rapportsCount === 2
+        ? '2e rapport médical généré'
+        : 'Nouveau rapport médical généré'
       : createNew
         ? 'Rapport médical généré'
         : 'Rapport médical modifié'
-    const message = isAdditionalRapport
-      ? `Un nouveau rapport a été généré pour ${p.user.fullName} (${p.dossierNumber}). Créez un nouveau devis — les versions précédentes restent conservées.`
+    const message = announceNouveau
+      ? `Un nouveau rapport (R${rapportsCount}) a été généré pour ${p.user.fullName} (${p.dossierNumber}). Merci de créer un nouveau devis — les versions précédentes restent conservées.`
       : createNew
         ? `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) est prêt. Devis à préparer.`
         : `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) a été corrigé.`
@@ -769,7 +785,18 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
       message,
       lienAction: `/gestionnaire/devis/${patientId}`,
       email: true,
+    }).catch((err) => {
+      console.warn('[upsertRapport] Notification / email gestionnaire non envoyés', err)
     })
+    if (announceNouveau) {
+      const chatMessage =
+        `Nouveau rapport médical généré (R${rapportsCount}).\n\n` +
+        `Patiente : ${p.user.fullName} (${p.dossierNumber}).\n\n` +
+        `Merci de préparer un nouveau devis. Les anciens rapports et devis restent en historique.`
+      await sendStaffOnlyMessage(medecinId, patientId, chatMessage, 'medecin').catch((err) => {
+        console.warn('[upsertRapport] Message interne nouveau rapport non envoyé', err)
+      })
+    }
   }
 
   return { rapport }

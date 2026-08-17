@@ -41,6 +41,7 @@ const patientListInclude = {
   user: { select: { id: true, fullName: true, email: true, createdAt: true } },
   formulaires: { orderBy: { createdAt: 'desc' as const }, take: 1 },
   devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' as const }, take: 1 },
+  _count: { select: { rapports: true } },
 } as const
 
 /** Devis visibles (non soft-supprimés). */
@@ -190,11 +191,15 @@ function notifyMedecinsFormulaire(input: {
 function mapPatientListRow<T extends {
   dossierNumber: string
   devis?: Array<{ numeroDevis?: string | null }>
-}>(patient: T): T {
+  rapports?: unknown[]
+  _count?: { rapports?: number }
+}>(patient: T): T & { rapportsCount: number } {
   const numeroDevis = patient.devis?.[0]?.numeroDevis
+  const rapportsCount = patient._count?.rapports ?? patient.rapports?.length ?? 0
   return {
     ...patient,
     dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
+    rapportsCount,
   }
 }
 

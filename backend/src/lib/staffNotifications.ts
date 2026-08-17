@@ -20,7 +20,7 @@ export async function notifyStaff(input: {
 }) {
   const users = await prisma.user.findMany({
     where: { role: input.role },
-    select: { id: true },
+    select: { id: true, email: true },
   })
 
   const notifPromises = users.map(async (user) => {
@@ -54,6 +54,10 @@ export async function notifyStaff(input: {
           message: input.message,
           lienAction: input.lienAction,
           audience: input.role,
+          extraTo: users.map((u) => u.email),
+          ctaLabel: 'Ouvrir le dossier →',
+        }).catch((err) => {
+          console.warn('[notifyStaff] Email non envoyé', err)
         }),
   ])
 }

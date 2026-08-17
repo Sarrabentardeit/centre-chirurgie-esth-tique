@@ -50,6 +50,15 @@ export const STATUS_LABELS: Record<DossierStatus, string> = {
   abstention: 'Abstention',
 }
 
+/** Liste gestionnaire / médecin : R2+ = « 2e rapport généré » (pas « Devis envoyé »). */
+export function dossierStatusLabel(status: string, rapportsCount?: number): string {
+  const n = rapportsCount ?? 0
+  if (n > 1 && (status === 'rapport_genere' || status === 'rapport_modifie')) {
+    return n === 2 ? '2e rapport généré' : `Nouveau rapport (R${n})`
+  }
+  return STATUS_LABELS[status as DossierStatus] ?? status
+}
+
 /** Aligné charte teal / bronze / amber / emerald / slate */
 export const STATUS_COLORS: Record<DossierStatus, string> = {
   nouveau: 'bg-slate-100 text-slate-700 border-slate-200',

@@ -694,6 +694,7 @@ export interface PatientListItem {
   phone: string | null
   status: string
   statusBeforeAbstention?: string | null
+  rapportsCount?: number
   ville: string | null
   pays: string | null
   nationalite: string | null

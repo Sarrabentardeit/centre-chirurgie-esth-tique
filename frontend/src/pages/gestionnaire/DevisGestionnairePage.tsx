@@ -15,7 +15,7 @@ import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { feedbackSuccess, toast } from '@/store/toastStore'
-import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, getDevisDisplayNumber, STATUS_COLORS, STATUS_LABELS, type CurrencyUnit } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, getDevisDisplayNumber, STATUS_COLORS, STATUS_LABELS, dossierStatusLabel, type CurrencyUnit } from '@/lib/utils'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
@@ -2781,11 +2781,18 @@ export default function DevisGestionnairePage() {
                 </div>
               </div>
 
-              {patientRow.status === 'rapport_modifie' && (
+              {(patientRow.status === 'rapport_modifie' ||
+                (patientRow.status === 'rapport_genere' && (patientRow.rapportsCount ?? patientRow.rapports?.length ?? 0) > 1)) && (
                 <div className="border-t border-amber-100 bg-amber-50/90 px-4 sm:px-6 py-3">
-                  <p className="text-sm font-semibold text-amber-950">Rapport modifié par le médecin</p>
+                  <p className="text-sm font-semibold text-amber-950">
+                    {(patientRow.rapportsCount ?? patientRow.rapports?.length ?? 0) > 1
+                      ? dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)
+                      : 'Rapport modifié par le médecin'}
+                  </p>
                   <p className="mt-0.5 text-[13px] text-amber-900/90">
-                    Reprenez la même fiche devis : forfait, nuits, drainage et examens sont mis à jour dans le tableau, le PDF et l’éditeur.
+                    {(patientRow.rapportsCount ?? patientRow.rapports?.length ?? 0) > 1
+                      ? 'Créez un nouveau devis à partir de ce rapport. Les devis précédents restent conservés.'
+                      : 'Reprenez la même fiche devis : forfait, nuits, drainage et examens sont mis à jour dans le tableau, le PDF et l’éditeur.'}
                   </p>
                 </div>
               )}
@@ -2800,7 +2807,7 @@ export default function DevisGestionnairePage() {
                       STATUS_COLORS[patientRow.status as DossierStatus] ?? 'bg-slate-100 text-slate-700 border-slate-200',
                     )}
                   >
-                    {STATUS_LABELS[patientRow.status as DossierStatus] ?? patientRow.status}
+                    {dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)}
                   </span>
                   <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
                     <Select

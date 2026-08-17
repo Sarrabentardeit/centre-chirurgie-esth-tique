@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, Check, CheckCheck, Download, EyeOff, FileText, Filter, Image as ImageIcon,
   Mail, MessageSquare, MoreVertical, Paperclip, Pin, PinOff, Search, Send,
-  Stethoscope, Trash2, User, Users, X,
+  Stethoscope, Trash2, Users, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

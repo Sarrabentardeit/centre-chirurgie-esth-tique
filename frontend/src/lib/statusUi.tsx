@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { DossierStatus } from '@/types'
-import { cn } from '@/lib/utils'
+import { cn, dossierStatusLabel } from '@/lib/utils'
 
 /** Palette unifiée — teal / bronze / amber / emerald / slate */
 export type StatusTone = 'slate' | 'amber' | 'brand' | 'teal' | 'emerald' | 'rose'
@@ -66,13 +66,15 @@ type StatusBadgeProps = {
   value: string
   className?: string
   showIcon?: boolean
+  rapportsCount?: number
 }
 
-export function StatusBadge({ kind, value, className, showIcon = true }: StatusBadgeProps) {
+export function StatusBadge({ kind, value, className, showIcon = true, rapportsCount }: StatusBadgeProps) {
   const ui = kind === 'dossier'
     ? dossierStatusUi(value as DossierStatus)
     : devisStatusUi(value)
   const Icon = ui.icon
+  const label = kind === 'dossier' ? dossierStatusLabel(value, rapportsCount) : ui.label
   return (
     <span
       className={cn(
@@ -82,7 +84,7 @@ export function StatusBadge({ kind, value, className, showIcon = true }: StatusB
       )}
     >
       {showIcon && <Icon className="h-3 w-3 shrink-0 opacity-80" />}
-      {ui.label}
+      {label}
     </span>
   )
 }

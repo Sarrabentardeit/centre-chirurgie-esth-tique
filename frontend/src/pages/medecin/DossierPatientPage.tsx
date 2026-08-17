@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEffect, useState } from 'react'
-import { STATUS_LABELS, STATUS_COLORS, formatDate, formatCurrency, cn } from '@/lib/utils'
+import { STATUS_LABELS, STATUS_COLORS, formatDate, formatCurrency, cn, dossierStatusLabel } from '@/lib/utils'
 import { medecinApi } from '@/lib/api'
 import type { Devis, RendezVous } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
@@ -479,7 +479,7 @@ export default function DossierPatientPage() {
                 {patient.dossierNumber}
               </span>
               <Badge className={`text-[10px] sm:text-xs ${STATUS_COLORS[patient.status as keyof typeof STATUS_COLORS] ?? ''}`}>
-                {STATUS_LABELS[patient.status as keyof typeof STATUS_LABELS] ?? patient.status}
+                {dossierStatusLabel(patient.status, patient.rapports?.length)}
               </Badge>
               {patient.sourceContact && (
                 <span
@@ -521,7 +521,7 @@ export default function DossierPatientPage() {
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <span className="text-sm font-medium text-muted-foreground">Statut dossier :</span>
         <span className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold border', STATUS_COLORS[patient.status as keyof typeof STATUS_COLORS])}>
-          {STATUS_LABELS[patient.status as keyof typeof STATUS_LABELS] ?? patient.status}
+          {dossierStatusLabel(patient.status, patient.rapports?.length)}
         </span>
         <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
           <Select value={newStatus} onValueChange={setNewStatus}>

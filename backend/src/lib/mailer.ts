@@ -217,8 +217,15 @@ export async function sendNotificationEmail(input: {
   message: string
   lienAction?: string | null
   audience: EmailAudience
+  /** Destinataires supplémentaires (ex. e-mail du compte Houda). */
+  extraTo?: string[]
+  ctaLabel?: string
 }): Promise<void> {
-  const recipients = recipientsFor(input.audience)
+  const fromEnv = recipientsFor(input.audience)
+  const extra = (input.extraTo ?? [])
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.includes('@'))
+  const recipients = [...new Set([...fromEnv, ...extra])]
   if (recipients.length === 0) {
     console.warn(`[mailer] Envoi ignoré : aucun destinataire pour audience=${input.audience}`)
     return
@@ -228,8 +235,8 @@ export async function sendNotificationEmail(input: {
   const html = buildSimpleEmailHtml({
     titre: input.titre,
     greetingHtml: 'Bonjour,',
-    bodyHtml: `<p style="margin:0;">${escapeHtml(input.message)}</p>`,
-    ctaLabel: 'Ouvrir Centre Est →',
+    bodyHtml: `<p style="margin:0;">${escapeHtml(input.message).replace(/\n/g, '<br/>')}</p>`,
+    ctaLabel: input.ctaLabel ?? 'Ouvrir le dossier →',
     ctaHref: lien,
   })
 

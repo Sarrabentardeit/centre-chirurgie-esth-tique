@@ -352,14 +352,19 @@ model Message {
   staffOnly       Boolean   @default(false) @map("staff_only")
   /** Bouton « Ouvrir le dossier » — messages automatiques uniquement. */
   dossierLink     Boolean   @default(false) @map("dossier_link")
+  /** Réponse à un message précis (citation type WhatsApp). */
+  replyToId       String?   @map("reply_to_id")
 
   patient    Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
   expediteur User            @relation(fields: [expediteurId], references: [id], onDelete: Cascade)
   hiddenBy   MessageHidden[]
+  replyTo    Message?        @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies    Message[]       @relation("MessageReply")
 
   @@index([patientId, dateEnvoi])
   @@index([patientId, pinned])
   @@index([patientId, staffOnly])
+  @@index([replyToId])
   @@map("messages")
 }
 

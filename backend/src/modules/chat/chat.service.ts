@@ -281,6 +281,34 @@ function equipeDisplayName(role: string): string {
   return role
 }
 
+function mapReplyTo(
+  quoted:
+    | {
+        id: string
+        contenu: string
+        expediteurRole: string
+        deletedForAll?: boolean
+        staffOnly?: boolean
+        pieceJointeNom?: string | null
+        expediteur?: { fullName: string } | null
+      }
+    | null
+    | undefined,
+  viewerRole: UserRole,
+) {
+  if (!quoted) return null
+  if (quoted.staffOnly && viewerRole === 'patient') return null
+  const deleted = Boolean(quoted.deletedForAll)
+  return {
+    id: quoted.id,
+    contenu: deleted ? '' : quoted.contenu,
+    expediteurNom: quoted.expediteur?.fullName ?? equipeDisplayName(quoted.expediteurRole),
+    expediteurRole: quoted.expediteurRole as UserRole,
+    deletedForAll: deleted,
+    pieceJointeNom: deleted ? null : (quoted.pieceJointeNom ?? null),
+  }
+}
+
 function mapMessage(m: {
   id: string
   patientId: string
@@ -301,7 +329,8 @@ function mapMessage(m: {
     dossierNumber: string
     user: { fullName: string }
   } | null
-}) {
+  replyTo?: Parameters<typeof mapReplyTo>[0]
+}, viewerRole: UserRole = 'gestionnaire') {
   const deletedForAll = Boolean(m.deletedForAll)
   const staffOnly = Boolean(m.staffOnly)
   const expediteurNom = staffOnly
@@ -326,8 +355,22 @@ function mapMessage(m: {
     dossierLink: staffOnly && Boolean(m.dossierLink),
     patientNom: m.patient?.user.fullName ?? null,
     dossierNumber: m.patient?.dossierNumber ?? null,
+    replyTo: mapReplyTo(m.replyTo, viewerRole),
   }
 }
+
+const messageListInclude = {
+  expediteur: { select: { fullName: true } },
+  patient: {
+    select: {
+      dossierNumber: true,
+      user: { select: { fullName: true } },
+    },
+  },
+  replyTo: {
+    include: { expediteur: { select: { fullName: true } } },
+  },
+} as const
 
 async function resolvePatientIdForUser(userId: string, role: UserRole, patientId?: string): Promise<string> {
   if (role === 'patient') {
@@ -763,20 +806,12 @@ export async function getMessages(
         hiddenBy: { none: { userId } },
       },
       orderBy: { dateEnvoi: 'asc' },
-      include: {
-        expediteur: { select: { fullName: true } },
-        patient: {
-          select: {
-            dossierNumber: true,
-            user: { select: { fullName: true } },
-          },
-        },
-      },
+      include: messageListInclude,
     })
 
     return {
       patientId: EQUIPE_THREAD_ID,
-      messages: messages.map(mapMessage),
+      messages: messages.map((m) => mapMessage(m, role)),
     }
   }
 
@@ -823,20 +858,12 @@ export async function getMessages(
       ...(medecinVisibleFrom ? { dateEnvoi: { gte: medecinVisibleFrom } } : {}),
     },
     orderBy: { dateEnvoi: 'asc' },
-    include: {
-      expediteur: { select: { fullName: true } },
-      patient: {
-        select: {
-          dossierNumber: true,
-          user: { select: { fullName: true } },
-        },
-      },
-    },
+    include: messageListInclude,
   })
 
   return {
     patientId,
-    messages: messages.map(mapMessage),
+    messages: messages.map((m) => mapMessage(m, role)),
   }
 }
 
@@ -858,6 +885,24 @@ export async function sendMessage(
     throw new AppError(403, 'FORBIDDEN', 'Message interne réservé à l’équipe.')
   }
 
+  let replyToId: string | null = null
+  if (input.replyToId) {
+    const quoted = await prisma.message.findUnique({
+      where: { id: input.replyToId },
+      select: { id: true, patientId: true, staffOnly: true },
+    })
+    if (!quoted || quoted.patientId !== patientId) {
+      throw new AppError(400, 'REPLY_NOT_FOUND', 'Message cité introuvable dans ce fil.')
+    }
+    if (Boolean(quoted.staffOnly) !== staffOnly) {
+      throw new AppError(400, 'REPLY_CHANNEL', 'La réponse doit rester dans le même canal.')
+    }
+    if (role === 'patient' && quoted.staffOnly) {
+      throw new AppError(404, 'MESSAGE_NOT_FOUND', 'Message introuvable.')
+    }
+    replyToId = quoted.id
+  }
+
   const preview = input.contenu.trim() || (input.pieceJointeNom ? `📎 ${input.pieceJointeNom}` : 'Pièce jointe')
 
   const message = await prisma.message.create({
@@ -870,16 +915,9 @@ export async function sendMessage(
       pieceJointeNom: input.pieceJointeNom ?? null,
       lu: false,
       staffOnly,
+      replyToId,
     },
-    include: {
-      expediteur: { select: { fullName: true } },
-      patient: {
-        select: {
-          dossierNumber: true,
-          user: { select: { fullName: true } },
-        },
-      },
-    },
+    include: messageListInclude,
   })
 
   if (role === 'patient') {
@@ -938,7 +976,7 @@ export async function sendMessage(
     })
   }
 
-  const mapped = mapMessage(message)
+  const mapped = mapMessage(message, role)
   const lastStaff = role === 'patient' ? await lastPublicStaffRole(patientId) : null
   const staffRoles: UserRole[] = staffOnly
     ? ['medecin', 'gestionnaire']

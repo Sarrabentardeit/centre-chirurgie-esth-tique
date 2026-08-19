@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, Check, CheckCheck, Download, EyeOff, FileText, Filter, Image as ImageIcon,
-  Mail, MessageSquare, MoreVertical, Paperclip, Pin, PinOff, Search, Send,
+  Mail, MessageSquare, MoreVertical, Paperclip, Pin, PinOff, Reply, Search, Send,
   Stethoscope, Trash2, Users, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -51,6 +51,20 @@ function matchesQuery(q: string, p: { fullName: string; email: string; dossierNu
 
 function initials(name: string) {
   return name.split(/\s+/).map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function quoteSnippet(m: {
+  contenu?: string
+  pieceJointeNom?: string | null
+  deletedForAll?: boolean
+}) {
+  if (m.deletedForAll) return 'Message supprimé'
+  const t = (m.contenu ?? '').trim()
+  if (t && !t.startsWith('Pièce jointe')) {
+    return t.length > 140 ? `${t.slice(0, 137)}…` : t
+  }
+  if (m.pieceJointeNom) return `📎 ${m.pieceJointeNom}`
+  return t || 'Message'
 }
 
 function roleLabel(role: string) {
@@ -147,6 +161,7 @@ export default function ChatPage() {
   )
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [loading, setLoading] = useState(true)
   const [directoryLoading, setDirectoryLoading] = useState(false)
   const [sending, setSending] = useState(false)
@@ -478,6 +493,7 @@ export default function ChatPage() {
       setMessages([])
       setLoading(false)
     }
+    setReplyTo(null)
   }, [isPatient, selectedPatientId, loadMessages])
 
   const refreshThread = useCallback(async () => {
@@ -688,6 +704,17 @@ export default function ChatPage() {
     setPendingDeleteAll(m)
   }
 
+  const startReply = (m: ChatMessage) => {
+    if (m.deletedForAll) return
+    closeMessageMenu()
+    setReplyTo(m)
+    window.setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  const scrollToQuoted = (id: string) => {
+    document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
   const confirmDeleteForAll = async () => {
     const m = pendingDeleteAll
     if (!m) return
@@ -818,10 +845,12 @@ export default function ChatPage() {
         pieceJointeUrl,
         pieceJointeNom,
         staffOnly: isStaff && staffTab === 'equipe',
+        replyToId: replyTo && !replyTo.deletedForAll ? replyTo.id : undefined,
       })
       setMessages((prev) => [...prev, res.message])
       if (res.message.patientId) setEquipeFocusPatientId(res.message.patientId)
       setInput('')
+      setReplyTo(null)
       clearPendingFile()
       if (isStaff) void loadConversations({ keepSelection: true })
       feedbackSuccess('Message envoyé')
@@ -1464,7 +1493,7 @@ export default function ChatPage() {
                         </span>
                       )}
                     </div>
-                    <div className={cn('relative flex items-start gap-1', own && 'flex-row-reverse')}>
+                    <div className={cn('relative flex items-start gap-0.5', own && 'flex-row-reverse')}>
                       <div className={cn(
                         'rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words shadow-sm',
                         deleted
@@ -1481,6 +1510,27 @@ export default function ChatPage() {
                           <p className="text-xs not-italic text-slate-500">Message supprimé</p>
                         ) : (
                           <>
+                            {m.replyTo && (
+                              <button
+                                type="button"
+                                onClick={() => scrollToQuoted(m.replyTo!.id)}
+                                className={cn(
+                                  'mb-2 w-full text-left rounded-lg px-2.5 py-1.5 border-l-4 text-[11px] leading-snug',
+                                  own
+                                    ? 'bg-white/15 border-white/80 text-white/90'
+                                    : 'bg-slate-50 border-brand-600 text-slate-700',
+                                )}
+                              >
+                                <span className="block font-semibold truncate">
+                                  {m.replyTo.deletedForAll
+                                    ? 'Message supprimé'
+                                    : (m.replyTo.expediteurNom || roleLabel(m.replyTo.expediteurRole))}
+                                </span>
+                                <span className={cn('block line-clamp-2 mt-0.5', own ? 'text-white/75' : 'text-slate-500')}>
+                                  {quoteSnippet(m.replyTo)}
+                                </span>
+                              </button>
+                            )}
                             {m.pieceJointeUrl && (
                               <div className="mb-2">
                                 {isImageUrl(m.pieceJointeUrl) ? (
@@ -1559,7 +1609,25 @@ export default function ChatPage() {
                           </>
                         )}
                       </div>
-                      <div className="relative shrink-0 pt-0.5">
+                      <div className="relative shrink-0 pt-0.5 flex flex-col gap-0.5">
+                        {!deleted && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            className={cn(
+                              'h-7 w-7 rounded-lg border border-transparent text-slate-400 hover:text-brand-800 hover:bg-brand-50 hover:border-brand-100 flex items-center justify-center transition-opacity',
+                              'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
+                            )}
+                            aria-label="Répondre à ce message"
+                            title="Répondre"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              startReply(m)
+                            }}
+                          >
+                            <Reply className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={busy}
@@ -1595,6 +1663,25 @@ export default function ChatPage() {
       </div>
 
       <footer className="border-t border-border/70 p-2.5 sm:p-3 bg-white shrink-0">
+        {replyTo && (
+          <div className="mb-2 flex items-start gap-2 rounded-xl border border-brand-100 bg-brand-50/70 px-3 py-2">
+            <Reply className="h-4 w-4 text-brand-700 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold text-brand-900 truncate">
+                Réponse à {replyTo.expediteurNom || roleLabel(replyTo.expediteurRole)}
+              </p>
+              <p className="text-[11px] text-slate-600 line-clamp-2 mt-0.5">{quoteSnippet(replyTo)}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyTo(null)}
+              className="h-8 w-8 rounded-lg hover:bg-white flex items-center justify-center shrink-0"
+              aria-label="Annuler la réponse"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         {pendingFile && (
           <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
             {pendingFile.previewUrl ? (
@@ -1680,6 +1767,17 @@ export default function ChatPage() {
 
   const messageMenuActions = menuMessage ? (
     <>
+      {!menuDeleted && (
+        <button
+          type="button"
+          role="menuitem"
+          className="w-full min-h-12 px-3 py-3 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 rounded-xl"
+          onClick={() => startReply(menuMessage)}
+        >
+          <Reply className="h-4 w-4 shrink-0" />
+          Répondre
+        </button>
+      )}
       {menuCanPin && (
         <button
           type="button"

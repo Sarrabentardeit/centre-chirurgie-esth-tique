@@ -447,6 +447,15 @@ export interface ChatMessage {
   /** Contexte dossier (fil unifié Équipe). */
   patientNom?: string | null
   dossierNumber?: string | null
+  /** Message cité (réponse un à un). */
+  replyTo?: {
+    id: string
+    contenu: string
+    expediteurNom?: string | null
+    expediteurRole: 'patient' | 'medecin' | 'gestionnaire'
+    deletedForAll?: boolean
+    pieceJointeNom?: string | null
+  } | null
 }
 
 export interface ChatConversation {
@@ -510,6 +519,7 @@ export const chatApi = {
     pieceJointeNom?: string
     /** Canal interne équipe (invisible patiente). */
     staffOnly?: boolean
+    replyToId?: string
   }) =>
     request<{ ok: true; message: ChatMessage }>('/chat/messages', {
       method: 'POST',

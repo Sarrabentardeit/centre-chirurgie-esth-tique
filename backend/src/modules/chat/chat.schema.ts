@@ -9,6 +9,8 @@ export const sendMessageSchema = z
     pieceJointeNom: z.string().trim().max(255).optional(),
     /** Message interne équipe (invisible patiente). Réservé staff. */
     staffOnly: z.boolean().optional().default(false),
+    /** Message cité (réponse un à un). */
+    replyToId: z.string().uuid().optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.contenu && !data.pieceJointeUrl) {

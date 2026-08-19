@@ -1614,10 +1614,7 @@ export default function ChatPage() {
                           <button
                             type="button"
                             disabled={busy}
-                            className={cn(
-                              'h-7 w-7 rounded-lg border border-transparent text-slate-400 hover:text-brand-800 hover:bg-brand-50 hover:border-brand-100 flex items-center justify-center transition-opacity',
-                              'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
-                            )}
+                            className="h-7 w-7 rounded-lg border border-transparent text-slate-400 hover:text-brand-800 hover:bg-brand-50 hover:border-brand-100 flex items-center justify-center"
                             aria-label="Répondre à ce message"
                             title="Répondre"
                             onClick={(e) => {
@@ -1632,8 +1629,8 @@ export default function ChatPage() {
                           type="button"
                           disabled={busy}
                           className={cn(
-                            'h-7 w-7 rounded-lg border border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-100 hover:border-slate-200 flex items-center justify-center transition-opacity',
-                            menuOpen ? 'opacity-100 bg-slate-100 border-slate-200' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
+                            'h-7 w-7 rounded-lg border border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-100 hover:border-slate-200 flex items-center justify-center',
+                            menuOpen && 'bg-slate-100 border-slate-200 text-slate-700',
                           )}
                           aria-label="Actions du message"
                           aria-expanded={menuOpen}

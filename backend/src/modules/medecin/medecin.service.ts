@@ -626,20 +626,23 @@ export async function updatePatientStatus(
     const chatMessage =
       `Dossier classé en abstention.\n\n` +
       `Patiente : ${fullName} (${dossier}).\n\n` +
-      `Merci de traiter cette décision (message à la patiente si besoin). Les anciens rapports et devis restent en historique.`
+      `Merci de traiter cette décision : ouvrir le dossier et envoyer le message à la patiente si besoin. Les anciens rapports et devis restent en historique.`
+    const lienDossier = `/gestionnaire/devis/${patientId}`
 
-    await sendStaffOnlyMessage(actorId, patientId, chatMessage, 'medecin').catch((err) => {
+    await sendStaffOnlyMessage(actorId, patientId, chatMessage, 'medecin', { dossierLink: true }).catch((err) => {
       console.warn('[updatePatientStatus] Message interne abstention non envoyé', err)
     })
 
     await notifyGestionnaires({
       type: 'warning',
       titre: 'Dossier classé en abstention',
-      message: `Le Dr Chennoufi a classé le dossier de ${fullName} (${dossier}) en abstention. Merci de le traiter.`,
-      lienAction: `/gestionnaire/devis/${patientId}`,
+      message:
+        `Le Dr Chennoufi a classé le dossier de ${fullName} (${dossier}) en abstention.\n\n` +
+        `Ouvrez le dossier pour envoyer le message à la patiente.`,
+      lienAction: lienDossier,
       email: true,
     }).catch((err) => {
-      console.warn('[updatePatientStatus] Notification abstention gestionnaire non envoyée', err)
+      console.warn('[updatePatientStatus] Notification / email abstention gestionnaire non envoyés', err)
     })
   }
 
@@ -775,7 +778,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
         ? 'Rapport médical généré'
         : 'Rapport médical modifié'
     const message = announceNouveau
-      ? `Un nouveau rapport (R${rapportsCount}) a été généré pour ${p.user.fullName} (${p.dossierNumber}). Merci de créer un nouveau devis — les versions précédentes restent conservées.`
+        ? `Un nouveau rapport (R${rapportsCount}) a été généré pour ${p.user.fullName} (${p.dossierNumber}). Merci de créer le devis R${rapportsCount} (prérempli depuis ce rapport) — les versions précédentes restent conservées.`
       : createNew
         ? `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) est prêt. Devis à préparer.`
         : `Le rapport médical de ${p.user.fullName} (${p.dossierNumber}) a été corrigé.`
@@ -792,7 +795,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
       const chatMessage =
         `Nouveau rapport médical généré (R${rapportsCount}).\n\n` +
         `Patiente : ${p.user.fullName} (${p.dossierNumber}).\n\n` +
-        `Merci de préparer un nouveau devis. Les anciens rapports et devis restent en historique.`
+        `Merci de créer le devis R${rapportsCount} : il sera prérempli depuis ce rapport. Les anciens rapports et devis restent en historique.`
       await sendStaffOnlyMessage(medecinId, patientId, chatMessage, 'medecin').catch((err) => {
         console.warn('[upsertRapport] Message interne nouveau rapport non envoyé', err)
       })
@@ -859,6 +862,7 @@ type DevisLigneJson = {
 async function syncBrouillonDevisFromRapport(
   patientId: string,
   rapport: {
+    id: string
     forfaitPropose?: number | null
     nuitsPreoperatoires?: number | null
     nuitsClinique?: number | null
@@ -871,7 +875,12 @@ async function syncBrouillonDevisFromRapport(
   },
 ) {
   const draft = await prisma.devis.findFirst({
-    where: { patientId, statut: 'brouillon', deletedAt: null },
+    where: {
+      patientId,
+      statut: 'brouillon',
+      deletedAt: null,
+      OR: [{ rapportId: rapport.id }, { rapportId: null }],
+    },
     orderBy: { dateCreation: 'desc' },
   })
   if (!draft) return

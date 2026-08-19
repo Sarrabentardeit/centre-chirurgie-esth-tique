@@ -235,8 +235,8 @@ model Devis {
   gestionnaireId String      @map("gestionnaire_id")
   /** Rapport médical source de cette version de devis (figé à la création). */
   rapportId      String?     @map("rapport_id")
-  /** Référence affichée : MC-MM-NNN-AAAA */
-  numeroDevis    String?     @unique @map("numero_devis")
+  /** Référence famille : MC-MM-NNN-AAAA (partagée par toutes les versions du patient). */
+  numeroDevis    String?     @map("numero_devis")
   statut         DevisStatut @default(brouillon)
   version        Int         @default(1)
   lignes         Json        @default("[]")
@@ -260,6 +260,7 @@ model Devis {
 
   @@index([deletedAt])
   @@index([rapportId])
+  @@index([numeroDevis])
   @@map("devis")
 }
 

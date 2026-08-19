@@ -14,8 +14,10 @@ export const upsertDevisDraftSchema = z.object({
   planningMedical: z.string().optional().nullable(),
   notesSejour: z.string().optional().nullable(),
   currency: z.string().length(3).optional().default('EUR'),
-  /** Force une nouvelle version (conserve les devis existants, ex. après nouveau rapport). */
+  /** Force une nouvelle version (conserve les devis déjà envoyés). */
   nouvelleVersion: z.boolean().optional(),
+  /** Met à jour ce brouillon uniquement (jamais un devis déjà envoyé / accepté). */
+  devisId: z.string().uuid().optional(),
   /** Rapport source de cette version. */
   rapportId: z.string().uuid().optional().nullable(),
 })
@@ -156,3 +158,22 @@ export const updateUserByGestionnaireSchema = z.object({
 })
 
 export type UpdateUserByGestionnaireInput = z.infer<typeof updateUserByGestionnaireSchema>
+
+const identityFicheSchema = z.object({
+  fullName: z.string().min(2).max(120).optional(),
+  email: z.string().email().optional(),
+  phone: z.string().max(30).nullable().optional(),
+  ville: z.string().max(100).nullable().optional(),
+  pays: z.string().max(100).nullable().optional(),
+  nationalite: z.string().max(60).nullable().optional(),
+  sourceContact: z.string().max(80).nullable().optional(),
+})
+
+export const updatePatientFicheSchema = z.object({
+  identity: identityFicheSchema.optional(),
+  formulairePayload: z.record(z.string(), z.unknown()).optional(),
+}).refine((v) => v.identity !== undefined || v.formulairePayload !== undefined, {
+  message: 'Aucun champ à modifier.',
+})
+
+export type UpdatePatientFicheInput = z.infer<typeof updatePatientFicheSchema>

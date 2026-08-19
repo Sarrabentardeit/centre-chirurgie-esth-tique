@@ -2,7 +2,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Stethoscope, CheckCircle2, User, Phone, Mail,
   MapPin, Calendar, AlertCircle, RefreshCw, Save, ClipboardList,
-  History, Eye, Plus, Lock, Pencil, Trash2,
+  History, Eye, Plus, Lock, Pencil, Trash2, Ban, RotateCcw,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,14 +14,11 @@ import { Label } from '@/components/ui/label'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEffect, useState } from 'react'
-import { STATUS_LABELS, STATUS_COLORS, formatDate, formatCurrency, cn, dossierStatusLabel } from '@/lib/utils'
+import { STATUS_COLORS, formatDate, formatCurrency, cn, dossierStatusLabel } from '@/lib/utils'
 import { medecinApi } from '@/lib/api'
 import type { Devis, RendezVous } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import { InfoRow, FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
@@ -66,6 +63,7 @@ interface PatientDetail {
   dossierNumber: string
   phone: string | null
   status: string
+  statusBeforeAbstention?: string | null
   ville: string | null
   pays: string | null
   nationalite: string | null
@@ -110,12 +108,12 @@ const SOURCE_COLORS: Record<string, string> = {
   direct:    'bg-slate-100 text-slate-600 border-slate-200',
 }
 
-const DOSSIER_STATUSES = [
-  'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
-  'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte',
-  'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
-  'abstention',
-]
+function reopenStatusFor(patient: { statusBeforeAbstention?: string | null }): string {
+  if (patient.statusBeforeAbstention && patient.statusBeforeAbstention !== 'abstention') {
+    return patient.statusBeforeAbstention
+  }
+  return 'en_analyse'
+}
 
 function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -166,9 +164,9 @@ export default function DossierPatientPage() {
   const [deleteRapportError, setDeleteRapportError] = useState<string | null>(null)
   const [nouveauFromUrlApplied, setNouveauFromUrlApplied] = useState(false)
 
-  // Status change
-  const [newStatus, setNewStatus]       = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [abstentionDialog, setAbstentionDialog] = useState<'classer' | 'reouvrir' | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
 
   const applyRapportToForm = (
     r: Rapport | null | undefined,
@@ -266,7 +264,6 @@ export default function DossierPatientPage() {
         setSelectedRapportId(null)
         applyRapportToForm(null, formPayload)
       }
-      setNewStatus(detail.status)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
@@ -388,14 +385,17 @@ export default function DossierPatientPage() {
     }
   }
 
-  const handleUpdateStatus = async () => {
-    if (!id || !newStatus) return
+  const handleConfirmAbstention = async () => {
+    if (!id || !patient) return
+    const nextStatus = abstentionDialog === 'reouvrir' ? reopenStatusFor(patient) : 'abstention'
     setStatusSaving(true)
+    setStatusError(null)
     try {
-      await medecinApi.updatePatientStatus(id, newStatus)
+      await medecinApi.updatePatientStatus(id, nextStatus)
+      setAbstentionDialog(null)
       void load()
     } catch (e) {
-      console.error(e)
+      setStatusError(e instanceof Error ? e.message : 'Impossible de mettre à jour le statut.')
     } finally {
       setStatusSaving(false)
     }
@@ -524,25 +524,39 @@ export default function DossierPatientPage() {
           {dossierStatusLabel(patient.status, patient.rapports?.length)}
         </span>
         <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
-          <Select value={newStatus} onValueChange={setNewStatus}>
-            <SelectTrigger className="w-full sm:w-52 h-8 text-xs border-dashed">
-              <SelectValue placeholder="Modifier manuellement…" />
-            </SelectTrigger>
-            <SelectContent>
-              {DOSSIER_STATUSES.map((s) => (
-                <SelectItem key={s} value={s} className="text-xs">
-                  {STATUS_LABELS[s as keyof typeof STATUS_LABELS] ?? s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {newStatus && newStatus !== patient.status && (
-            <Button size="sm" variant="brand" className="h-8 text-xs" disabled={statusSaving} onClick={handleUpdateStatus}>
-              {statusSaving ? 'Sauvegarde...' : 'Appliquer'}
+          {patient.status === 'abstention' ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+              disabled={statusSaving}
+              onClick={() => setAbstentionDialog('reouvrir')}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Réouvrir
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-50"
+              disabled={statusSaving}
+              onClick={() => setAbstentionDialog('classer')}
+            >
+              <Ban className="h-3.5 w-3.5" />
+              Abstention
             </Button>
           )}
         </div>
       </div>
+      {statusError && (
+        <p className="text-xs text-destructive flex items-center gap-1.5 -mt-3 mb-4">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          {statusError}
+        </p>
+      )}
 
       {/* ── Tabs ── */}
       <Tabs defaultValue={initialTab}>
@@ -729,7 +743,7 @@ export default function DossierPatientPage() {
                     </CardTitle>
                     <p className="text-[11px] text-muted-foreground mt-1">
                       {rapportMode === 'nouveau'
-                        ? 'Les versions précédentes et les devis déjà créés restent conservés.'
+                        ? 'Les versions précédentes et les devis déjà créés restent conservés. Houda créera le devis lié à ce rapport.'
                         : rapportMode === 'consult'
                           ? 'Version archivée — lecture seule. Créez un nouveau rapport pour mettre à jour le dossier.'
                           : latestRapport
@@ -826,7 +840,7 @@ export default function DossierPatientPage() {
                     <p className="font-semibold mb-0.5">Création d’une nouvelle version (R{nextVersionNum})</p>
                     <p>
                       Prérempli depuis R{rapports.length}. L’ancien rapport reste consultable dans l’historique.
-                      Un nouveau devis pourra ensuite être créé sans écraser le précédent.
+                      Houda pourra créer le devis R{nextVersionNum}, prérempli depuis ce rapport, sans écraser les devis précédents.
                     </p>
                   </div>
                 )}
@@ -1180,7 +1194,7 @@ export default function DossierPatientPage() {
             open={confirmNouveauOpen}
             onClose={() => setConfirmNouveauOpen(false)}
             title="Créer un nouveau rapport ?"
-            description={`Une nouvelle version (R${nextVersionNum}) sera ajoutée. R${rapports.length || 1} restera consultable. Les devis déjà émis restent inchangés — un nouveau devis pourra être créé ensuite.`}
+            description={`Une nouvelle version (R${nextVersionNum}) sera ajoutée. R${rapports.length || 1} restera consultable. Les devis déjà créés restent inchangés — Houda pourra créer le devis R${nextVersionNum}, prérempli depuis ce rapport.`}
             confirmLabel={`Créer R${nextVersionNum}`}
             confirmVariant="brand"
             onConfirm={startNouveauRapport}
@@ -1238,6 +1252,37 @@ export default function DossierPatientPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={abstentionDialog !== null}
+        onClose={() => {
+          if (statusSaving) return
+          setAbstentionDialog(null)
+          setStatusError(null)
+        }}
+        title={abstentionDialog === 'reouvrir' ? 'Réouvrir ce dossier ?' : 'Classer en abstention ?'}
+        description={
+          abstentionDialog === 'reouvrir'
+            ? 'Le dossier reprend son suivi, au stade où il se trouvait avant l’abstention.'
+            : 'Aucune intervention ne sera proposée. L’équipe est notifiée pour informer la patiente. Rapports et devis restent consultables.'
+        }
+        confirmLabel={abstentionDialog === 'reouvrir' ? 'Réouvrir' : 'Classer en abstention'}
+        confirmVariant={abstentionDialog === 'reouvrir' ? 'brand' : 'default'}
+        loading={statusSaving}
+        error={statusError}
+        onConfirm={() => void handleConfirmAbstention()}
+        icon={
+          abstentionDialog === 'reouvrir' ? (
+            <div className="h-11 w-11 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+              <RotateCcw className="h-5 w-5 text-emerald-700" />
+            </div>
+          ) : (
+            <div className="h-11 w-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center">
+              <Ban className="h-5 w-5 text-slate-600" />
+            </div>
+          )
+        }
+      />
     </div>
   )
 }

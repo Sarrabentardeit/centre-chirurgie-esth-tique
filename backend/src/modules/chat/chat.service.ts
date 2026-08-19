@@ -1143,6 +1143,7 @@ export async function sendStaffOnlyMessage(
   patientId: string,
   contenu: string,
   expediteurRole: 'gestionnaire' | 'medecin' = 'gestionnaire',
+  opts?: { dossierLink?: boolean },
 ) {
   const text = contenu.trim()
   if (!text) throw new AppError(400, 'EMPTY_MESSAGE', 'Le message ne peut pas être vide.')
@@ -1153,6 +1154,8 @@ export async function sendStaffOnlyMessage(
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
+  const dossierLink = opts?.dossierLink !== false
+
   const message = await prisma.message.create({
     data: {
       patientId,
@@ -1161,6 +1164,7 @@ export async function sendStaffOnlyMessage(
       contenu: text,
       lu: false,
       staffOnly: true,
+      dossierLink,
     },
     include: {
       expediteur: { select: { fullName: true } },
@@ -1175,7 +1179,7 @@ export async function sendStaffOnlyMessage(
 
   await prisma.$executeRaw`UPDATE messages SET dossier_link = true WHERE id = ${message.id}`.catch(() => undefined)
 
-  const mapped = { ...mapMessage(message), dossierLink: true }
+  const mapped = { ...mapMessage(message), dossierLink }
   void publishThreadEvent(
     patientId,
     {

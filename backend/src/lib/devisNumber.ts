@@ -75,16 +75,37 @@ export async function generateNextDevisNumber(prisma: PrismaClient): Promise<str
 }
 
 /**
- * Lettre de version : v1 → aucune, v2 → b, v3 → c, …
+ * N° MC d’une famille de devis : le premier n° déjà attribué au patient,
+ * sinon le n° de dossier s’il est déjà MC, sinon un nouveau compteur.
+ * Les versions suivantes réutilisent ce n° (lettres -B, -C à l’affichage).
+ */
+export async function resolveSharedDevisNumber(
+  prisma: PrismaClient,
+  patientId: string,
+  dossierNumber: string,
+): Promise<string> {
+  const existing = await prisma.devis.findFirst({
+    where: { patientId, numeroDevis: { not: null } },
+    orderBy: [{ version: 'asc' }, { dateCreation: 'asc' }],
+    select: { numeroDevis: true },
+  })
+  const fromDevis = existing?.numeroDevis?.trim()
+  if (fromDevis) return fromDevis
+  if (isMcReference(dossierNumber)) return dossierNumber.trim()
+  return generateNextDevisNumber(prisma)
+}
+
+/**
+ * Lettre de version : v1 → aucune, v2 → B, v3 → C, …
  */
 export function getDevisVersionLetter(version: number): string | null {
   if (!Number.isFinite(version) || version < 2) return null
-  const code = 96 + Math.floor(version) // 2 → 'b'
-  if (code < 98 || code > 122) return String(Math.floor(version))
+  const code = 64 + Math.floor(version) // 2 → 'B'
+  if (code < 66 || code > 90) return String(Math.floor(version))
   return String.fromCharCode(code)
 }
 
-/** Nom affiché : `MC-… NOM PRENOM` (+ ` -b`, ` -c`, … dès la 2ᵉ version). */
+/** Nom affiché : `MC-… NOM PRENOM` (+ ` -B`, ` -C`, … dès la 2ᵉ version). */
 export function formatDevisListName(
   dossierNumber: string | null | undefined,
   patientFullName: string | null | undefined,

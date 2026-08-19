@@ -1310,6 +1310,26 @@ export const gestionnaireApi = {
       body: JSON.stringify({ status }),
     }),
 
+  updatePatientFiche: (
+    id: string,
+    body: {
+      identity?: {
+        fullName?: string
+        email?: string
+        phone?: string | null
+        ville?: string | null
+        pays?: string | null
+        nationalite?: string | null
+        sourceContact?: string | null
+      }
+      formulairePayload?: Record<string, unknown>
+    },
+  ) =>
+    request<{ ok: true; patient: GestionnairePatientDetail }>(`/gestionnaire/patients/${id}/fiche`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
   upsertDevisDraft: (
     patientId: string,
     body: {
@@ -1320,6 +1340,7 @@ export const gestionnaireApi = {
       notesSejour?: string | null
       currency?: string
       nouvelleVersion?: boolean
+      devisId?: string
       rapportId?: string | null
     }
   ) =>

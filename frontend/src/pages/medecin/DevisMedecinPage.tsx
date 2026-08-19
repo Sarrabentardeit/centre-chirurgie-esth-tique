@@ -14,7 +14,7 @@ import {
   refreshDevisCustomContentParts,
 } from '@/lib/devisExportHtml'
 import { sejourPdfFromContext } from '@/lib/devisLetterHtml'
-import { parseSejourMeta } from '@/lib/devisSejourNotes'
+import { parseSejourMeta, nbAdultesDevisFromAccompagnants } from '@/lib/devisSejourNotes'
 import { inlineHtmlImages } from '@/lib/pdf'
 import { StatusBadge } from '@/lib/statusUi'
 import { EmptyState } from '@/components/EmptyState'
@@ -215,6 +215,7 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
   const ref = getDevisDisplayNumber(dv, dv.patient.dossierNumber) || dv.patient.dossierNumber
   const title = formatDevisTitle(dv, dv.patient.dossierNumber)
   const sej = parseSejourMeta(dv.notesSejour)
+  const nbAdultesDevis = nbAdultesDevisFromAccompagnants(sej.nbAdultes || '0')
   const hasSej = !!(sej.cliniqueNom || sej.cliniqueNuits || sej.hotelNom || sej.hotelNuits)
   const sejourLine = sejourLineFromDevis(dv)
 
@@ -248,9 +249,9 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
     { label: 'Nuits hôtel', value: sej.hotelNuits },
     { label: 'Durée totale', value: sej.dureeSejourTotale ? `${sej.dureeSejourTotale} nuit(s)` : '' },
     {
-      label: 'Accompagnants',
+      label: 'Adultes',
       value: [
-        sej.nbAdultes ? `${sej.nbAdultes} adulte${Number(sej.nbAdultes) > 1 ? 's' : ''}` : '',
+        sej.nbAdultes !== '' ? `${nbAdultesDevis} adulte${Number(nbAdultesDevis) > 1 ? 's' : ''}` : '',
         sej.nbEnfants ? `${sej.nbEnfants} enfant${Number(sej.nbEnfants) > 1 ? 's' : ''}` : '',
       ].filter(Boolean).join(', '),
     },

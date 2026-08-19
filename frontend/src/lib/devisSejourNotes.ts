@@ -17,6 +17,8 @@ export const SEJOUR_CLINIQUE_NUITS_PREFIX = 'SEJOUR_CLINIQUE_NUITS:'
 export const SEJOUR_HOTEL_NOM_PREFIX = 'SEJOUR_HOTEL_NOM:'
 export const SEJOUR_HOTEL_NUITS_PREFIX = 'SEJOUR_HOTEL_NUITS:'
 export const SEJOUR_NB_ADULTES_PREFIX = 'SEJOUR_NB_ADULTES:'
+/** 1 = SEJOUR_NB_ADULTES compte déjà la patiente (nouveau format devis). */
+export const SEJOUR_ADULTES_INCLUT_PATIENTE_PREFIX = 'SEJOUR_ADULTES_INCLUT_PATIENTE:'
 export const SEJOUR_NB_ENFANTS_PREFIX = 'SEJOUR_NB_ENFANTS:'
 export const SEJOUR_DUREE_TOTALE_PREFIX = 'SEJOUR_DUREE_TOTALE:'
 export const DELAIS_CONVALESCENCE_PREFIX = 'DELAIS_CONVALESCENCE:'
@@ -29,6 +31,7 @@ const META_PREFIXES = [
   SEJOUR_HOTEL_NOM_PREFIX,
   SEJOUR_HOTEL_NUITS_PREFIX,
   SEJOUR_NB_ADULTES_PREFIX,
+  SEJOUR_ADULTES_INCLUT_PATIENTE_PREFIX,
   SEJOUR_NB_ENFANTS_PREFIX,
   SEJOUR_DUREE_TOTALE_PREFIX,
   DEVIS_INCLUT_PREFIX,
@@ -137,12 +140,18 @@ export function joursSejourFromNuits(cliniqueNuits: string, hotelNuits: string):
 
 export function parseSejourMeta(notes: string | null | undefined): ParsedSejourMeta {
   const lines = (notes ?? '').split('\n')
+  const rawAdultes = lineValue(lines, SEJOUR_NB_ADULTES_PREFIX)
+  const dejaInclutPatiente = lineValue(lines, SEJOUR_ADULTES_INCLUT_PATIENTE_PREFIX) === '1'
   return {
     cliniqueNom: lineValue(lines, SEJOUR_CLINIQUE_NOM_PREFIX),
     cliniqueNuits: lineValue(lines, SEJOUR_CLINIQUE_NUITS_PREFIX),
     hotelNom: lineValue(lines, SEJOUR_HOTEL_NOM_PREFIX),
     hotelNuits: lineValue(lines, SEJOUR_HOTEL_NUITS_PREFIX),
-    nbAdultes: lineValue(lines, SEJOUR_NB_ADULTES_PREFIX),
+    nbAdultes: rawAdultes === ''
+      ? ''
+      : (dejaInclutPatiente
+          ? String(Math.max(0, Math.floor(Number(rawAdultes)) - 1) || 0)
+          : rawAdultes),
     nbEnfants: lineValue(lines, SEJOUR_NB_ENFANTS_PREFIX),
     dureeSejourTotale: lineValue(lines, SEJOUR_DUREE_TOTALE_PREFIX),
     noteSejour: lines.filter((l) => !isMetaLine(l)).join('\n').trim(),
@@ -193,6 +202,26 @@ export function accompagnantsFromFormulairePayload(
     nbAdultes: String(adultesAcc),
     nbEnfants: String(enfants),
   }
+}
+
+/** Nb d'adultes au devis / PDF = accompagnants adultes + la patiente (minimum 1). */
+export function nbAdultesDevisFromAccompagnants(accompagnantsAdultes: number | string): string {
+  const n = Number(accompagnantsAdultes)
+  const acc = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
+  return String(acc + 1)
+}
+
+export function typeChambreFromNbAdultesDevis(nbAdultesIncluantPatiente: number | string): 'Single' | 'Double' {
+  const n = Number(nbAdultesIncluantPatiente)
+  const total = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1
+  return total >= 2 ? 'Double' : 'Single'
+}
+
+/** Adultes accompagnants (hors patiente) à partir du champ devis. */
+export function accompagnantsAdultesFromNbAdultesDevis(nbAdultesIncluantPatiente: number | string): number {
+  const n = Number(nbAdultesIncluantPatiente)
+  const total = Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1
+  return Math.max(0, total - 1)
 }
 
 export type RapportSejourDefaults = {
@@ -280,7 +309,7 @@ export function formatDevisSejourNotesForDisplay(notes: string | null | undefine
   }
   if (p.nbAdultes || p.nbEnfants) {
     const bits = [
-      p.nbAdultes !== '' && `Nombre d'adultes : ${p.nbAdultes}`,
+      p.nbAdultes !== '' && `Nombre d'adultes : ${nbAdultesDevisFromAccompagnants(p.nbAdultes)}`,
       p.nbEnfants !== '' && `Nbr enfants (2 – 12 ans) : ${p.nbEnfants}`,
     ].filter(Boolean)
     if (bits.length) parts.push(bits.join('\n'))

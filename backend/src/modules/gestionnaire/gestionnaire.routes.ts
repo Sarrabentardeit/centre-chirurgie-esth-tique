@@ -16,6 +16,7 @@ import {
   updateUserByGestionnaireSchema,
   updateTemplateSchema,
   upsertDevisDraftSchema,
+  updatePatientFicheSchema,
 } from './gestionnaire.schema.js'
 import { createAgendaEventSchema, updateAgendaEventSchema, updatePatientStatusSchema } from '../medecin/medecin.schema.js'
 import * as gestionnaireService from './gestionnaire.service.js'
@@ -87,6 +88,19 @@ gestionnaireRouter.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await gestionnaireService.updatePatientStatus(req.auth!.sub, pid(req.params.id), req.body)
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.patch(
+  '/patients/:id/fiche',
+  validate(updatePatientFicheSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.updatePatientFiche(req.auth!.sub, pid(req.params.id), req.body)
       res.json({ ok: true, ...result })
     } catch (e) {
       next(e)

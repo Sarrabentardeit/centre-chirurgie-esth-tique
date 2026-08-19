@@ -136,11 +136,22 @@ app.use((_req, res) => {
 app.use(errorHandler)
 
 // ── Démarrage ────────────────────────────────────────────────────────────────
-app.listen(env.PORT, () => {
+const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, '🚀 Serveur démarré')
   logMailerStatus()
   startGoogleCalendarScheduler()
   startDevisRappelScheduler()
+})
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    logger.error(
+      { port: env.PORT },
+      `Port ${env.PORT} déjà utilisé (un autre projet tourne dessus). Arrêtez-le ou changez PORT, puis relancez le backend.`,
+    )
+    process.exit(1)
+  }
+  throw err
 })
 
 export default app

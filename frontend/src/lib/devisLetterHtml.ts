@@ -19,7 +19,7 @@ import {
   resolveExclutIds,
   resolveInclutIds,
 } from '@/lib/devisOfferInclus'
-import { devisSejourDefaultsFromRapport, parseSejourMeta } from '@/lib/devisSejourNotes'
+import { devisSejourDefaultsFromRapport, nbAdultesDevisFromAccompagnants, parseSejourMeta, typeChambreFromNbAdultesDevis } from '@/lib/devisSejourNotes'
 import { buildDevisAmountSentence, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { paraSalmonHi } from '@/lib/planningSejourBranding'
 import { formatDevisTitle } from '@/lib/utils'
@@ -153,10 +153,10 @@ export function sejourPdfFromContext(ctx: DevisLetterContext) {
 
   const formPayload = (ctx.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
   const fromRapport = devisSejourDefaultsFromRapport(rap, formPayload)
-  const nbAdultes = sej.nbAdultes.trim() !== '' ? sej.nbAdultes.trim() : fromRapport.nbAdultes
+  const accompagnantsAdultes = sej.nbAdultes.trim() !== '' ? sej.nbAdultes.trim() : fromRapport.nbAdultes
+  const nbAdultes = nbAdultesDevisFromAccompagnants(accompagnantsAdultes)
   const nbEnfants = sej.nbEnfants.trim() !== '' ? sej.nbEnfants.trim() : fromRapport.nbEnfants
-  // nbAdultes = accompagnants uniquement ; ≥1 adulte accompagnant → chambre Double (avec la patiente)
-  const typeChambre = Number(nbAdultes) >= 1 ? 'Double' : 'Single'
+  const typeChambre = typeChambreFromNbAdultesDevis(nbAdultes)
 
   return {
     dureeHosp,
@@ -506,11 +506,11 @@ function refreshDevisTitleInTopHtml(html: string, title: string): string {
   // Variantes TipTap / anciennes (centré, class, avec ou sans -a/-b)
   out = out.replace(/<p[^>]*class="[^"]*devis-ref-title[^"]*"[^>]*>[\s\S]*?<\/p>/gi, styled)
   out = out.replace(
-    /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+    /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
     styled,
   )
   out = out.replace(
-    /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-[\w-]+(?:\s+-?[a-z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+    /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-[\w-]+(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
     styled,
   )
   // Si aucun titre trouvé, l’insérer avant le récapitulatif

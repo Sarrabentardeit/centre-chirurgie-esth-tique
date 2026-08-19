@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   Plus, Minus, Trash2, Save, Send, CheckCircle2, FileText, AlertCircle,
-  RefreshCw, Search, Eye, EyeOff, ChevronDown, ChevronRight,
+  RefreshCw, Search, ChevronDown, ChevronRight,
   Stethoscope, ClipboardList, Scissors, Heart, ArrowLeft, X, FilePenLine,
-  User, Mail, Phone, MapPin, Calendar, MessageSquare, Ban, Bell,
+  User, Mail, Phone, MapPin, Calendar, MessageSquare, Ban, Bell, Pencil, RotateCcw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -15,7 +15,7 @@ import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { feedbackSuccess, toast } from '@/store/toastStore'
-import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, getDevisDisplayNumber, STATUS_COLORS, STATUS_LABELS, dossierStatusLabel, type CurrencyUnit } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, getDevisDisplayNumber, getDevisVersionLetter, STATUS_COLORS, dossierStatusLabel, type CurrencyUnit } from '@/lib/utils'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
@@ -31,6 +31,8 @@ import {
 } from '@/lib/api'
 import type { DossierStatus } from '@/types'
 import { FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
+import { FormulairePayloadEditor } from '@/components/dossier/FormulairePayloadEditor'
+import { IdentityFicheEditor } from '@/components/dossier/IdentityFicheEditor'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import {
   buildSejourNotes,
@@ -69,12 +71,12 @@ import { inlineHtmlImages } from '@/lib/pdf'
 interface LigneDevisForm { description: string; quantite: number; prixUnitaire: number }
 type PageView = 'list' | 'detail'
 
-const DOSSIER_STATUSES: DossierStatus[] = [
-  'nouveau', 'formulaire_en_cours', 'formulaire_complete', 'en_analyse',
-  'rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte',
-  'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
-  'abstention',
-]
+function reopenStatusFor(patient: { statusBeforeAbstention?: string | null }): string {
+  if (patient.statusBeforeAbstention && patient.statusBeforeAbstention !== 'abstention') {
+    return patient.statusBeforeAbstention
+  }
+  return 'rapport_genere'
+}
 
 const PRESTATIONS_PAR_DEFAUT = [
   'Honoraires Chirurgiens et clinique (nbr de nuitées)',
@@ -94,6 +96,17 @@ const PRESTATIONS_PAR_DEFAUT = [
 function normalizeTndDinars(n: number): number {
   if (!Number.isFinite(n)) return 0
   return Math.round(Number(n.toFixed(2)))
+}
+
+/** R1 = plus ancien. `rapports` du plus récent au plus ancien. */
+function rapportNumero(
+  rapports: { id: string }[],
+  rapportId: string | null | undefined,
+): number | null {
+  if (!rapportId || !rapports.length) return null
+  const idx = rapports.findIndex((r) => r.id === rapportId)
+  if (idx < 0) return null
+  return rapports.length - idx
 }
 
 /** Accompagnants = adultes accompagnants + enfants (sans la patiente). */
@@ -305,7 +318,7 @@ function initials(name: string) {
 function Section({
   icon, title, count, children, defaultOpen = false,
 }: {
-  icon: React.ReactNode; title: string; count?: number; children: React.ReactNode; defaultOpen?: boolean
+  icon: ReactNode; title: string; count?: number; children: ReactNode; defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -490,12 +503,18 @@ interface DevisModalProps {
   onSend: () => void; onSaveDraft: () => void
   onDelete: () => void
   canDelete: boolean
+  canSend?: boolean
   onCustomize: () => void
+  title?: string
+  hint?: string
   currency: CurrencyUnit
   tauxEur: TndEurRateResponse | null
   formError?: string | null
   cliniqueNomInvalid?: boolean
   hotelNomInvalid?: boolean
+  readOnly?: boolean
+  onCreateVersion?: () => void
+  createVersionLabel?: string
 }
 
 function DevisModal({
@@ -513,15 +532,27 @@ function DevisModal({
   exclutIds, setExclutIds,
   drainageNb, setDrainageNb,
   contentionDetail, setContentionDetail,
-  sent, savedDraft, autoSaving = false, actionLoading, onSend, onSaveDraft, onDelete, canDelete, onCustomize, currency,
+  sent, savedDraft, autoSaving = false, actionLoading, onSend, onSaveDraft, onDelete, canDelete, canSend = true, onCustomize, currency,
   tauxEur,
   formError = null,
   cliniqueNomInvalid = false,
   hotelNomInvalid = false,
+  title,
+  hint,
+  readOnly = false,
+  onCreateVersion,
+  createVersionLabel = 'Nouvelle version',
 }: DevisModalProps) {
   const tndPerEur = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
   const euroLabel = formatEuroApprox(total, tndPerEur)
   const [confirmSendOpen, setConfirmSendOpen] = useState(false)
+  const bodyScrollRef = useRef<HTMLDivElement>(null)
+  const bodyScrollTopRef = useRef(0)
+
+  useLayoutEffect(() => {
+    const el = bodyScrollRef.current
+    if (el) el.scrollTop = bodyScrollTopRef.current
+  })
   // Fermer sur Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -546,12 +577,20 @@ function DevisModal({
         <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 shrink-0">
           <div>
             <h2 className="text-base font-bold text-slate-900">
-              {existingDevis?.statut === 'brouillon' || isEditing ? 'Modifier le devis' : 'Nouveau devis'}
+              {title
+                ?? (existingDevis?.statut === 'brouillon' || isEditing ? 'Modifier le devis' : 'Nouveau devis')}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">{patientName}</p>
-            {(autoSaving || savedDraft) && (
-              <p className={`text-[11px] mt-1 font-medium ${savedDraft && !autoSaving ? 'text-emerald-600' : 'text-slate-400'}`}>
-                {autoSaving ? 'Enregistrement automatique…' : 'Brouillon enregistré automatiquement'}
+            {hint && (
+              <p className="text-[11px] text-brand-800 mt-1 font-medium">{hint}</p>
+            )}
+            {!readOnly && (
+              <p className="text-[11px] mt-1 font-medium min-h-[1rem] leading-4">
+                {autoSaving
+                  ? <span className="text-slate-400">Enregistrement…</span>
+                  : savedDraft
+                    ? <span className="text-emerald-600">Enregistré</span>
+                    : <span className="invisible">Enregistrement…</span>}
               </p>
             )}
           </div>
@@ -564,7 +603,12 @@ function DevisModal({
         </div>
 
         {/* Corps scrollable */}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-6">
+        <div
+          ref={bodyScrollRef}
+          className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-6"
+          onScroll={(e) => { bodyScrollTopRef.current = e.currentTarget.scrollTop }}
+        >
+          <div className={cn(readOnly && 'pointer-events-none select-text')}>
 
           {/* Tableau des prestations */}
           <div>
@@ -651,12 +695,14 @@ function DevisModal({
               </div>
             </div>
 
+            {!readOnly && (
             <button
               type="button" onClick={addLigne}
               className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700 transition-colors"
             >
               <Plus className="h-3.5 w-3.5" /> Ajouter une ligne
             </button>
+            )}
           </div>
 
           {/* Informations séjour */}
@@ -978,6 +1024,7 @@ function DevisModal({
               </div>
             </div>
           </div>
+          </div>
         </div>
 
         {/* Footer avec actions */}
@@ -989,6 +1036,34 @@ function DevisModal({
             </p>
           )}
           <div className="flex flex-col sm:flex-row gap-2.5">
+          {readOnly ? (
+            <>
+              {onCreateVersion && (
+                <Button
+                  variant="brand"
+                  className="flex-1 h-10 gap-2 font-semibold"
+                  onClick={onCreateVersion}
+                >
+                  <Pencil className="h-4 w-4" />
+                  {createVersionLabel}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                className="sm:w-auto h-10 gap-2 border-slate-200 text-slate-700"
+                onClick={onCustomize}
+                disabled={actionLoading}
+              >
+                <FilePenLine className="h-4 w-4" />
+                Lettre PDF
+              </Button>
+              <Button variant="ghost" className="sm:w-auto h-10 text-slate-500" onClick={onClose}>
+                Fermer
+              </Button>
+            </>
+          ) : (
+            <>
+          {canSend && (
           <Button
             variant="brand"
             className="flex-1 h-10 gap-2 font-semibold"
@@ -1002,6 +1077,7 @@ function DevisModal({
               ? <><CheckCircle2 className="h-4 w-4" /> Devis envoyé !</>
               : <><Send className="h-4 w-4" /> Valider et envoyer au patient</>}
           </Button>
+          )}
           <Button
             variant="outline"
             className="sm:w-auto h-10 gap-2 border-slate-200 text-slate-700"
@@ -1012,13 +1088,13 @@ function DevisModal({
             Personnaliser le devis
           </Button>
           <Button
-            variant="outline"
-            className="sm:w-auto h-10 gap-2 border-slate-200"
+            variant={canSend ? 'outline' : 'brand'}
+            className="sm:w-auto h-10 gap-2 border-slate-200 min-w-[8.5rem]"
             onClick={onSaveDraft}
-            disabled={actionLoading || autoSaving}
+            disabled={actionLoading}
           >
-            <Save className={`h-4 w-4 ${autoSaving ? 'animate-pulse text-brand-600' : 'text-slate-400'}`} />
-            {autoSaving ? 'Enregistrement…' : savedDraft ? 'Enregistré !' : 'Brouillon'}
+            <Save className={`h-4 w-4 ${autoSaving ? 'animate-pulse text-brand-600' : savedDraft ? 'text-emerald-600' : 'text-slate-400'}`} />
+            {canSend ? 'Brouillon' : 'Enregistrer'}
           </Button>
           {canDelete && (
             <Button
@@ -1034,6 +1110,8 @@ function DevisModal({
           <Button variant="ghost" className="sm:w-auto h-10 text-slate-500" onClick={onClose}>
             Annuler
           </Button>
+            </>
+          )}
           </div>
         </div>
       </div>
@@ -1084,6 +1162,10 @@ export default function DevisGestionnairePage() {
   const [view, setView]                   = useState<PageView>('list')
   const [selectedPatient, setSelectedPatient] = useState('')
   const [patientDetail, setPatientDetail] = useState<GestionnairePatientDetail | null>(null)
+  const [editingIdentity, setEditingIdentity] = useState(false)
+  const [editingFormulaire, setEditingFormulaire] = useState(false)
+  const [ficheSaving, setFicheSaving] = useState(false)
+  const [ficheError, setFicheError] = useState<string | null>(null)
   const [showModal, setShowModal]         = useState(false)
   const [tauxEur, setTauxEur]             = useState<TndEurRateResponse | null>(null)
   const [deletedDevis, setDeletedDevis]   = useState<Array<{
@@ -1145,7 +1227,6 @@ export default function DevisGestionnairePage() {
   const [majRapportMsg, setMajRapportMsg] = useState(DEMANDE_MAJ_RAPPORT_FALLBACK)
   const [majRapportSending, setMajRapportSending] = useState(false)
   const [majRapportError, setMajRapportError] = useState<string | null>(null)
-  const [consultVersionsOpen, setConsultVersionsOpen] = useState(false)
   const [deletePicker, setDeletePicker] = useState<{
     patientId: string
     patientName: string
@@ -1154,9 +1235,8 @@ export default function DevisGestionnairePage() {
     selectedIds: string[]
     loading: boolean
   } | null>(null)
-  const [historiqueSelectedIds, setHistoriqueSelectedIds] = useState<string[]>([])
   const [abstentionMsgError, setAbstentionMsgError] = useState<string | null>(null)
-  const [dossierStatusDraft, setDossierStatusDraft] = useState('')
+  const [abstentionDialog, setAbstentionDialog] = useState<'classer' | 'reouvrir' | null>(null)
   const [statusSaving, setStatusSaving] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
 
@@ -1165,8 +1245,14 @@ export default function DevisGestionnairePage() {
   const draftSavePendingRef = useRef(false)
   /** Une seule nouvelle version à l’ouverture « nouveau devis » ; les auto-saves suivants mettent à jour. */
   const createNewVersionOnceRef = useRef(false)
+  const modalDevisIdRef = useRef<string | undefined>(undefined)
+  const modalRapportIdRef = useRef<string | null>(null)
   const persistDraftSilentRef = useRef<() => Promise<boolean>>(async () => false)
   const [modalReady, setModalReady] = useState(false)
+  const [modalDevis, setModalDevis] = useState<Devis | null>(null)
+  const [modalTitle, setModalTitle] = useState('Nouveau devis')
+  const [modalHint, setModalHint] = useState<string | null>(null)
+  const [tableReadOnly, setTableReadOnly] = useState(false)
 
   // Séjour total (nuits) = nuits clinique + nuits hôtel
   useEffect(() => {
@@ -1283,9 +1369,16 @@ export default function DevisGestionnairePage() {
     setView('list')
     setSelectedPatient('')
     setPatientDetail(null)
+    setEditingIdentity(false)
+    setEditingFormulaire(false)
+    setFicheError(null)
     setShowModal(false)
     setIsEditingExisting(false)
+    setModalDevis(null)
+    setTableReadOnly(false)
     createNewVersionOnceRef.current = false
+    modalDevisIdRef.current = undefined
+    modalRapportIdRef.current = null
     setSent(false)
     setSavedDraft(false)
     // location.key : reclic sidebar sur /devis alors qu’un dossier est ouvert
@@ -1297,7 +1390,9 @@ export default function DevisGestionnairePage() {
     setIsEditingExisting(false)
     setSent(false)
     setSavedDraft(false)
-    setHistoriqueSelectedIds([])
+    setEditingIdentity(false)
+    setEditingFormulaire(false)
+    setFicheError(null)
     navigate(`/gestionnaire/devis/${id}`)
   }
 
@@ -1306,7 +1401,9 @@ export default function DevisGestionnairePage() {
     setSelectedPatient('')
     setPatientDetail(null)
     setShowModal(false)
-    setHistoriqueSelectedIds([])
+    setEditingIdentity(false)
+    setEditingFormulaire(false)
+    setFicheError(null)
     navigate('/gestionnaire/devis')
   }
 
@@ -1333,12 +1430,6 @@ export default function DevisGestionnairePage() {
     return list.sort((a, b) => b.version - a.version)
   }, [patientDetail])
 
-  const openConsultDevis = (devisId: string) => {
-    if (!selectedPatient) return
-    setConsultVersionsOpen(false)
-    navigate(`/gestionnaire/devis/${selectedPatient}/personnaliser?devisId=${encodeURIComponent(devisId)}`)
-  }
-
   const rapportsList = patientDetail?.rapports ?? []
   /** Liste active OU détail API (ex. abstention hors liste devis). */
   const patientRow: PatientListItem | GestionnairePatientDetail | null = useMemo(() => {
@@ -1351,26 +1442,37 @@ export default function DevisGestionnairePage() {
   }, [patients, selectedPatient, patientDetail])
 
   useEffect(() => {
-    if (patientRow?.status) {
-      setDossierStatusDraft(patientRow.status)
-      setStatusError(null)
-    }
-  }, [patientRow?.status, selectedPatient])
+    setStatusError(null)
+    setAbstentionDialog(null)
+  }, [selectedPatient])
 
-  const handleApplyDossierStatus = async () => {
-    if (!selectedPatient || !dossierStatusDraft) return
-    if (dossierStatusDraft === patientRow?.status) return
+  const applyLocalPatientStatus = (status: string, extra?: { statusBeforeAbstention?: string | null }) => {
+    if (!selectedPatient) return
+    setPatients((prev) =>
+      prev.map((p) => (p.id === selectedPatient ? { ...p, status, ...extra } : p)),
+    )
+    setPatientDetail((prev) =>
+      prev && prev.id === selectedPatient ? { ...prev, status, ...extra } : prev,
+    )
+  }
+
+  const handleConfirmAbstention = async () => {
+    if (!selectedPatient || !patientRow) return
+    const nextStatus = abstentionDialog === 'reouvrir' ? reopenStatusFor(patientRow) : 'abstention'
     setStatusSaving(true)
     setStatusError(null)
     try {
-      await gestionnaireApi.updatePatientStatus(selectedPatient, dossierStatusDraft)
-      setPatients((prev) =>
-        prev.map((p) => (p.id === selectedPatient ? { ...p, status: dossierStatusDraft } : p)),
-      )
-      setPatientDetail((prev) =>
-        prev && prev.id === selectedPatient ? { ...prev, status: dossierStatusDraft } : prev,
-      )
-      toast({ title: 'Statut dossier mis à jour', variant: 'success' })
+      await gestionnaireApi.updatePatientStatus(selectedPatient, nextStatus)
+      if (abstentionDialog === 'classer') {
+        applyLocalPatientStatus('abstention', { statusBeforeAbstention: patientRow.status })
+        setAbstentionDialog(null)
+        toast({ title: 'Dossier classé en abstention', variant: 'success' })
+        openAbstentionMessage()
+      } else {
+        applyLocalPatientStatus(nextStatus, { statusBeforeAbstention: null })
+        setAbstentionDialog(null)
+        toast({ title: 'Dossier réouvert', variant: 'success' })
+      }
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : 'Impossible de mettre à jour le statut.')
     } finally {
@@ -1378,9 +1480,84 @@ export default function DevisGestionnairePage() {
     }
   }
 
+  const applyFichePatient = (updated: GestionnairePatientDetail) => {
+    setPatientDetail(updated)
+    setPatients((prev) =>
+      prev.map((p) =>
+        p.id === updated.id
+          ? {
+              ...p,
+              phone: updated.phone,
+              ville: updated.ville,
+              pays: updated.pays,
+              nationalite: updated.nationalite,
+              sourceContact: updated.sourceContact,
+              status: updated.status,
+              user: { ...p.user, ...updated.user },
+            }
+          : p,
+      ),
+    )
+  }
+
+  const handleSaveIdentity = async (values: {
+    fullName: string
+    email: string
+    phone: string
+    ville: string
+    pays: string
+    nationalite: string
+    sourceContact: string
+  }) => {
+    if (!selectedPatient) return
+    setFicheSaving(true)
+    setFicheError(null)
+    try {
+      const r = await gestionnaireApi.updatePatientFiche(selectedPatient, {
+        identity: {
+          fullName: values.fullName.trim(),
+          email: values.email.trim(),
+          phone: values.phone.trim() || null,
+          ville: values.ville.trim() || null,
+          pays: values.pays.trim() || null,
+          nationalite: values.nationalite.trim() || null,
+          sourceContact: values.sourceContact.trim() || null,
+        },
+      })
+      applyFichePatient(r.patient)
+      setEditingIdentity(false)
+      feedbackSuccess('Identité mise à jour')
+    } catch (e) {
+      setFicheError(e instanceof Error ? e.message : 'Impossible d’enregistrer l’identité.')
+    } finally {
+      setFicheSaving(false)
+    }
+  }
+
+  const handleSaveFormulaire = async (payload: Record<string, unknown>) => {
+    if (!selectedPatient) return
+    setFicheSaving(true)
+    setFicheError(null)
+    try {
+      const r = await gestionnaireApi.updatePatientFiche(selectedPatient, {
+        formulairePayload: payload,
+      })
+      applyFichePatient(r.patient)
+      setEditingFormulaire(false)
+      feedbackSuccess('Formulaire mis à jour')
+    } catch (e) {
+      setFicheError(e instanceof Error ? e.message : 'Impossible d’enregistrer le formulaire.')
+    } finally {
+      setFicheSaving(false)
+    }
+  }
+
   const total        = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
 
-  const openModal = (editing = false) => {
+  const openDevisTable = (
+    intent: 'create' | 'edit-draft' | 'view' | 'new-version',
+    target?: Devis | null,
+  ) => {
     const status = patientRow?.status ?? patientDetail?.status
     if (!status || !canPatientHaveDevis(status)) {
       setPageError(
@@ -1402,67 +1579,136 @@ export default function DevisGestionnairePage() {
     const fp = rap?.forfaitPropose ?? rapportsList[0]?.forfaitPropose
     const honoraires =
       typeof fp === 'number' && Number.isFinite(fp) && fp > 0 ? fp : undefined
-    /** Ancien comportement « sync même fiche » retiré : un nouveau rapport → nouveau devis. */
-    const syncFromRapport = false
+    const rapNum = rap ? rapportNumero(rapportsList, rap.id) : null
+    const rapportOpts = {
+      honorairesChirCliniquePu: honoraires,
+      qteSuppCliniqueAccomp: qteAccomp,
+      qteHotelNuits: qteHotel,
+      qteDrainage,
+    }
 
-    if (editing && existingDevis) {
-      const baseLignes = existingDevis.lignes.map((l) => ({
+    const source = intent === 'create' ? null : (target ?? existingDevis)
+    const effectiveIntent =
+      intent === 'view' && source?.statut === 'brouillon' ? 'edit-draft' : intent
+    setTableReadOnly(effectiveIntent === 'view')
+
+    if (source && effectiveIntent !== 'create') {
+      const baseLignes = source.lignes.map((l) => ({
         description: l.description,
         quantite: l.quantite,
         prixUnitaire: normalizeTndDinars(l.prixUnitaire),
       }))
-      setLignes(
-        syncFromRapport
-          ? applyRapportToExistingLignes(baseLignes, {
-              honorairesChirCliniquePu: honoraires,
-              qteSuppCliniqueAccomp: qteAccomp,
-              qteHotelNuits: qteHotel,
-              qteDrainage,
-            })
-          : baseLignes,
-      )
-      const p = parseSejourMeta(existingDevis.notesSejour ?? existingDevis.planningMedical ?? '')
+      setLignes(baseLignes)
+      const p = parseSejourMeta(source.notesSejour ?? source.planningMedical ?? '')
       const clinique = resolveCliniqueFromNom(p.cliniqueNom)
       const hotel = resolveHotelFromNom(p.hotelNom)
       setCliniqueChoice(clinique.choice)
       setCliniqueAutre(clinique.autre)
-      setCliniqueNuits(syncFromRapport ? fromRapport.cliniqueNuits : (p.cliniqueNuits !== '' ? p.cliniqueNuits : fromRapport.cliniqueNuits))
+      setCliniqueNuits(p.cliniqueNuits !== '' ? p.cliniqueNuits : fromRapport.cliniqueNuits)
       setHotelChoice(hotel.choice)
       setHotelAutre(hotel.autre)
-      setHotelNuits(syncFromRapport ? fromRapport.hotelNuits : (p.hotelNuits !== '' ? p.hotelNuits : fromRapport.hotelNuits))
-      setNbAdultes(syncFromRapport ? fromRapport.nbAdultes : (p.nbAdultes !== '' ? p.nbAdultes : fromRapport.nbAdultes))
-      setNbEnfants(syncFromRapport ? fromRapport.nbEnfants : (p.nbEnfants !== '' ? p.nbEnfants : fromRapport.nbEnfants))
-      setDureeSejourTotale(syncFromRapport ? fromRapport.dureeSejourTotale : (p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale))
+      setHotelNuits(p.hotelNuits !== '' ? p.hotelNuits : fromRapport.hotelNuits)
+      setNbAdultes(p.nbAdultes !== '' ? p.nbAdultes : fromRapport.nbAdultes)
+      setNbEnfants(p.nbEnfants !== '' ? p.nbEnfants : fromRapport.nbEnfants)
+      setDureeSejourTotale(p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale)
       setNotesSejour(p.noteSejour)
       setInclutIds(p.inclutIds ?? defaultInclutIds())
       setExclutIds(p.exclutIds ?? defaultExclutIds())
-      setDrainageNb(syncFromRapport ? defaultDrainageNbFromRapport(rap) : (p.drainageNb ?? defaultDrainageNbFromRapport(rap)))
+      setDrainageNb(p.drainageNb ?? defaultDrainageNbFromRapport(rap))
       setContentionDetail(p.contentionDetail ?? '')
-      setIsEditingExisting(true)
-      createNewVersionOnceRef.current = false
+      const sourceRapNum = rapportNumero(rapportsList, source.rapportId)
+      if (effectiveIntent === 'edit-draft') {
+        setIsEditingExisting(true)
+        setModalDevis(source)
+        createNewVersionOnceRef.current = false
+        modalDevisIdRef.current = source.id
+        modalRapportIdRef.current = source.rapportId ?? null
+        setModalTitle('Modifier le devis')
+        setModalHint(
+          sourceRapNum
+            ? `Version ${source.version} · rapport R${sourceRapNum} · même numéro MC`
+            : `Version ${source.version} · même numéro MC`,
+        )
+      } else if (effectiveIntent === 'view') {
+        const letter = getDevisVersionLetter(source.version)
+        setIsEditingExisting(false)
+        setModalDevis(source)
+        createNewVersionOnceRef.current = false
+        modalDevisIdRef.current = source.id
+        modalRapportIdRef.current = source.rapportId ?? null
+        setModalTitle(letter ? `Devis -${letter}` : 'Devis envoyé')
+        setModalHint(
+          sourceRapNum
+            ? `Lecture · version ${source.version} · rapport R${sourceRapNum}. Pour changer : Nouvelle version.`
+            : `Lecture · version ${source.version}. Pour changer : Nouvelle version.`,
+        )
+      } else {
+        const nextVer = Math.max(source.version, ...devisVersions.map((d) => d.version)) + 1
+        const nextLetter = getDevisVersionLetter(nextVer)
+        setIsEditingExisting(false)
+        setModalDevis(null)
+        createNewVersionOnceRef.current = true
+        modalDevisIdRef.current = undefined
+        modalRapportIdRef.current = source.rapportId ?? rap?.id ?? null
+        setModalTitle(nextLetter ? `Nouvelle version -${nextLetter}` : 'Nouvelle version du devis')
+        setModalHint(
+          `Le devis déjà envoyé est conservé. Cette copie créera une nouvelle version${nextLetter ? ` (-${nextLetter})` : ''} avec le même numéro MC.`,
+        )
+      }
     } else {
-      setLignes(
-        buildDefaultLignes({
-          honorairesChirCliniquePu: honoraires,
-          qteSuppCliniqueAccomp: qteAccomp,
-          qteHotelNuits: qteHotel ?? undefined,
-          qteDrainage: qteDrainage ?? undefined,
-        }),
-      )
-      setCliniqueChoice(''); setCliniqueAutre('')
+      const template = existingDevis
+      if (template) {
+        const baseLignes = template.lignes.map((l) => ({
+          description: l.description,
+          quantite: l.quantite,
+          prixUnitaire: normalizeTndDinars(l.prixUnitaire),
+        }))
+        setLignes(applyRapportToExistingLignes(baseLignes, rapportOpts))
+        const p = parseSejourMeta(template.notesSejour ?? template.planningMedical ?? '')
+        const clinique = resolveCliniqueFromNom(p.cliniqueNom)
+        const hotel = resolveHotelFromNom(p.hotelNom)
+        setCliniqueChoice(clinique.choice)
+        setCliniqueAutre(clinique.autre)
+        setHotelChoice(hotel.choice)
+        setHotelAutre(hotel.autre)
+        setNotesSejour(p.noteSejour)
+        setInclutIds(p.inclutIds ?? defaultInclutIds())
+        setExclutIds(p.exclutIds ?? defaultExclutIds())
+        setContentionDetail(p.contentionDetail ?? '')
+      } else {
+        setLignes(
+          buildDefaultLignes({
+            honorairesChirCliniquePu: honoraires,
+            qteSuppCliniqueAccomp: qteAccomp,
+            qteHotelNuits: qteHotel ?? undefined,
+            qteDrainage: qteDrainage ?? undefined,
+          }),
+        )
+        setCliniqueChoice(''); setCliniqueAutre('')
+        setHotelChoice(''); setHotelAutre('')
+        setNotesSejour('')
+        setInclutIds(defaultInclutIds())
+        setExclutIds(defaultExclutIds())
+        setContentionDetail('')
+      }
       setCliniqueNuits(fromRapport.cliniqueNuits)
-      setHotelChoice(''); setHotelAutre('')
       setHotelNuits(fromRapport.hotelNuits)
       setNbAdultes(fromRapport.nbAdultes)
       setNbEnfants(fromRapport.nbEnfants)
       setDureeSejourTotale(fromRapport.dureeSejourTotale)
-      setNotesSejour('')
-      setInclutIds(defaultInclutIds())
-      setExclutIds(defaultExclutIds())
       setDrainageNb(defaultDrainageNbFromRapport(rap))
-      setContentionDetail('')
+      setTableReadOnly(false)
       setIsEditingExisting(false)
+      setModalDevis(null)
       createNewVersionOnceRef.current = devisVersions.length > 0
+      modalDevisIdRef.current = undefined
+      modalRapportIdRef.current = rap?.id ?? null
+      setModalTitle(rapNum ? `Nouveau devis · Rapport R${rapNum}` : 'Nouveau devis')
+      setModalHint(
+        rapNum
+          ? `Prérempli depuis le rapport R${rapNum} (forfait, nuits, drainage). Les devis précédents restent inchangés.`
+          : 'Prérempli depuis le rapport médical.',
+      )
     }
     setSent(false); setSavedDraft(false)
     setModalError(null)
@@ -1505,8 +1751,9 @@ export default function DevisGestionnairePage() {
         }) || null,
       currency,
       // Nouvelle fiche : 1er save = nouvelle version ; les suivants mettent à jour ce brouillon
-      nouvelleVersion: createNewVersionOnceRef.current && devisVersions.length > 0,
-      rapportId: latestRapportId,
+      nouvelleVersion: !modalDevisIdRef.current && createNewVersionOnceRef.current && devisVersions.length > 0,
+      devisId: modalDevisIdRef.current,
+      rapportId: modalRapportIdRef.current ?? latestRapportId,
     }
   }
 
@@ -1532,6 +1779,7 @@ export default function DevisGestionnairePage() {
     silent?: boolean
     requireNoms?: boolean
   }): Promise<boolean> => {
+    if (tableReadOnly) return false
     const silent = opts?.silent ?? false
     const requireNoms = opts?.requireNoms ?? !silent
     if (!selectedPatient) return false
@@ -1611,6 +1859,9 @@ export default function DevisGestionnairePage() {
       })
       createNewVersionOnceRef.current = false
       setIsEditingExisting(true)
+      setModalDevis(savedDevis)
+      modalDevisIdRef.current = savedDevis.id
+      if (savedDevis.rapportId) modalRapportIdRef.current = savedDevis.rapportId
       setSavedDraft(true)
       window.setTimeout(() => setSavedDraft(false), 2200)
 
@@ -1656,6 +1907,7 @@ export default function DevisGestionnairePage() {
     drainageNb,
     contentionDetail,
     currency,
+    tableReadOnly,
   ])
 
   persistDraftSilentRef.current = () => persistDraft({ silent: true, requireNoms: false })
@@ -1712,7 +1964,7 @@ export default function DevisGestionnairePage() {
   }, [showModal])
 
   useEffect(() => {
-    if (!showModal || !modalReady) return
+    if (!showModal || !modalReady || tableReadOnly) return
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     draftSaveTimerRef.current = setTimeout(() => {
       void persistDraftSilentRef.current()
@@ -1720,16 +1972,21 @@ export default function DevisGestionnairePage() {
     return () => {
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     }
-  }, [showModal, modalReady, draftFormSnapshot])
+  }, [showModal, modalReady, draftFormSnapshot, tableReadOnly])
 
   const flushDraftAndCloseModal = useCallback(() => {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     void (async () => {
-      if (modalReady) await persistDraftSilentRef.current()
+      if (modalReady && !tableReadOnly) await persistDraftSilentRef.current()
       setShowModal(false)
       setModalReady(false)
+      setModalDevis(null)
+      setTableReadOnly(false)
+      modalDevisIdRef.current = undefined
+      modalRapportIdRef.current = null
+      setModalHint(null)
     })()
-  }, [modalReady])
+  }, [modalReady, tableReadOnly])
 
   const handleSaveDraft = async () => {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
@@ -1806,12 +2063,13 @@ export default function DevisGestionnairePage() {
     finally { setActionLoading(false) }
   }
 
-  const handleRefuse = async () => {
-    if (!existingDevis) return
+  const handleRefuse = async (devisId?: string) => {
+    const id = devisId ?? existingDevis?.id
+    if (!id) return
     const reason = window.prompt('Motif de refus (optionnel)') ?? ''
     setActionLoading(true); setPageError(null)
     try {
-      await gestionnaireApi.refuseDevis(existingDevis.id, { reason: reason.trim() || undefined })
+      await gestionnaireApi.refuseDevis(id, { reason: reason.trim() || undefined })
       await loadPatientDetail(selectedPatient); await loadPatients()
     } catch (e) { setPageError(e instanceof Error ? e.message : 'Erreur.') }
     finally { setActionLoading(false) }
@@ -1819,6 +2077,14 @@ export default function DevisGestionnairePage() {
 
   const handleCustomize = async () => {
     if (!selectedPatient) return
+    if (tableReadOnly && modalDevis) {
+      setShowModal(false)
+      setModalReady(false)
+      navigate(
+        `/gestionnaire/devis/${selectedPatient}/personnaliser?devisId=${encodeURIComponent(modalDevis.id)}`,
+      )
+      return
+    }
     if (!validateSejourNoms()) return
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     setActionLoading(true); setModalError(null); setPageError(null)
@@ -1893,7 +2159,7 @@ export default function DevisGestionnairePage() {
     patientName: string,
   ) =>
     formatDevisListName(
-      getDevisDisplayNumber(d, dossierNumber) || dossierNumber,
+      dossierNumber?.trim() || getDevisDisplayNumber(d, dossierNumber) || 'Dossier',
       patientName,
       d.version,
     )
@@ -1981,7 +2247,6 @@ export default function DevisGestionnairePage() {
         }
         setShowModal(false)
         setIsEditingExisting(false)
-        setHistoriqueSelectedIds([])
         if (selectedPatient) await loadPatientDetail(selectedPatient)
         const n = pendingDelete.devisIds.length
         toast({
@@ -2013,7 +2278,7 @@ export default function DevisGestionnairePage() {
       null,
       selectedPatient,
       patientRow.user.fullName,
-      existingDevis?.id,
+      modalDevis?.id ?? existingDevis?.id,
     )
   }
 
@@ -2426,14 +2691,12 @@ export default function DevisGestionnairePage() {
                     onClick={() => openDetail(p.id)}
                     className="flex-1 min-w-0 flex items-center gap-3 text-left"
                   >
-                  {/* Avatar */}
                   <Avatar className="h-9 w-9 sm:h-10 sm:w-10 shrink-0">
                     <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-xs rounded-xl">
                       {initials(p.user.fullName)}
                     </AvatarFallback>
                   </Avatar>
 
-                  {/* Info principale */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-slate-900 truncate">{p.user.fullName}</p>
@@ -2445,7 +2708,6 @@ export default function DevisGestionnairePage() {
                     </div>
                   </div>
 
-                  {/* Bloc devis */}
                   <div className="hidden sm:flex flex-col items-end gap-1 shrink-0 min-w-[190px]">
                     <div className="flex items-center gap-1.5">
                       {hasDevis && devisStatut
@@ -2457,25 +2719,14 @@ export default function DevisGestionnairePage() {
                     </div>
                     {devisStatut === 'envoye' && (
                       <span className={`flex items-center gap-1 text-[11px] font-medium ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {isRead
-                          ? <><Eye className="h-3 w-3" /> Lu le {formatDateTime(lastDevis!.vuParPatientAt!)}</>
-                          : <><EyeOff className="h-3 w-3" /> Non consulté</>}
+                        {isRead ? 'Consulté' : 'Non consulté'}
                       </span>
                     )}
-                    {(devisStatut === 'accepte' || devisStatut === 'refuse') && isRead && (
-                      <span className="flex items-center gap-1 text-[11px] text-slate-400">
-                        <Eye className="h-3 w-3" /> Lu le {formatDateTime(lastDevis!.vuParPatientAt!)}
-                      </span>
+                    {devisStatut === 'accepte' && (
+                      <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">Accepté</span>
                     )}
-                    {devisStatut === 'accepte' && lastDevis?.updatedAt && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-                        <CheckCircle2 className="h-3 w-3" /> Accepté le {formatDateTime(lastDevis.updatedAt)}
-                      </span>
-                    )}
-                    {devisStatut === 'refuse' && lastDevis?.updatedAt && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
-                        <X className="h-3 w-3" /> Refusé le {formatDateTime(lastDevis.updatedAt)}
-                      </span>
+                    {devisStatut === 'refuse' && (
+                      <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500">Refusé</span>
                     )}
                     {!hasDevis && (
                       <span className="text-[11px] text-slate-400">Créer un devis →</span>
@@ -2502,9 +2753,9 @@ export default function DevisGestionnairePage() {
                           numeroDevis: lastDevis.numeroDevis,
                         })
                       }
-                      className="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-sky-500 hover:text-sky-700 hover:bg-sky-50 transition-colors disabled:opacity-50"
+                      className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-sky-700 hover:bg-sky-50 transition-colors disabled:opacity-50"
                     >
-                      <Bell className="h-3.5 w-3.5" />
+                      <Bell className="h-4 w-4" />
                     </button>
                   )}
 
@@ -2568,34 +2819,66 @@ export default function DevisGestionnairePage() {
       )
     }
 
-    const devisStatut = existingDevis?.statut
-    const isRead = !!existingDevis?.vuParPatientAt
-
     const latestRapport = rapportsList[0] ?? null
-    const rapportIdsUsedByDevis = new Set(
-      devisVersions.map((d) => d.rapportId).filter((id): id is string => !!id),
+    const latestRapportNumero = latestRapport ? (rapportsList.length) : 0
+    const hasDevisForLatestRapport = Boolean(
+      latestRapport &&
+      devisVersions.some((d) => d.rapportId === latestRapport.id && d.statut !== 'refuse'),
     )
     const needsNewDevisFromRapport = Boolean(
       latestRapport &&
       existingDevis &&
-      (
-        rapportIdsUsedByDevis.size > 0
-          ? !rapportIdsUsedByDevis.has(latestRapport.id)
-          : +new Date(latestRapport.createdAt) > +new Date(existingDevis.dateCreation)
-      ),
+      existingDevis.statut !== 'refuse' &&
+      !hasDevisForLatestRapport,
     )
-
-    const devisActionLabel =
-      !existingDevis || existingDevis.statut === 'refuse'
-        ? 'Créer un devis'
-        : needsNewDevisFromRapport
-          ? `Créer un nouveau devis (v${(devisVersions[0]?.version ?? 0) + 1})`
-          : existingDevis.statut === 'brouillon'
-            ? 'Modifier le brouillon'
-            : 'Modifier le devis'
 
     const devisAllowed = canPatientHaveDevis(patientRow.status)
     const isAbstention = patientRow.status === 'abstention'
+
+    const primaryDevisAction: {
+      label: string
+      intent: 'create' | 'edit-draft' | 'new-version'
+      target?: Devis | null
+    } = needsNewDevisFromRapport
+      ? {
+          label: latestRapportNumero > 0 ? `Créer le devis R${latestRapportNumero}` : 'Créer un devis',
+          intent: 'create',
+        }
+      : existingDevis && existingDevis.statut !== 'refuse'
+        ? existingDevis.statut === 'brouillon'
+          ? { label: 'Modifier', intent: 'edit-draft', target: existingDevis }
+          : (() => {
+              const nextVer = Math.max(existingDevis.version, ...devisVersions.map((d) => d.version)) + 1
+              const letter = getDevisVersionLetter(nextVer)
+              return {
+                label: letter ? `Nouvelle version -${letter}` : 'Nouvelle version',
+                intent: 'new-version' as const,
+                target: existingDevis,
+              }
+            })()
+        : { label: 'Créer le devis', intent: 'create' }
+
+    const workStatusLabel = isAbstention
+      ? 'Abstention'
+      : needsNewDevisFromRapport
+        ? latestRapportNumero > 1
+          ? `À traiter · devis R${latestRapportNumero}`
+          : 'À traiter'
+        : !existingDevis || existingDevis.statut === 'refuse'
+          ? rapportsList.length > 0 && devisAllowed
+            ? 'À traiter'
+            : dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)
+          : existingDevis.statut === 'brouillon'
+            ? 'Devis en cours'
+            : existingDevis.statut === 'envoye'
+              ? existingDevis.vuParPatientAt
+                ? 'Devis envoyé · consulté'
+                : 'Devis envoyé · non consulté'
+              : existingDevis.statut === 'accepte'
+                ? 'Accepté'
+                : existingDevis.statut === 'refuse'
+                  ? 'Refusé'
+                  : dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)
 
     return (
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -2619,7 +2902,6 @@ export default function DevisGestionnairePage() {
                     'linear-gradient(135deg, rgba(6,42,48,0.06) 0%, rgba(184,140,92,0.08) 55%, rgba(255,255,255,0.9) 100%)',
                 }}
               >
-                {/* Identité */}
                 <div className="flex items-start gap-3 sm:gap-4">
                   <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 ring-2 ring-white shadow-sm">
                     <AvatarFallback className="bg-brand-100 text-brand-800 text-base sm:text-lg font-bold">
@@ -2634,30 +2916,13 @@ export default function DevisGestionnairePage() {
                       <span className="text-[11px] sm:text-xs font-mono font-semibold text-brand-800 bg-white/90 border border-brand-100 px-2 py-0.5 rounded-md">
                         {patientRow.dossierNumber}
                       </span>
-                      <StatusBadge kind="dossier" value={patientRow.status} />
-                      {devisStatut && <StatusBadge kind="devis" value={devisStatut} />}
-                      {devisStatut === 'envoye' && (
-                        <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
-                          {isRead
-                            ? <><Eye className="h-3 w-3" /> Vu le {formatDateTime(existingDevis!.vuParPatientAt!)}</>
-                            : <><EyeOff className="h-3 w-3" /> Pas encore consulté</>}
-                        </span>
-                      )}
-                      {devisStatut === 'accepte' && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-                          <CheckCircle2 className="h-3 w-3" /> Accepté
-                          {isRead && (
-                            <span className="font-normal text-slate-400">
-                              · lu le {formatDateTime(existingDevis!.vuParPatientAt!)}
-                            </span>
-                          )}
-                        </span>
-                      )}
+                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border bg-white/90 text-slate-800 border-slate-200">
+                        {workStatusLabel}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Coordonnées — grille pleine largeur */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 rounded-xl border border-white/80 bg-white/70 px-3 py-2.5">
                   <div className="flex items-center gap-2 min-w-0 text-xs text-slate-700">
                     <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -2675,7 +2940,6 @@ export default function DevisGestionnairePage() {
                   </div>
                 </div>
 
-                {/* Actions — barre unique */}
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-wrap gap-2">
                     {isAbstention ? (
@@ -2693,24 +2957,13 @@ export default function DevisGestionnairePage() {
                         <Button
                           variant="brand"
                           className="gap-2 h-10 text-sm font-semibold"
-                          onClick={() =>
-                            openModal(
-                              needsNewDevisFromRapport
-                                ? false
-                                : !!existingDevis && existingDevis.statut !== 'refuse',
-                            )
-                          }
+                          onClick={() => openDevisTable(primaryDevisAction.intent, primaryDevisAction.target)}
                           disabled={detailLoading || !devisAllowed}
-                          title={
-                            devisAllowed
-                              ? needsNewDevisFromRapport
-                                ? 'Nouveau devis à partir du dernier rapport — les versions précédentes restent conservées.'
-                                : undefined
-                              : 'En attente du rapport médical (médecin) avant devis.'
-                          }
                         >
-                          <FileText className="h-4 w-4" />
-                          {devisActionLabel}
+                          {primaryDevisAction.intent === 'create'
+                            ? <FileText className="h-4 w-4" />
+                            : <Pencil className="h-4 w-4" />}
+                          {primaryDevisAction.label}
                         </Button>
                         {existingDevis && existingDevis.statut === 'envoye' && (
                           <Button
@@ -2736,31 +2989,10 @@ export default function DevisGestionnairePage() {
                           className="gap-1.5 h-10 text-sm border-brand-200 text-brand-800 hover:bg-brand-50 bg-white"
                           disabled={detailLoading || majRapportSending}
                           onClick={openMajRapport}
-                          title="Demander un nouveau rapport au médecin — sans toucher aux devis existants"
                         >
                           <Stethoscope className="h-4 w-4" />
                           Écrire au Dr Chennoufi
                         </Button>
-                        {existingDevis && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="gap-1.5 h-10 text-sm border-slate-200 bg-white"
-                            onClick={() => {
-                              if (devisVersions.length === 1) {
-                                openConsultDevis(devisVersions[0].id)
-                                return
-                              }
-                              setConsultVersionsOpen(true)
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                            Consulter
-                            {devisVersions.length > 1 && (
-                              <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                            )}
-                          </Button>
-                        )}
                         {existingDevis && (
                           <Button
                             type="button"
@@ -2788,23 +3020,27 @@ export default function DevisGestionnairePage() {
                 </div>
               </div>
 
-              {(patientRow.status === 'rapport_modifie' ||
-                (patientRow.status === 'rapport_genere' && (patientRow.rapportsCount ?? patientRow.rapports?.length ?? 0) > 1)) && (
+              {needsNewDevisFromRapport && latestRapportNumero > 0 ? (
                 <div className="border-t border-amber-100 bg-amber-50/90 px-4 sm:px-6 py-3">
                   <p className="text-sm font-semibold text-amber-950">
-                    {(patientRow.rapportsCount ?? patientRow.rapports?.length ?? 0) > 1
-                      ? dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)
-                      : 'Rapport modifié par le médecin'}
+                    Rapport R{latestRapportNumero} généré
                   </p>
                   <p className="mt-0.5 text-[13px] text-amber-900/90">
-                    {(patientRow.rapportsCount ?? patientRow.rapports?.length ?? 0) > 1
-                      ? 'Créez un nouveau devis à partir de ce rapport. Les devis précédents restent conservés.'
-                      : 'Reprenez la même fiche devis : forfait, nuits, drainage et examens sont mis à jour dans le tableau, le PDF et l’éditeur.'}
+                    Créez le devis R{latestRapportNumero} : le tableau est prérempli depuis ce rapport.
+                    Les devis précédents restent dans l’historique.
                   </p>
                 </div>
-              )}
+              ) : patientRow.status === 'rapport_modifie' ? (
+                <div className="border-t border-amber-100 bg-amber-50/90 px-4 sm:px-6 py-3">
+                  <p className="text-sm font-semibold text-amber-950">
+                    Rapport modifié par le médecin
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-amber-900/90">
+                    Ouvrez Modifier : le brouillon lié à ce rapport reprend le forfait, les nuits et le drainage mis à jour.
+                  </p>
+                </div>
+              ) : null}
 
-              {/* Barre statut — comme médecin : badge actuel + classement */}
               <div className="border-t border-slate-200/80 px-4 sm:px-6 py-3 bg-white space-y-2">
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="text-sm font-medium text-slate-600 shrink-0">Statut dossier :</span>
@@ -2817,33 +3053,29 @@ export default function DevisGestionnairePage() {
                     {dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)}
                   </span>
                   <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
-                    <Select
-                      value={dossierStatusDraft || patientRow.status}
-                      onValueChange={(v) => {
-                        setDossierStatusDraft(v)
-                        setStatusError(null)
-                      }}
-                    >
-                      <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 border-dashed w-full sm:w-56">
-                        <SelectValue placeholder="Modifier…" />
-                      </SelectTrigger>
-                    <SelectContent>
-                      {DOSSIER_STATUSES.map((s) => (
-                        <SelectItem key={s} value={s} className="text-xs">
-                          {STATUS_LABELS[s]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                    </Select>
-                    {dossierStatusDraft && dossierStatusDraft !== patientRow.status && (
+                    {isAbstention ? (
                       <Button
+                        type="button"
                         size="sm"
-                        variant="brand"
-                        className="h-9 text-xs shrink-0 px-3"
-                        disabled={statusSaving}
-                        onClick={() => void handleApplyDossierStatus()}
+                        variant="outline"
+                        className="h-9 text-xs gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                        disabled={statusSaving || detailLoading}
+                        onClick={() => setAbstentionDialog('reouvrir')}
                       >
-                        {statusSaving ? '…' : 'Appliquer'}
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Réouvrir
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-50"
+                        disabled={statusSaving || detailLoading}
+                        onClick={() => setAbstentionDialog('classer')}
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                        Abstention
                       </Button>
                     )}
                   </div>
@@ -2892,17 +3124,46 @@ export default function DevisGestionnairePage() {
                     <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
                       <User className="h-4 w-4" />
                     </span>
-                    <h3 className="text-sm font-semibold text-slate-900">Identité & coordonnées</h3>
+                    <h3 className="text-sm font-semibold text-slate-900 flex-1">Identité & coordonnées</h3>
+                    {!editingIdentity && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setFicheError(null); setEditingIdentity(true); setEditingFormulaire(false) }}
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                        Modifier
+                      </Button>
+                    )}
                   </div>
+                  {editingIdentity && patientDetail ? (
+                    <IdentityFicheEditor
+                      initial={{
+                        fullName: patientDetail.user.fullName,
+                        email: patientDetail.user.email,
+                        phone: patientDetail.phone ?? '',
+                        ville: patientDetail.ville ?? '',
+                        pays: patientDetail.pays ?? '',
+                        nationalite: patientDetail.nationalite ?? '',
+                        sourceContact: patientDetail.sourceContact ?? '',
+                      }}
+                      saving={ficheSaving}
+                      error={ficheError}
+                      onCancel={() => { setEditingIdentity(false); setFicheError(null) }}
+                      onSave={(v) => void handleSaveIdentity(v)}
+                    />
+                  ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
                     {([
                       [<User key="u" className="h-3.5 w-3.5" />, 'Nom complet', patientDetail?.user.fullName],
                       [<Mail key="m" className="h-3.5 w-3.5" />, 'Email', patientDetail?.user.email],
                       [<Phone key="p" className="h-3.5 w-3.5" />, 'Téléphone', patientDetail?.phone],
                       [<MapPin key="mp" className="h-3.5 w-3.5" />, 'Ville / Pays', [patientDetail?.ville, patientDetail?.pays].filter(Boolean).join(', ') || null],
+                      [<User key="n" className="h-3.5 w-3.5" />, 'Nationalité', patientDetail?.nationalite],
                       [<User key="s" className="h-3.5 w-3.5" />, 'Source', patientDetail?.sourceContact ? formatSourceConnaissanceLabel(patientDetail.sourceContact) : null],
                       [<Calendar key="c" className="h-3.5 w-3.5" />, 'Compte créé le', patientDetail?.user.createdAt ? formatDate(patientDetail.user.createdAt) : null],
-                    ] as [React.ReactNode, string, string | null | undefined][]).map(([icon, label, value]) => (
+                    ] as [ReactNode, string, string | null | undefined][]).map(([icon, label, value]) => (
                       <div key={label} className="flex items-start gap-2.5 min-w-0">
                         <span className="text-slate-300 mt-0.5 shrink-0">{icon}</span>
                         <div className="min-w-0">
@@ -2914,6 +3175,7 @@ export default function DevisGestionnairePage() {
                       </div>
                     ))}
                   </div>
+                  )}
                 </section>
 
                 <Section
@@ -2926,8 +3188,29 @@ export default function DevisGestionnairePage() {
                   }
                   defaultOpen
                 >
-                  {!patientDetail?.formulaires.length ? (
-                    <p className="text-sm text-slate-400 text-center py-4">Aucun formulaire soumis.</p>
+                  {editingFormulaire ? (
+                    <FormulairePayloadEditor
+                      initialPayload={
+                        ((patientDetail?.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>)
+                      }
+                      saving={ficheSaving}
+                      error={ficheError}
+                      onCancel={() => { setEditingFormulaire(false); setFicheError(null) }}
+                      onSave={(payload) => void handleSaveFormulaire(payload)}
+                    />
+                  ) : !patientDetail?.formulaires.length ? (
+                    <div className="text-center py-4 space-y-3">
+                      <p className="text-sm text-slate-400">Aucun formulaire soumis.</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setFicheError(null); setEditingFormulaire(true); setEditingIdentity(false) }}
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                        Saisir le formulaire
+                      </Button>
+                    </div>
                   ) : (
                     <div className="space-y-6">
                       {(() => {
@@ -2946,17 +3229,27 @@ export default function DevisGestionnairePage() {
                           <>
                             {toShow.map((f) => (
                               <div key={f.id}>
-                                <div className="flex items-center gap-3 mb-4">
+                                <div className="flex items-center gap-3 mb-4 flex-wrap">
                                   <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${f.status === 'submitted' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
                                   <p className="text-sm font-semibold text-slate-700">
                                     Formulaire médical
                                     <span className="font-normal text-slate-400 ml-2">· {formatDate(f.createdAt)}</span>
                                   </p>
-                                  <span className={`ml-auto text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
                                     f.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                                   }`}>
                                     {f.status === 'submitted' ? 'Soumis' : 'Brouillon'}
                                   </span>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="ml-auto"
+                                    onClick={() => { setFicheError(null); setEditingFormulaire(true); setEditingIdentity(false) }}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                                    Modifier
+                                  </Button>
                                 </div>
                                 <FormulairePayloadView
                                   status={f.status}
@@ -3033,6 +3326,7 @@ export default function DevisGestionnairePage() {
                   ) : null}
                 </Section>
 
+                
                 <Section
                   icon={<FileText className="h-4 w-4" />}
                   title="Historique des devis"
@@ -3042,123 +3336,86 @@ export default function DevisGestionnairePage() {
                   {!devisVersions.length ? (
                     <p className="text-sm text-slate-400 text-center py-4">Aucun devis créé.</p>
                   ) : (
-                    <div className="space-y-2">
-                      {historiqueSelectedIds.length > 0 && (
-                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50/70 px-3 py-2">
-                          <p className="text-xs font-medium text-red-800">
-                            {historiqueSelectedIds.length} devis sélectionné{historiqueSelectedIds.length > 1 ? 's' : ''}
-                          </p>
-                          <div className="flex items-center gap-2">
+                    <div className="divide-y divide-slate-100">
+                      {devisVersions.map((d) => {
+                        const sc = {
+                          accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
+                          refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
+                          envoye:    { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700' },
+                          brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
+                        }[d.statut] ?? { label: d.statut, cls: 'bg-slate-100 text-slate-600' }
+                        const devisName = devisDisplayName(
+                          d,
+                          patientRow.dossierNumber,
+                          patientRow.user.fullName,
+                        )
+                        const linkedRapportNum = rapportNumero(rapportsList, d.rapportId)
+                        return (
+                          <div key={d.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
+                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sc.cls}`}>{sc.label}</span>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-slate-800 truncate">{devisName}</p>
+                              <p className="text-slate-400 text-xs">
+                                Version {d.version}
+                                {linkedRapportNum ? ` · Rapport R${linkedRapportNum}` : ''}
+                              </p>
+                            </div>
+                            <span className="font-bold text-slate-800">{formatCurrency(d.total, currency)}</span>
+                            <span className="text-xs text-slate-400">{formatDate(d.dateCreation)}</span>
                             <Button
-                              type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-7 text-xs"
-                              onClick={() => setHistoriqueSelectedIds([])}
-                            >
-                              Tout désélectionner
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="sm"
-                              className="h-7 gap-1 text-xs"
-                              disabled={actionLoading}
-                              onClick={() => requestDeleteDevis(historiqueSelectedIds)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Supprimer
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="divide-y divide-slate-100">
-                        {devisVersions.map((d) => {
-                          const sc = {
-                            accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
-                            refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
-                            envoye:    { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700' },
-                            brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
-                          }[d.statut] ?? { label: d.statut, cls: 'bg-slate-100 text-slate-600' }
-                          const devisName = devisDisplayName(
-                            d,
-                            patientRow.dossierNumber,
-                            patientRow.user.fullName,
-                          )
-                          const checked = historiqueSelectedIds.includes(d.id)
-                          return (
-                            <div key={d.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
-                              <button
-                                type="button"
-                                aria-label={checked ? 'Désélectionner' : 'Sélectionner'}
-                                onClick={() =>
-                                  setHistoriqueSelectedIds((prev) =>
-                                    checked ? prev.filter((id) => id !== d.id) : [...prev, d.id],
-                                  )
-                                }
-                                className={cn(
-                                  'h-4 w-4 rounded border shrink-0 flex items-center justify-center transition-colors',
-                                  checked
-                                    ? 'bg-brand-600 border-brand-600 text-white'
-                                    : 'border-slate-300 bg-white hover:border-brand-400',
-                                )}
-                              >
-                                {checked ? <CheckCircle2 className="h-3 w-3" /> : null}
-                              </button>
-                              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sc.cls}`}>{sc.label}</span>
-                              <div className="min-w-0 flex-1">
-                                <p className="font-medium text-slate-800 truncate">{devisName}</p>
-                                <p className="text-slate-400 text-xs">Version {d.version}</p>
-                              </div>
-                              <span className="font-bold text-slate-800">{formatCurrency(d.total, currency)}</span>
-                              <span className="text-xs text-slate-400">{formatDate(d.dateCreation)}</span>
-                              {d.statut === 'envoye' && (
-                                <span className={`flex items-center gap-1.5 text-xs font-medium ${d.vuParPatientAt ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                  {d.vuParPatientAt
-                                    ? <><Eye className="h-3.5 w-3.5" /> Vu le {formatDate(d.vuParPatientAt)}</>
-                                    : <><EyeOff className="h-3.5 w-3.5" /> Non consulté</>}
-                                </span>
+                              className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
+                              onClick={() => openDevisTable(
+                                d.statut === 'brouillon' ? 'edit-draft' : 'view',
+                                d,
                               )}
+                              disabled={!devisAllowed}
+                            >
+                              Consulter
+                            </Button>
+                            {d.statut !== 'brouillon' && d.statut !== 'refuse' && (
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
-                                onClick={() => openConsultDevis(d.id)}
+                                onClick={() => openDevisTable('new-version', d)}
+                                disabled={!devisAllowed}
                               >
-                                <Eye className="h-3.5 w-3.5" />
-                                Consulter
+                                <Pencil className="h-3.5 w-3.5" />
+                                Nouvelle version
                               </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-destructive hover:bg-destructive/10 h-7 px-2.5 gap-1"
+                              disabled={actionLoading}
+                              onClick={() => requestDeleteDevis(d.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Supprimer
+                            </Button>
+                            {d.statut === 'envoye' && (
                               <Button
-                                type="button"
                                 variant="ghost"
                                 size="sm"
-                                className="text-xs text-destructive hover:bg-destructive/10 h-7 px-2.5 gap-1"
+                                className="text-xs text-red-500 hover:bg-red-50 h-7 px-2.5"
+                                onClick={() => void handleRefuse(d.id)}
                                 disabled={actionLoading}
-                                onClick={() => requestDeleteDevis(d.id)}
-                                title="Supprimer cette version (espace patient + chat)"
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Supprimer
+                                Marquer refusé
                               </Button>
-                              {d.statut === 'envoye' && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs text-red-500 hover:bg-red-50 h-7 px-2.5"
-                                  onClick={() => void handleRefuse()}
-                                  disabled={actionLoading}
-                                >
-                                  Marquer refusé
-                                </Button>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </Section>
               </>
+
             )}
           </div>
         </div>
@@ -3198,8 +3455,10 @@ export default function DevisGestionnairePage() {
         <DevisModal
           onClose={flushDraftAndCloseModal}
           patientName={patientRow.user.fullName}
-          existingDevis={existingDevis}
+          existingDevis={modalDevis}
           isEditing={isEditingExisting}
+          title={modalTitle}
+          hint={modalHint ?? undefined}
           lignes={lignes}
           addLigne={() => setLignes((p) => [...p, { description: '', quantite: 1, prixUnitaire: 0 }])}
           removeLigne={(i) => setLignes((p) => p.filter((_, idx) => idx !== i))}
@@ -3227,8 +3486,21 @@ export default function DevisGestionnairePage() {
           onSend={() => void handleSend()}
           onSaveDraft={() => void handleSaveDraft()}
           onDelete={() => handleDeleteDevis()}
-          canDelete={!!existingDevis && existingDevis.statut !== 'accepte'}
+          canDelete={!!modalDevis && modalDevis.statut !== 'accepte' && !tableReadOnly}
+          canSend={!tableReadOnly && (!modalDevis || modalDevis.statut === 'brouillon')}
           onCustomize={() => void handleCustomize()}
+          readOnly={tableReadOnly}
+          onCreateVersion={
+            tableReadOnly && modalDevis && modalDevis.statut !== 'refuse'
+              ? () => openDevisTable('new-version', modalDevis)
+              : undefined
+          }
+          createVersionLabel={(() => {
+            if (!modalDevis) return 'Nouvelle version'
+            const nextVer = Math.max(modalDevis.version, ...devisVersions.map((d) => d.version)) + 1
+            const letter = getDevisVersionLetter(nextVer)
+            return letter ? `Nouvelle version -${letter}` : 'Nouvelle version'
+          })()}
           currency={currency}
           tauxEur={tauxEur}
           formError={modalError}
@@ -3236,6 +3508,37 @@ export default function DevisGestionnairePage() {
           hotelNomInvalid={hotelNomInvalid}
         />
       )}
+
+      <ConfirmDialog
+        open={abstentionDialog !== null}
+        onClose={() => {
+          if (statusSaving) return
+          setAbstentionDialog(null)
+          setStatusError(null)
+        }}
+        title={abstentionDialog === 'reouvrir' ? 'Réouvrir ce dossier ?' : 'Classer en abstention ?'}
+        description={
+          abstentionDialog === 'reouvrir'
+            ? 'Le dossier reprend son suivi, au stade où il se trouvait avant l’abstention.'
+            : 'Aucune intervention ne sera proposée. Vous pourrez ensuite informer la patiente. Rapports et devis restent consultables.'
+        }
+        confirmLabel={abstentionDialog === 'reouvrir' ? 'Réouvrir' : 'Classer en abstention'}
+        confirmVariant={abstentionDialog === 'reouvrir' ? 'brand' : 'default'}
+        loading={statusSaving}
+        error={statusError}
+        onConfirm={() => void handleConfirmAbstention()}
+        icon={
+          abstentionDialog === 'reouvrir' ? (
+            <div className="h-11 w-11 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+              <RotateCcw className="h-5 w-5 text-emerald-700" />
+            </div>
+          ) : (
+            <div className="h-11 w-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center">
+              <Ban className="h-5 w-5 text-slate-600" />
+            </div>
+          )
+        }
+      />
 
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -3365,72 +3668,6 @@ export default function DevisGestionnairePage() {
                 Continuer
                 {deletePicker.selectedIds.length > 1 ? ` (${deletePicker.selectedIds.length})` : ''}
               </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Choix de version à consulter */}
-      {consultVersionsOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setConsultVersionsOpen(false)}
-            aria-label="Fermer"
-          />
-          <div className="relative w-full max-w-lg max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-border flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-slate-900">Consulter un devis</p>
-                <p className="text-xs text-muted-foreground truncate">
-                  Choisissez la version à ouvrir
-                </p>
-              </div>
-              <button
-                type="button"
-                className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100"
-                onClick={() => setConsultVersionsOpen(false)}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="px-3 py-3 flex-1 min-h-0 overflow-y-auto space-y-1">
-              {devisVersions.map((d) => {
-                const sc = {
-                  accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
-                  refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
-                  envoye:    { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700' },
-                  brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
-                }[d.statut] ?? { label: d.statut, cls: 'bg-slate-100 text-slate-600' }
-                const devisName = devisDisplayName(
-                  d,
-                  patientRow?.dossierNumber,
-                  patientRow?.user.fullName ?? '',
-                )
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => openConsultDevis(d.id)}
-                    className="w-full text-left rounded-xl border border-slate-100 hover:border-brand-200 hover:bg-brand-50/40 px-3.5 py-3 transition-colors"
-                  >
-                    <div className="flex items-start gap-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-slate-900 truncate">{devisName}</p>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${sc.cls}`}>{sc.label}</span>
-                          <span className="text-xs text-slate-400">Version {d.version}</span>
-                          <span className="text-xs text-slate-400">{formatDate(d.dateCreation)}</span>
-                        </div>
-                      </div>
-                      <span className="text-sm font-bold text-slate-800 shrink-0">
-                        {formatCurrency(d.total, currency)}
-                      </span>
-                    </div>
-                  </button>
-                )
-              })}
             </div>
           </div>
         </div>

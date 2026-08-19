@@ -16,7 +16,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getPatientDisplayReference } from '@/lib/utils'
 import type { DossierStatus } from '@/types'
 import { medecinApi, gestionnaireApi } from '@/lib/api'
-import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
+import { formatSourceConnaissanceLabel, SOURCE_CONNAISSANCE_OPTIONS } from '@/lib/sourceConnaissance'
 import type { DossierBucketCounts, PatientListItem } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { PullToRefresh } from '@/components/PullToRefresh'
@@ -106,8 +106,9 @@ function ListSkeleton() {
 
 // ─── Modal Modifier ───────────────────────────────────────────────────────────
 
-function EditModal({ patient, onClose, onSaved }: {
+function EditModal({ patient, asGestionnaire, onClose, onSaved }: {
   patient: PatientListItem
+  asGestionnaire: boolean
   onClose: () => void
   onSaved: (updated: PatientListItem) => void
 }) {
@@ -127,7 +128,7 @@ function EditModal({ patient, onClose, onSaved }: {
     if (!form.fullName.trim() || !form.email.trim()) return
     setSaving(true); setErr(null)
     try {
-      const res = await medecinApi.updatePatient(patient.id, {
+      const body = {
         fullName:      form.fullName      || undefined,
         email:         form.email         || undefined,
         phone:         form.phone         || undefined,
@@ -135,8 +136,21 @@ function EditModal({ patient, onClose, onSaved }: {
         pays:          form.pays          || undefined,
         nationalite:   form.nationalite   || undefined,
         sourceContact: form.sourceContact || undefined,
-      })
-      onSaved(res.patient)
+      }
+      if (asGestionnaire) {
+        const res = await gestionnaireApi.updatePatientFiche(patient.id, { identity: {
+          ...body,
+          phone: form.phone.trim() || null,
+          ville: form.ville.trim() || null,
+          pays: form.pays.trim() || null,
+          nationalite: form.nationalite.trim() || null,
+          sourceContact: form.sourceContact.trim() || null,
+        } })
+        onSaved({ ...patient, ...res.patient, user: { ...patient.user, ...res.patient.user } })
+      } else {
+        const res = await medecinApi.updatePatient(patient.id, body)
+        onSaved(res.patient)
+      }
       onClose()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Erreur lors de la modification.')
@@ -192,10 +206,9 @@ function EditModal({ patient, onClose, onSaved }: {
                 className="mt-1.5 w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="">— Aucune —</option>
-                <option value="instagram">Instagram</option>
-                <option value="whatsapp">WhatsApp</option>
-                <option value="google">Google</option>
-                <option value="direct">Direct</option>
+                {SOURCE_CONNAISSANCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -323,8 +336,8 @@ function AbstentionModal({ patient, asGestionnaire, mode, onClose, onDone }: {
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {mode === 'classer'
-                  ? 'Le dossier disparaît du fil actif ; l’historique est conservé.'
-                  : 'Le dossier revient dans le fil des non traités / traités.'}
+                  ? 'Aucune intervention ne sera proposée. L’équipe est notifiée pour informer la patiente.'
+                  : 'Le dossier reprend son suivi, au stade où il se trouvait avant l’abstention.'}
               </p>
             </div>
           </div>
@@ -657,8 +670,7 @@ export default function PatientsPage() {
                   </div>
 
                   <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
-                    {!isGestionnaire && (
-                      <button
+                    <button
                         type="button"
                         className="h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-xl sm:rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                         title="Modifier"
@@ -666,7 +678,6 @@ export default function PatientsPage() {
                       >
                         <Pencil className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                       </button>
-                    )}
                     {isAbstention ? (
                       <button
                         type="button"
@@ -725,6 +736,7 @@ export default function PatientsPage() {
       {editTarget && (
         <EditModal
           patient={editTarget}
+          asGestionnaire={isGestionnaire}
           onClose={() => setEditTarget(null)}
           onSaved={(updated) => {
             setPatients((prev) => prev.map((p) => p.id === updated.id ? { ...p, ...updated } : p))

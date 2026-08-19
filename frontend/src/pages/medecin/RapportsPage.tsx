@@ -381,7 +381,7 @@ export default function RapportsPage() {
       toast({
         title: createNouveau && selected?.rapport ? 'Nouveau rapport généré' : 'Rapport enregistré',
         description: createNouveau && selected?.rapport
-          ? 'Le rapport précédent est conservé. Un nouveau devis pourra être créé ensuite.'
+          ? 'Le rapport précédent est conservé. Houda pourra créer le devis correspondant, prérempli depuis ce nouveau rapport.'
           : 'Le diagnostic a été sauvegardé.',
         variant: 'success',
       })
@@ -567,7 +567,7 @@ export default function RapportsPage() {
               : 'border-slate-200 bg-slate-50 text-slate-600'
           }`}>
             {modeNouveauRapport
-              ? `Mode nouveau rapport : le rapport précédent (R${rapportsCount || 1}) restera figé. Vous créez R${(rapportsCount || 1) + 1} — même dossier, devis v1 conservé.`
+              ? `Mode nouveau rapport : R${rapportsCount || 1} et son devis restent conservés. Vous créez R${(rapportsCount || 1) + 1} — Houda pourra ensuite créer le devis R${(rapportsCount || 1) + 1}, prérempli depuis ce rapport.`
               : `${rapportsCount > 1 ? `${rapportsCount} rapports` : '1 rapport'} sur ce dossier. Après un devis, utilisez « Nouveau rapport » (ne pas corriger l’ancien).`}
             {modeNouveauRapport && (
               <button

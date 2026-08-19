@@ -168,23 +168,22 @@ export function formatDevisTitle(
   const versionNum =
     v != null && Number.isFinite(v) && v >= 1 ? Math.floor(v) : num ? 1 : null
   if (versionNum == null) return base
-  const code = 96 + versionNum // 1 → a, 2 → b, 3 → c
-  const letter = code >= 97 && code <= 122 ? String.fromCharCode(code) : String(versionNum)
-  return `${base} -${letter}`
+  const letter = getDevisVersionLetter(versionNum)
+  return letter ? `${base} -${letter}` : base
 }
 
 /**
  * Lettre de version pour l’affichage liste :
- * v1 → aucune, v2 → b, v3 → c, …
+ * v1 → aucune, v2 → B, v3 → C, …
  */
 export function getDevisVersionLetter(version: number): string | null {
   if (!Number.isFinite(version) || version < 2) return null
-  const code = 96 + Math.floor(version) // 2 → 'b'
-  if (code < 98 || code > 122) return String(Math.floor(version))
+  const code = 64 + Math.floor(version) // 2 → 'B'
+  if (code < 66 || code > 90) return String(Math.floor(version))
   return String.fromCharCode(code)
 }
 
-/** Nom affiché d’un devis : `MC-… NOM PRENOM` (+ ` -b`, ` -c`, … dès la 2ᵉ version). */
+/** Nom affiché d’un devis : `MC-… NOM PRENOM` (+ ` -B`, ` -C`, … dès la 2ᵉ version). */
 export function formatDevisListName(
   dossierNumber: string | null | undefined,
   patientFullName: string | null | undefined,

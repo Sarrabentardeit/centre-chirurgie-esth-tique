@@ -9,17 +9,19 @@ import type {
   LogistiqueInput,
   PlanningSejourInput,
   RefuseDevisInput,
+  UpdatePatientFicheInput,
   UpdateUserByGestionnaireInput,
   UpdateTemplateInput,
   UpsertDevisDraftInput,
 } from './gestionnaire.schema.js'
+import { isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '../../lib/phonePolicy.js'
 import type { CreateAgendaEventInput, UpdateAgendaEventInput } from '../medecin/medecin.schema.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import {
   formatDevisPdfFileName,
-  generateNextDevisNumber,
   generateNextMcReference,
   resolvePatientReference,
+  resolveSharedDevisNumber,
   syncPatientDossierFromDevis,
 } from '../../lib/devisNumber.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
@@ -205,20 +207,13 @@ function mapPatientListRow<T extends {
 
 async function assignNumeroDevisWithRetry(
   createData: Parameters<typeof prisma.devis.create>[0]['data'],
+  dossierNumber: string,
 ): Promise<Awaited<ReturnType<typeof prisma.devis.create>>> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const numeroDevis = await generateNextDevisNumber(prisma)
-    try {
-      return await prisma.devis.create({
-        data: { ...createData, numeroDevis },
-      })
-    } catch (err) {
-      const code = (err as { code?: string })?.code
-      if (code === 'P2002' && attempt < 4) continue
-      throw err
-    }
-  }
-  throw new Error('Impossible de générer un numéro de devis unique.')
+  const patientId = String(createData.patientId)
+  const numeroDevis = await resolveSharedDevisNumber(prisma, patientId, dossierNumber)
+  return prisma.devis.create({
+    data: { ...createData, numeroDevis },
+  })
 }
 
 export async function getDashboard(gestionnaireUserId: string) {
@@ -550,17 +545,7 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
     orderBy: { dateCreation: 'desc' },
   })
 
-  // Un seul brouillon actif par rapport : les auto-saves le mettent à jour.
-  // Nouvelle version seulement s’il n’y a pas de brouillon, ou s’il appartient à un autre rapport.
-  const draftForOtherRapport =
-    !!draft &&
-    !!rapportId &&
-    !!draft.rapportId &&
-    draft.rapportId !== rapportId
-  const shouldCreateNew = !draft || draftForOtherRapport
-
-  let devis
-  if (!shouldCreateNew && draft) {
+  const applyDevisUpdate = async (targetId: string, currentNumero: string | null, currentRapportId: string | null) => {
     const updateData: Parameters<typeof prisma.devis.update>[0]['data'] = {
       gestionnaireId,
       lignes: lignesJson,
@@ -569,18 +554,54 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       notesSejour: input.notesSejour ?? null,
       currency: input.currency ?? 'EUR',
       ...(dateValidite ? { dateValidite } : {}),
-      ...(rapportId && !draft.rapportId ? { rapportId } : {}),
+      ...(rapportId && !currentRapportId ? { rapportId } : {}),
     }
-    if (!draft.numeroDevis) {
-      updateData.numeroDevis = await generateNextDevisNumber(prisma)
+    if (!currentNumero) {
+      updateData.numeroDevis = await resolveSharedDevisNumber(prisma, patientId, patient.dossierNumber)
     }
-    devis = await prisma.devis.update({
-      where: { id: draft.id },
+    const updated = await prisma.devis.update({
+      where: { id: targetId },
       data: updateData,
     })
     if (updateData.numeroDevis && typeof updateData.numeroDevis === 'string') {
       await syncPatientDossierFromDevis(prisma, patientId, updateData.numeroDevis)
     }
+    return updated
+  }
+
+  // Modifier un brouillon : même n°. Un devis déjà envoyé / accepté n’est jamais écrasé.
+  if (input.devisId && !input.nouvelleVersion) {
+    const target = await prisma.devis.findFirst({
+      where: { id: input.devisId, patientId, ...devisActiveWhere },
+    })
+    if (!target) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+    if (target.statut === 'brouillon') {
+      const devis = await applyDevisUpdate(target.id, target.numeroDevis, target.rapportId)
+      if (['rapport_genere', 'rapport_modifie', 'devis_preparation'].includes(patient.status)) {
+        await prisma.patient.update({
+          where: { id: patientId },
+          data: { status: 'devis_preparation' },
+        })
+      }
+      if (devis.numeroDevis) {
+        await syncPatientDossierFromDevis(prisma, patientId, devis.numeroDevis)
+      }
+      return { devis }
+    }
+  }
+
+  // Un seul brouillon actif par rapport : les auto-saves le mettent à jour.
+  // Nouvelle version si : demandé explicitement, pas de brouillon, ou brouillon d’un autre rapport.
+  const draftForOtherRapport =
+    !!draft &&
+    !!rapportId &&
+    !!draft.rapportId &&
+    draft.rapportId !== rapportId
+  const shouldCreateNew = !!input.nouvelleVersion || !draft || draftForOtherRapport
+
+  let devis
+  if (!shouldCreateNew && draft) {
+    devis = await applyDevisUpdate(draft.id, draft.numeroDevis, draft.rapportId)
   } else {
     const last = await prisma.devis.findFirst({
       where: { patientId, ...devisActiveWhere },
@@ -600,7 +621,7 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
       currency: input.currency ?? 'EUR',
       dateValidite,
       rapportId: rapportId ?? undefined,
-    })
+    }, patient.dossierNumber)
 
     const patientProfile = await prisma.patient.findUnique({
       where: { id: patientId },
@@ -1372,6 +1393,156 @@ export async function updatePatientStatus(actorId: string, patientId: string, in
   }).catch(() => undefined)
 
   return { patient: updated }
+}
+
+function emptyToNull(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined
+  const t = (value ?? '').trim()
+  return t.length > 0 ? t : null
+}
+
+function parseIsoDateOnly(raw: unknown): Date | null {
+  if (typeof raw !== 'string') return null
+  const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+export async function updatePatientFiche(actorId: string, patientId: string, input: UpdatePatientFicheInput) {
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    include: {
+      user: { select: { id: true, fullName: true, email: true } },
+      formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
+    },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const before = {
+    fullName: patient.user.fullName,
+    email: patient.user.email,
+    phone: patient.phone,
+    ville: patient.ville,
+    pays: patient.pays,
+    nationalite: patient.nationalite,
+    sourceContact: patient.sourceContact,
+    formulaireId: patient.formulaires[0]?.id ?? null,
+  }
+
+  if (input.identity) {
+    const identity = input.identity
+    const nextEmail = identity.email?.trim().toLowerCase()
+    if (nextEmail && nextEmail !== patient.user.email.toLowerCase()) {
+      const emailTaken = await prisma.user.findUnique({
+        where: { email: nextEmail },
+        select: { id: true },
+      })
+      if (emailTaken) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
+    }
+
+    const nextPhone = emptyToNull(identity.phone)
+    if (nextPhone && isTunisianPhone(nextPhone)) {
+      throw new AppError(400, 'PHONE_TN_BLOCKED', TUNISIA_PHONE_BLOCK_MESSAGE)
+    }
+
+    if (identity.fullName !== undefined || identity.email !== undefined) {
+      await prisma.user.update({
+        where: { id: patient.userId },
+        data: {
+          ...(identity.fullName !== undefined && { fullName: identity.fullName.trim() }),
+          ...(nextEmail ? { email: nextEmail } : {}),
+        },
+      })
+    }
+
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: {
+        ...(identity.phone !== undefined && { phone: nextPhone ?? null }),
+        ...(identity.ville !== undefined && { ville: emptyToNull(identity.ville) ?? null }),
+        ...(identity.pays !== undefined && { pays: emptyToNull(identity.pays) ?? null }),
+        ...(identity.nationalite !== undefined && { nationalite: emptyToNull(identity.nationalite) ?? null }),
+        ...(identity.sourceContact !== undefined && { sourceContact: emptyToNull(identity.sourceContact) ?? null }),
+      },
+    })
+
+    if (identity.sourceContact !== undefined && patient.formulaires[0]) {
+      const latest = patient.formulaires[0]
+      const payload = (latest.payload ?? {}) as Record<string, unknown>
+      const src = emptyToNull(identity.sourceContact)
+      await prisma.formulaire.update({
+        where: { id: latest.id },
+        data: {
+          payload: {
+            ...payload,
+            sourceContact: src ?? undefined,
+          } as never,
+        },
+      })
+    }
+  }
+
+  if (input.formulairePayload) {
+    const payload = input.formulairePayload as Record<string, unknown>
+    const latest = patient.formulaires[0]
+    if (latest) {
+      await prisma.formulaire.update({
+        where: { id: latest.id },
+        data: { payload: payload as never },
+      })
+    } else {
+      await prisma.formulaire.create({
+        data: {
+          patientId,
+          status: 'submitted',
+          submittedAt: new Date(),
+          payload: payload as never,
+        },
+      })
+      if (patient.status === 'nouveau' || patient.status === 'formulaire_en_cours') {
+        await prisma.patient.update({
+          where: { id: patientId },
+          data: { status: 'formulaire_complete' },
+        })
+        await notifyMedecinsFormulaire({
+          type: 'info',
+          titre: 'Formulaire patient complété',
+          message: `${patient.user.fullName} (${patient.dossierNumber}) : formulaire saisi par la gestionnaire.`,
+          lienAction: `/medecin/patients/${patientId}`,
+        })
+      }
+    }
+
+    const src = typeof payload.sourceContact === 'string' ? payload.sourceContact.trim() : ''
+    const dateNaissance = parseIsoDateOnly(payload.dateNaissance)
+    const nationalite = typeof payload.nationalite === 'string' ? payload.nationalite.trim() : ''
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: {
+        ...(src ? { sourceContact: src } : {}),
+        ...(dateNaissance ? { dateNaissance } : {}),
+        ...(nationalite ? { nationalite } : {}),
+      },
+    })
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      actorRole: 'gestionnaire',
+      action: 'update',
+      entity: 'patient_fiche',
+      entityId: patientId,
+      before: before as never,
+      after: {
+        identity: input.identity ?? null,
+        formulaireUpdated: Boolean(input.formulairePayload),
+      } as never,
+    },
+  }).catch(() => undefined)
+
+  return getPatientById(patientId)
 }
 
 export async function getLogistiquePatients() {

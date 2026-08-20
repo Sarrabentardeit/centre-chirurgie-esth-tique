@@ -951,6 +951,8 @@ export default function ChatPage() {
             ? 'Écrire à la patiente (sans le fil Houda)'
             : 'Chat avec la patiente'
 
+  const canOpenHeaderDossier = isStaff && staffTab !== 'equipe' && !!selectedPatientId && selectedPatientId !== EQUIPE_THREAD_ID
+
   const openPatientDossier = (patientId?: string) => {
     const pid = patientId || (staffTab === 'equipe' ? equipeFocusPatientId : selectedPatientId)
     if (!pid || pid === EQUIPE_THREAD_ID) {
@@ -1275,24 +1277,50 @@ export default function ChatPage() {
             <ArrowLeft className="h-4 w-4" />
           </button>
         )}
-        <Avatar className="h-10 w-10 shrink-0">
-          <AvatarFallback className={cn(
-            'text-xs font-bold',
-            staffTab === 'equipe'
-              ? (isMedecin ? 'bg-violet-100 text-violet-800' : 'bg-sky-100 text-sky-800')
-              : 'bg-brand-100 text-brand-800',
-          )}>
-            {isPatient || (staffTab === 'equipe' && !isMedecin)
-              ? <Stethoscope className="h-4 w-4" />
-              : staffTab === 'equipe'
-                ? <Users className="h-4 w-4" />
-                : initials(headerTitle)}
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0 flex-1">
-          <p className="font-bold text-sm text-slate-900 truncate">{headerTitle}</p>
-          <p className="text-[11px] text-muted-foreground truncate">{headerSub}</p>
-        </div>
+        {canOpenHeaderDossier ? (
+          <button
+            type="button"
+            onClick={() => openPatientDossier()}
+            className="flex items-center gap-2.5 min-w-0 flex-1 text-left rounded-xl -ml-1 px-1 py-0.5 hover:bg-brand-50/80 cursor-pointer group/header"
+            title="Ouvrir le dossier"
+            aria-label={`Ouvrir le dossier de ${headerTitle}`}
+          >
+            <Avatar className="h-10 w-10 shrink-0">
+              <AvatarFallback className="text-xs font-bold bg-brand-100 text-brand-800">
+                {initials(headerTitle)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-sm text-slate-900 truncate group-hover/header:text-brand-800 group-hover/header:underline underline-offset-2">
+                {headerTitle}
+              </p>
+              <p className="text-[11px] text-muted-foreground truncate group-hover/header:text-brand-700">
+                {headerSub}
+              </p>
+            </div>
+          </button>
+        ) : (
+          <>
+            <Avatar className="h-10 w-10 shrink-0">
+              <AvatarFallback className={cn(
+                'text-xs font-bold',
+                staffTab === 'equipe'
+                  ? (isMedecin ? 'bg-violet-100 text-violet-800' : 'bg-sky-100 text-sky-800')
+                  : 'bg-brand-100 text-brand-800',
+              )}>
+                {isPatient || (staffTab === 'equipe' && !isMedecin)
+                  ? <Stethoscope className="h-4 w-4" />
+                  : staffTab === 'equipe'
+                    ? <Users className="h-4 w-4" />
+                    : initials(headerTitle)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-sm text-slate-900 truncate">{headerTitle}</p>
+              <p className="text-[11px] text-muted-foreground truncate">{headerSub}</p>
+            </div>
+          </>
+        )}
         {isStaff && selectedPatientId && staffTab !== 'equipe' && (
           <Button
             type="button"

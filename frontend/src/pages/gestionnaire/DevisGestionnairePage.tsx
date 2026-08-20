@@ -3314,20 +3314,6 @@ export default function DevisGestionnairePage() {
                       </div>
                     </div>
                   )}
-                  {(patientDetail?.pendingRapportChangeNote ?? patientRow.pendingRapportChangeNote)?.trim() && (
-                    <div className="rounded-xl border border-[#e8d9c8] bg-[#faf6f1] px-4 py-3.5 mb-4">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <p className="text-xs font-semibold text-[#6b4a2e]">Retour de la patiente</p>
-                        <span className="text-[10px] font-medium text-slate-500 bg-white/80 border border-slate-200 rounded-full px-2 py-0.5">
-                          Note interne
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
-                        {(patientDetail?.pendingRapportChangeNote ?? patientRow.pendingRapportChangeNote)?.trim()}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-2">À intégrer dans le prochain rapport médical.</p>
-                    </div>
-                  )}
                   {!rapportsList.length && !isAbstention ? (
                     <p className="text-sm text-slate-400 text-center py-4">Aucun rapport disponible.</p>
                   ) : rapportsList.length > 0 ? (
@@ -3349,11 +3335,6 @@ export default function DevisGestionnairePage() {
                             <p className="text-sm font-semibold text-slate-600">
                               {formatDate(r.createdAt)}
                             </p>
-                            {r.changementDemande?.trim() && (
-                              <span className="text-[11px] font-medium text-[#6b4a2e] bg-[#faf6f1] border border-[#e8d9c8] rounded-md px-2 py-0.5">
-                                Retour patiente
-                              </span>
-                            )}
                           </div>
                           <RapportView r={r} currency={currency} />
                         </div>

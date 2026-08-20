@@ -377,23 +377,46 @@ export async function getPatients(search?: string, status?: string) {
 }
 
 export async function getPatientById(patientId: string) {
-  const patient = await prisma.patient.findUnique({
-    where: { id: patientId },
-    include: {
-      user: { select: { id: true, fullName: true, email: true, createdAt: true } },
-      formulaires: { orderBy: { createdAt: 'desc' } },
-      devis: { where: devisActiveWhere, orderBy: { dateCreation: 'desc' } },
-      rapports: { orderBy: { createdAt: 'desc' } },
-    },
-  })
+  const [patient, rapportSnapshots] = await Promise.all([
+    prisma.patient.findUnique({
+      where: { id: patientId },
+      include: {
+        user: { select: { id: true, fullName: true, email: true, createdAt: true } },
+        formulaires: { orderBy: { createdAt: 'desc' } },
+        devis: { where: devisActiveWhere, orderBy: { dateCreation: 'desc' } },
+        rapports: { orderBy: { createdAt: 'desc' } },
+      },
+    }),
+    prisma.rapportVersion.findMany({
+      where: { patientId },
+      orderBy: { createdAt: 'asc' },
+      select: { rapportId: true, createdAt: true, snapshot: true },
+    }),
+  ])
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
   const numeroDevis = patient.devis[0]?.numeroDevis
   if (numeroDevis) {
     await syncPatientDossierFromDevis(prisma, patientId, numeroDevis)
   }
+  const rapports = patient.rapports.map((r) => ({
+    ...r,
+    versions: rapportSnapshots
+      .filter((s) => s.rapportId === r.id)
+      .map((s) => {
+        const snap = (s.snapshot ?? {}) as Record<string, unknown>
+        return {
+          createdAt: s.createdAt,
+          diagnostic: typeof snap.diagnostic === 'string' ? snap.diagnostic : null,
+          interventionsRecommandees: Array.isArray(snap.interventionsRecommandees)
+            ? snap.interventionsRecommandees.map(String)
+            : [],
+        }
+      }),
+  }))
   return {
     patient: mapPatientListRow({
       ...patient,
+      rapports,
       dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
     }),
   }

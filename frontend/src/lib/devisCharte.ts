@@ -218,13 +218,9 @@ export function buildDevisPrintStyles(): string {
     ol { list-style-type: decimal; }
     ol > li {
       margin: 0 0 10px;
-      break-inside: avoid;
-      page-break-inside: avoid;
     }
     ul > li {
       margin: 0 0 5px;
-      break-inside: avoid;
-      page-break-inside: avoid;
     }
     ol ul { list-style-type: disc; margin-top: 6px; margin-bottom: 0; }
     .devis-heading {
@@ -267,12 +263,12 @@ export function buildDevisPrintStyles(): string {
       border-radius: 4px;
     }
     .devis-top { display: block; }
-    .devis-closing { display: flex; flex-direction: column; }
+    .devis-closing { display: block; }
     .devis-bot { margin-top: 14px; }
     .devis-bot p { margin: 0 0 9px; }
 
     strong { font-weight: 700; }
-    em { font-style: italic; color: ${C.gray}; }
+    em { font-style: italic; color: ${C.charcoal}; }
     u  { text-decoration: none; border-bottom: 1px solid ${C.rose}; }
     mark {
       /* Ne pas écraser le fluo inline (saumon planning) */

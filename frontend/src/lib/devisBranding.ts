@@ -83,9 +83,6 @@ export function buildDevisDocumentEndHtml(sigImgUrl: string): string {
 /** Hauteur d'une page A4 en px CSS @96dpi (marges 0) — cohérent avec htmlPdf.ts. */
 export const DEVIS_PAGE_HEIGHT_PX = 1123
 
-/** Nombre de pages cible du devis PDF. */
-export const DEVIS_TARGET_PAGES = 3
-
 function collectSpacingTargets(root: Element): HTMLElement[] {
   return Array.from(
     root.querySelectorAll<HTMLElement>('p, ul, ol, hr, .devis-heading, .section-hr, h1, h2, h3, h4'),
@@ -94,18 +91,18 @@ function collectSpacingTargets(root: Element): HTMLElement[] {
 
 function adjustVerticalRhythm(root: Element, deltaPx: number): void {
   const els = collectSpacingTargets(root)
-  if (!els.length || !Number.isFinite(deltaPx) || deltaPx === 0) return
+  if (!els.length || !Number.isFinite(deltaPx) || deltaPx <= 0) return
   const per = deltaPx / els.length
   for (const el of els) {
     const current = parseFloat(getComputedStyle(el).marginBottom || '0') || 0
-    el.style.marginBottom = `${Math.max(0, current + per)}px`
+    el.style.marginBottom = `${current + per}px`
   }
 }
 
 /**
- * Rebuild en 3 feuilles A4 fixes :
- * - pages 1–2 : corps
- * - page 3 : offre + modalités, signature+footer en absolute bas de page
+ * Découpe le devis en autant de feuilles A4 que nécessaire.
+ * Le diagnostic long continue page après page ; l’offre et la signature
+ * restent groupées en fin de document, sans masquer de contenu.
  */
 export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGHT_PX): void {
   if (doc.body.querySelector('.devis-sheet')) return
@@ -128,12 +125,13 @@ export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGH
   const makeSheet = (isLast: boolean) => {
     const sheet = doc.createElement('div')
     sheet.className = isLast ? 'devis-sheet devis-sheet-last' : 'devis-sheet'
-    sheet.style.cssText = `display:block;width:210mm;height:297mm;min-height:297mm;max-height:297mm;position:relative;overflow:visible;box-sizing:border-box;background:#fff;page-break-after:${isLast ? 'auto' : 'always'};break-after:${isLast ? 'auto' : 'page'};page-break-inside:avoid;break-inside:avoid;`
+    sheet.style.cssText = `display:block;width:210mm;height:297mm;min-height:297mm;max-height:297mm;position:relative;overflow:hidden;box-sizing:border-box;background:#fff;page-break-after:${isLast ? 'auto' : 'always'};break-after:${isLast ? 'auto' : 'page'};page-break-inside:avoid;break-inside:avoid;`
     const header = doc.createElement('div')
     header.className = 'devis-sheet-header'
     header.innerHTML = headerHtml
     const body = doc.createElement('div')
     body.className = 'devis-sheet-body'
+    body.style.overflow = 'hidden'
     sheet.appendChild(header)
     sheet.appendChild(body)
     return { sheet, header, body }
@@ -144,8 +142,7 @@ export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGH
   const headerH = probe.header.getBoundingClientRect().height
   probe.sheet.remove()
 
-  const bottomSafe = 30
-  const available = Math.max(360, pageHeight - headerH - bottomSafe)
+  const available = Math.max(360, pageHeight - headerH - 24)
 
   const measureBox = doc.createElement('div')
   measureBox.style.cssText = 'width:688px;'
@@ -153,51 +150,136 @@ export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGH
 
   const measureHeight = (nodes: HTMLElement[]) => {
     measureBox.innerHTML = ''
-    for (const n of nodes) measureBox.appendChild(n.cloneNode(true))
+    for (const n of nodes) measureBox.appendChild(n.cloneNode(true) as HTMLElement)
     return measureBox.getBoundingClientRect().height
   }
 
-  const page1Items: HTMLElement[] = []
-  const page2Items: HTMLElement[] = []
-  for (const child of topChildren) {
-    if (page2Items.length === 0 && measureHeight([...page1Items, child]) <= available) {
-      page1Items.push(child)
+  const cloneListWith = (list: HTMLElement, items: Element[]) => {
+    const wrap = list.cloneNode(false) as HTMLElement
+    for (const item of items) wrap.appendChild(item.cloneNode(true))
+    return wrap
+  }
+
+  const explodeNode = (node: HTMLElement): HTMLElement[] => {
+    const h = measureHeight([node])
+    if (h <= available) return [node]
+    const tag = node.tagName.toLowerCase()
+    const kids = Array.from(node.children) as HTMLElement[]
+    if ((tag === 'ul' || tag === 'ol') && kids.length > 1) {
+      const parts: HTMLElement[] = []
+      let batch: HTMLElement[] = []
+      for (const li of kids) {
+        const trial = [...batch, li]
+        if (batch.length && measureHeight([cloneListWith(node, trial)]) > available) {
+          parts.push(cloneListWith(node, batch))
+          batch = [li]
+        } else {
+          batch.push(li)
+        }
+      }
+      if (batch.length) parts.push(cloneListWith(node, batch))
+      return parts.length ? parts : [node]
+    }
+    if (kids.length > 1) {
+      return kids.flatMap((k) => explodeNode(k))
+    }
+    return [node]
+  }
+
+  const pack = (nodes: HTMLElement[], pageAvail: number) => {
+    const pages: HTMLElement[][] = []
+    let cur: HTMLElement[] = []
+
+    const textOf = (el: HTMLElement) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+    const isTitleLike = (el: HTMLElement | undefined) => {
+      if (!el) return false
+      const tag = el.tagName.toLowerCase()
+      if (tag === 'hr' || /^h[1-6]$/.test(tag)) return true
+      const cls = String(el.className || '')
+      if (/\b(devis-heading|diagnostic-op-title|section-title|devis-ref-title|section-hr)\b/.test(cls)) {
+        return true
+      }
+      const text = textOf(el)
+      if (!text) return true
+      if (text.length <= 96 && /:\s*$/.test(text)) return true
+      return false
+    }
+    const gatherGroup = (start: number) => {
+      const group = [nodes[start]]
+      let j = start + 1
+      while (j < nodes.length && isTitleLike(nodes[j])) {
+        group.push(nodes[j])
+        j += 1
+      }
+      if (j < nodes.length && !isTitleLike(nodes[j])) group.push(nodes[j])
+      return group
+    }
+    const peelTrailingTitles = (page: HTMLElement[]) => {
+      const moved: HTMLElement[] = []
+      while (page.length && isTitleLike(page[page.length - 1])) {
+        moved.unshift(page.pop() as HTMLElement)
+      }
+      return moved
+    }
+
+    let i = 0
+    while (i < nodes.length) {
+      const group = isTitleLike(nodes[i]) ? gatherGroup(i) : [nodes[i]]
+      if (cur.length && measureHeight([...cur, ...group]) > pageAvail) {
+        const moved = peelTrailingTitles(cur)
+        if (cur.length) pages.push(cur)
+        cur = [...moved, ...group]
+      } else {
+        cur.push(...group)
+      }
+      i += group.length
+    }
+    if (cur.length) pages.push(cur)
+    return pages
+  }
+
+  const topNodes = topChildren.flatMap((n) => explodeNode(n))
+  const closingNodes = closingChildren.flatMap((n) => explodeNode(n))
+  let pages = pack(topNodes, available)
+
+  let footerReserve = 36
+  if (footer) {
+    host.appendChild(footer)
+    footerReserve = Math.ceil(footer.getBoundingClientRect().height || 140) + 28
+    footer.remove()
+  }
+  const lastAvail = Math.max(280, available - footerReserve)
+
+  if (closingNodes.length) {
+    const last = pages[pages.length - 1]
+    if (last && measureHeight([...last, ...closingNodes]) <= lastAvail) {
+      pages[pages.length - 1] = [...last, ...closingNodes]
     } else {
-      page2Items.push(child)
+      pages = pages.concat(pack(closingNodes, lastAvail))
     }
   }
+  if (!pages.length) pages = [[]]
 
-  const sheet1 = makeSheet(false)
-  const sheet2 = makeSheet(false)
-  const sheet3 = makeSheet(true)
-  host.appendChild(sheet1.sheet)
-  host.appendChild(sheet2.sheet)
-  host.appendChild(sheet3.sheet)
-
-  for (const n of page1Items) sheet1.body.appendChild(n)
-  for (const n of page2Items) sheet2.body.appendChild(n)
-  for (const n of closingChildren) sheet3.body.appendChild(n)
-
-  adjustVerticalRhythm(sheet1.body, available - sheet1.body.getBoundingClientRect().height)
-  if (page2Items.length) {
-    adjustVerticalRhythm(sheet2.body, available - sheet2.body.getBoundingClientRect().height)
+  const sheets: HTMLElement[] = []
+  for (let p = 0; p < pages.length; p++) {
+    const isLast = p === pages.length - 1
+    const made = makeSheet(isLast)
+    host.appendChild(made.sheet)
+    for (const n of pages[p]) made.body.appendChild(n)
+    if (isLast && footer) {
+      made.sheet.appendChild(footer)
+      footer.style.position = 'absolute'
+      footer.style.left = '14mm'
+      footer.style.right = '14mm'
+      footer.style.bottom = '8mm'
+      footer.style.marginTop = '0'
+      made.body.style.paddingBottom = `${footerReserve}px`
+      const leftover = lastAvail - made.body.getBoundingClientRect().height
+      if (leftover > 48) adjustVerticalRhythm(made.body, leftover * 0.35)
+    }
+    sheets.push(made.sheet)
   }
 
-  if (footer) {
-    sheet3.sheet.appendChild(footer)
-    footer.style.position = 'absolute'
-    footer.style.left = '14mm'
-    footer.style.right = '14mm'
-    footer.style.bottom = '8mm'
-    footer.style.marginTop = '0'
-    const fh = footer.getBoundingClientRect().height || 140
-    sheet3.body.style.paddingBottom = `${Math.ceil(fh + 20)}px`
-    sheet3.body.style.maxHeight = `${Math.floor(available)}px`
-    sheet3.body.style.overflow = 'hidden'
-  }
-
-  // Remplace le body par les 3 feuilles (detach depuis host)
-  const sheets = [sheet1.sheet, sheet2.sheet, sheet3.sheet]
   doc.body.innerHTML = ''
   for (const s of sheets) doc.body.appendChild(s)
 }

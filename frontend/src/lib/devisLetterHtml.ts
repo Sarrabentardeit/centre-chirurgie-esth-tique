@@ -23,15 +23,27 @@ import { devisSejourDefaultsFromRapport, nbAdultesDevisFromAccompagnants, parseS
 import { buildDevisAmountSentence, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { paraSalmonHi } from '@/lib/planningSejourBranding'
 import { formatDevisTitle } from '@/lib/utils'
+import { formatDiagnosticLetterHtml } from '@/lib/diagnosticFormat'
 
 export type DevisLetterDevis = {
   statut?: string
   numeroDevis?: string | null
   notesSejour?: string | null
   version?: number | null
+  rapportId?: string | null
+  dateCreation?: string
+  envoyeAt?: string | null
+}
+
+export type DevisLetterRapportVersion = {
+  createdAt: string
+  diagnostic?: string | null
+  interventionsRecommandees?: string[]
 }
 
 export type DevisLetterRapport = {
+  id?: string
+  createdAt?: string
   diagnostic?: string | null
   examensDemandes?: string[]
   interventionsRecommandees?: string[]
@@ -43,6 +55,7 @@ export type DevisLetterRapport = {
   nbEnfantsSejour?: number | null
   drainage?: boolean | null
   nbSeancesDrainage?: number | null
+  versions?: DevisLetterRapportVersion[]
 }
 
 /** Contexte minimal pour synchroniser / générer le HTML avant PDF / éditeur. */
@@ -87,9 +100,64 @@ function pickDevis(ctx: DevisLetterContext): DevisLetterDevis | null {
   )
 }
 
+function devisAsOfMs(dv: DevisLetterDevis | null): number | null {
+  const raw = dv?.envoyeAt || dv?.dateCreation
+  if (!raw) return null
+  const t = new Date(raw).getTime()
+  return Number.isFinite(t) ? t : null
+}
+
+function applyRapportSnapshot(
+  rap: DevisLetterRapport,
+  atMs: number | null,
+): DevisLetterRapport {
+  const versions = rap.versions ?? []
+  if (versions.length === 0) return rap
+  const sorted = [...versions].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  )
+  const snap =
+    atMs == null
+      ? sorted[sorted.length - 1]
+      : [...sorted].reverse().find((v) => new Date(v.createdAt).getTime() <= atMs + 60_000)
+        ?? sorted[0]
+  if (!snap) return rap
+  return {
+    ...rap,
+    diagnostic: snap.diagnostic ?? rap.diagnostic,
+    interventionsRecommandees: snap.interventionsRecommandees?.length
+      ? snap.interventionsRecommandees
+      : rap.interventionsRecommandees,
+  }
+}
+
+/** Rapport de CE devis (rapportId ou déjà existant à sa date) — jamais un rapport plus récent. */
+export function pickRapport(ctx: DevisLetterContext): DevisLetterRapport | null {
+  const list = ctx.rapports ?? []
+  const dv = pickDevis(ctx)
+  const at = devisAsOfMs(dv)
+  if (dv?.rapportId) {
+    const linked = list.find((r) => r.id === dv.rapportId)
+    if (linked) return applyRapportSnapshot(linked, at)
+  }
+  if (at == null) {
+    const latest = list[0]
+    return latest ? applyRapportSnapshot(latest, null) : null
+  }
+  const existing = list
+    .filter((r) => r.createdAt && new Date(r.createdAt).getTime() <= at + 60_000)
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+  const rap = existing[0]
+  return rap ? applyRapportSnapshot(rap, at) : null
+}
+
+function isFrozenDevis(dv: DevisLetterDevis | null): boolean {
+  return dv?.statut === 'envoye' || dv?.statut === 'accepte'
+}
+
 /** Textes séjour / clinique / hôtel pour le PDF. */
 export function sejourPdfFromContext(ctx: DevisLetterContext) {
-  const rap = ctx.rapports?.[0]
+  const rap = pickRapport(ctx)
   const dv = pickDevis(ctx)
   const sej = parseSejourMeta(dv?.notesSejour ?? '')
   const nGestClin = parseGestNights(sej.cliniqueNuits)
@@ -295,7 +363,7 @@ function normalizeSejourJoursToNuits(html: string): string {
 }
 
 export function buildExamensMedicauxHtml(ctx: DevisLetterContext): string {
-  const examens = ctx.rapports?.[0]?.examensDemandes ?? []
+  const examens = pickRapport(ctx)?.examensDemandes ?? []
   const hasBilan = examens.some((e) => e.toLowerCase().includes('bilan sanguin'))
   const otherExamens = examens.filter((e) => !e.toLowerCase().includes('bilan sanguin'))
   const ink = DEVIS_CHARTE.charcoal
@@ -460,7 +528,8 @@ function replaceExamensSection(html: string, fresh: string): string {
 }
 
 function refreshExamensInTopHtml(html: string, ctx: DevisLetterContext): string {
-  const fromRapport = (ctx.rapports?.[0]?.examensDemandes ?? [])
+  const rap = pickRapport(ctx)
+  const fromRapport = (rap?.examensDemandes ?? [])
     .map((e) => e.trim())
     .filter(Boolean)
 
@@ -472,7 +541,10 @@ function refreshExamensInTopHtml(html: string, ctx: DevisLetterContext): string 
 
   const fresh = buildExamensMedicauxHtml({
     ...ctx,
-    rapports: [{ ...(ctx.rapports?.[0] ?? {}), examensDemandes: labels }],
+    activeDevis: rap?.id
+      ? { ...(pickDevis(ctx) ?? {}), rapportId: rap.id }
+      : { rapportId: null, dateCreation: undefined, envoyeAt: undefined },
+    rapports: [{ ...(rap ?? {}), examensDemandes: labels }],
   })
   return replaceExamensSection(html, fresh)
 }
@@ -527,8 +599,55 @@ function refreshDevisTitleInTopHtml(html: string, title: string): string {
 }
 
 /**
- * Applique toutes les règles lettre devis sur le HTML haut (éditeur + PDF partout).
- * Cases « Votre devis inclut / Notre forfait exclut » → resynchronisées depuis notesSejour.
+ * Recolle le diagnostic du rapport de CE devis (ou « — » s’il n’y en avait pas encore).
+ */
+function refreshDiagnosticInTopHtml(
+  html: string,
+  diagnostic: string | null | undefined,
+  interventionLabels: string[] = [],
+): string {
+  const fresh = formatDiagnosticLetterHtml(diagnostic ?? '', interventionLabels)
+
+  if (typeof window === 'undefined') {
+    const re =
+      /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
+    if (!re.test(html)) return html
+    return html.replace(re, `$1\n${fresh}\n<p></p>\n`)
+  }
+
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const heading = Array.from(root.querySelectorAll('p')).find((p) =>
+    /diagnostic du chirurgien/i.test(normalize(p.textContent ?? '')),
+  )
+  if (!heading) return html
+
+  let node = heading.nextSibling
+  while (node) {
+    const next = node.nextSibling
+    const el = node.nodeType === 1 ? (node as Element) : null
+    const txt = normalize(el?.textContent ?? node.textContent ?? '')
+    if (el && /durée\s+totale\s+du\s+séjour/i.test(txt)) break
+    if (el && /détails de l['’]intervention/i.test(txt)) break
+    if (el?.classList.contains('section-hr')) break
+    node.remove()
+    node = next
+  }
+
+  const tmp = doc.createElement('div')
+  tmp.innerHTML = `${fresh}\n<p></p>`
+  const frag = doc.createDocumentFragment()
+  while (tmp.firstChild) frag.appendChild(tmp.firstChild)
+  heading.after(frag)
+  return root.innerHTML
+}
+
+/**
+ * Applique les règles lettre devis sur le HTML haut (éditeur + PDF).
+ * Clinique / hôtel / durées / inclut-exclut se resynchronisent.
+ * Devis envoyé : le diagnostic est celui du rapport de CETTE version (pas le dernier).
  */
 export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext): string {
   const sv = sejourPdfFromContext(ctx)
@@ -540,6 +659,14 @@ export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext)
   out = normalizeInclutExclutLabels(out)
   out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
+  if (isFrozenDevis(active) && Array.isArray(ctx.rapports)) {
+    const rap = pickRapport(ctx)
+    out = refreshDiagnosticInTopHtml(
+      out,
+      rap?.diagnostic,
+      rap?.interventionsRecommandees ?? [],
+    )
+  }
   out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
   out = refreshDevisFieldByLabel(out, "Durée d'Hospitalisation :", sv.dureeHosp)
   out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
@@ -594,7 +721,7 @@ function str(v: unknown): string { return typeof v === 'string' ? v.trim() : '' 
 /** Lettre haute initiale (sans customContent). */
 export function buildDevisLetterTopHtml(ctx: DevisLetterContext): string {
   const pay = (ctx.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
-  const rap = ctx.rapports?.[0]
+  const rap = pickRapport(ctx)
   const sv = sejourPdfFromContext(ctx)
   const patient = ctx.patient
 
@@ -613,7 +740,10 @@ export function buildDevisLetterTopHtml(ctx: DevisLetterContext): string {
   const adresse = [patient?.ville, patient?.pays].filter(Boolean).join(' — ') || '—'
   const tel = patient?.phone || '—'
 
-  const diagnostic = rap?.diagnostic?.trim() || '—'
+  const diagnosticHtml = formatDiagnosticLetterHtml(
+    rap?.diagnostic?.trim() || '',
+    rap?.interventionsRecommandees ?? [],
+  )
   const interRec = (rap?.interventionsRecommandees ?? []).join(', ') || '—'
   const anesthType = rap?.anesthesieGenerale === true ? 'Générale' : 'Locale / Sédation'
   const active = pickDevis(ctx)
@@ -643,7 +773,7 @@ ${devisFieldRow('Tél. Mobile :', tel)}
 <p></p>
 
 ${devisSectionHeading('Diagnostic du chirurgien : Dr CHENNOUFI Mehdi')}
-<p>${diagnostic.replace(/\n/g, '<br/>')}</p>
+${diagnosticHtml}
 <p></p>
 ${paraSalmonHi(`Durée TOTALE du séjour : ${sv.dureeTotale}`)}
 <p></p>
@@ -693,7 +823,7 @@ function ulFromLabels(labels: string[]): string {
 /** Blocs « Votre devis inclut / Notre forfait exclut » selon les cases cochées. */
 export function buildOffreInclutExclutHtml(ctx: DevisLetterContext): string {
   const notes = pickDevis(ctx)?.notesSejour ?? ''
-  const drainageNb = resolveDrainageNb(notes, ctx.rapports?.[0] ?? null)
+  const drainageNb = resolveDrainageNb(notes, pickRapport(ctx) ?? null)
   const contentionDetail = parseContentionDetailFromNotes(notes)
   const inclut = labelsForInclut(resolveInclutIds(notes), drainageNb, contentionDetail)
   const exclut = labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes))

@@ -30,6 +30,7 @@ import {
   type PatientListItem,
 } from '@/lib/api'
 import type { DossierStatus } from '@/types'
+import { DiagnosticFormattedView } from '@/components/dossier/DiagnosticFormattedView'
 import { FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 import { FormulairePayloadEditor } from '@/components/dossier/FormulairePayloadEditor'
 import { IdentityFicheEditor } from '@/components/dossier/IdentityFicheEditor'
@@ -374,7 +375,12 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
           <p className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">
             <Heart className="h-3 w-3 text-rose-400" /> Diagnostic
           </p>
-          <p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-4 py-3 leading-relaxed">{r.diagnostic}</p>
+          <div className="text-sm bg-slate-50 rounded-xl px-4 py-3">
+            <DiagnosticFormattedView
+              text={r.diagnostic}
+              interventionLabels={interventions}
+            />
+          </div>
         </div>
       )}
       {interventions.length > 0 && (

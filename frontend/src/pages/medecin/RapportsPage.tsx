@@ -24,6 +24,7 @@ import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/Pagin
 import { cachedFetch, hasCachedData, invalidateCache } from '@/lib/cachedFetch'
 import { queryKeys } from '@/lib/queryKeys'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { DiagnosticPicker } from '@/components/dossier/DiagnosticPicker'
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -659,13 +660,20 @@ export default function RapportsPage() {
         {/* Formulaire 2 colonnes */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           <div className="lg:col-span-7 space-y-4">
-            <FormBlock icon={Heart} title="Diagnostic" required hint="Évaluation clinique principale">
+            <FormBlock icon={Heart} title="Diagnostic" required hint="Choisissez une intervention, puis ajustez le texte">
+              <DiagnosticPicker
+                diagnostic={diagnostic}
+                onDiagnosticChange={setDiagnostic}
+                interventions={interventions}
+                onInterventionsChange={setInterventions}
+                resetKey={`${selected.id}-${modeNouveauRapport ? 'nouveau' : selected.rapport?.id ?? 'new'}`}
+              />
               <Textarea
-                rows={5}
+                rows={10}
                 placeholder="Diagnostic, observations morphologiques, points cliniques…"
                 value={diagnostic}
                 onChange={(e) => setDiagnostic(e.target.value)}
-                className="resize-none text-sm leading-relaxed"
+                className="resize-y text-sm leading-relaxed min-h-[180px]"
                 autoFocus
               />
             </FormBlock>

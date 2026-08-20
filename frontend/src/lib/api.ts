@@ -370,6 +370,7 @@ export interface Devis {
   notesSejour: string | null
   dateValidite: string | null
   dateCreation: string
+  envoyeAt?: string | null
   updatedAt?: string
   vuParPatientAt?: string | null
   customContent?: string | null
@@ -1125,6 +1126,11 @@ export interface GestionnaireRapportRow {
   notes: string | null
   changementDemande?: string | null
   createdAt: string
+  versions?: Array<{
+    createdAt: string
+    diagnostic?: string | null
+    interventionsRecommandees?: string[]
+  }>
 }
 
 export interface GestionnaireFormulaireRow {

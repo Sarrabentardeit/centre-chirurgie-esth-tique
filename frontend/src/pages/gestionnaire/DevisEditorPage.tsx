@@ -48,7 +48,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { toast } from '@/store/toastStore'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
-import { formatDevisPdfFileName, getDevisDisplayNumber } from '@/lib/utils'
+import { formatDate, formatDevisPdfFileName, formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
 import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { inlineHtmlImages } from '@/lib/pdf'
 import {
@@ -67,6 +67,7 @@ import {
   buildDevisLetterBottomHtml,
   buildDevisLetterTopHtml,
   letterContextFromGestionnairePatient,
+  pickRapport,
   refreshDevisLetterTopHtml,
   sejourPdfFromContext,
   type DevisLetterContext,
@@ -97,7 +98,7 @@ const GLOBAL_CSS = `
 .ProseMirror ol ul { list-style-type: disc; margin-top: 6px; margin-bottom: 0; }
 .ProseMirror hr { border: none; border-top: 1px solid ${DEVIS_CHARTE.rose}; margin: 14px 0 12px; }
 .ProseMirror strong { font-weight: 700; }
-.ProseMirror em { font-style: italic; color: ${DEVIS_CHARTE.gray}; }
+.ProseMirror em { font-style: italic; color: ${DEVIS_CHARTE.charcoal}; }
 .ProseMirror u { text-decoration: none; border-bottom: 1px solid ${DEVIS_CHARTE.rose}; }
 .ProseMirror mark {
   padding: 0 1px;
@@ -189,7 +190,9 @@ const GLOBAL_CSS = `
 .doc-shell {
   border: 1px solid rgba(40,39,39,0.06);
   border-radius: 4px;
-  min-height: 1123px; /* hauteur A4 à 96dpi — zone éditeur lisible */
+  min-height: 1123px; /* hauteur A4 à 96dpi — le document grandit si le texte est long */
+  height: auto;
+  overflow: visible;
 }
 ${DEVIS_OFFER_PREVIEW_CSS}
 
@@ -327,7 +330,7 @@ export default function DevisEditorPage() {
           setInitialTopHtml(topRaw)
           const bottomRaw = bot ?? buildBottomHtml(total, tndPerEurRate)
           setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate))
-          // Persister le HTML synchronisé (évite d’avoir besoin de « Réinitialiser »)
+          // Persister le HTML (dont le diagnostic remis sur le rapport de CETTE version)
           if (id && topRaw !== (top ?? '')) {
             const contentToSave = `${topRaw}${CONTENT_BREAK}${replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate)}`
             void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
@@ -505,7 +508,9 @@ export default function DevisEditorPage() {
   /* Réinitialiser */
   const handleReset = () => {
     if (!patient) return
-    if (!window.confirm('Réinitialiser le document avec les données actuelles du dossier ?')) return
+    if (!window.confirm(
+      'Réinitialiser ce document avec le diagnostic du rapport de CETTE version de devis (pas le rapport le plus récent) ?',
+    )) return
     const dv =
       (devisId ? patient.devis?.find((d) => d.id === devisId) : null)
       ?? patient.devis?.find((d) => d.statut === 'brouillon')
@@ -525,7 +530,7 @@ export default function DevisEditorPage() {
     ?? patient?.devis?.find((d) => d.statut === 'brouillon')
     ?? patient?.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
     ?? null
-  const rap = patient?.rapports?.[0]
+  const rap = patient ? pickRapport(letterCtx(patient, dv ?? undefined)) : null
   const lignes = dv?.lignes ?? []
   const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
   const devisHeaderRef =
@@ -638,7 +643,13 @@ export default function DevisEditorPage() {
           <p className="text-sm font-bold text-slate-900 truncate">
             Personnalisation — {patient.user.fullName}
           </p>
-          <p className="text-[11px] text-slate-400 hidden sm:block">Zone active : <strong>{activeZone === 'top' ? 'Corps du document' : 'Bas du document'}</strong></p>
+          <p className="text-[11px] text-slate-400 hidden sm:block">
+            {formatDevisTitle(dv, patient.dossierNumber)}
+            {dv?.version != null ? ` · Version ${dv.version}` : ''}
+            {dv?.dateCreation ? ` · ${formatDate(dv.dateCreation)}` : ''}
+            {' · '}
+            Zone active : <strong>{activeZone === 'top' ? 'Corps du document' : 'Bas du document'}</strong>
+          </p>
         </div>
 
         <div className="flex items-center gap-1.5 text-[11px] font-medium shrink-0 order-last sm:order-none w-full sm:w-auto justify-end">
@@ -679,7 +690,8 @@ export default function DevisEditorPage() {
           <strong className="font-semibold">Contenu personnalisable.</strong>{' '}
           La <strong>clinique</strong>, l&apos;<strong>hôtel</strong>, les <strong>durées</strong> et la liste
           {' '}<strong>« Votre devis inclut / exclut »</strong> se synchronisent automatiquement depuis le devis
-          à chaque ouverture. Le reste du texte vient de votre dernière sauvegarde ici.
+          à chaque ouverture. Le <strong>diagnostic</strong> d’un devis envoyé est celui du <em>rapport de cette version</em>,
+          pas le dernier rapport du dossier.
           Pour tout régénérer (écraser le texte libre), cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
         </div>
       )}

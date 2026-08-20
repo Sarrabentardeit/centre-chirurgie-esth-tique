@@ -21,6 +21,7 @@ import { useAuthStore } from '@/store/authStore'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import { InfoRow, FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { DiagnosticPicker } from '@/components/dossier/DiagnosticPicker'
 import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
 
 // ─── Types locaux ──────────────────────────────────────────────────────────────
@@ -900,13 +901,26 @@ export default function DossierPatientPage() {
                 )}
 
                 <fieldset disabled={!canEditFields} className="space-y-5 border-0 p-0 m-0 min-w-0">
-              <div className="space-y-2">
-                <Label>Diagnostic</Label>
+              <div className="space-y-3">
+                <div>
+                  <Label>Diagnostic</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Choisissez une intervention pour préremplir le texte. Vous pouvez ensuite le modifier.
+                  </p>
+                </div>
+                <DiagnosticPicker
+                  diagnostic={diagnostic}
+                  onDiagnosticChange={setDiagnostic}
+                  interventions={interventions}
+                  onInterventionsChange={setInterventions}
+                  disabled={!canEditFields}
+                  resetKey={`${patient.id}-${rapportMode}-${selectedRapportId ?? 'nouveau'}`}
+                />
                 <Textarea
                   value={diagnostic}
                   onChange={(e) => setDiagnostic(e.target.value)}
-                  placeholder="Observations cliniques, analyse médicale..."
-                  className="min-h-[100px]"
+                  placeholder="Observations cliniques, analyse médicale…"
+                  className="min-h-[180px] text-sm leading-relaxed"
                 />
               </div>
 

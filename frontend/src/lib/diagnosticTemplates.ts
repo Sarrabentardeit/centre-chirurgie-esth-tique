@@ -186,10 +186,11 @@ export function composeDiagnosticTemplates(ids: string[]): string {
 }
 
 export function interventionLabelsFromIds(ids: string[]): string[] {
-  return ids
-    .map((id) => BY_ID.get(id))
-    .filter((op): op is DiagnosticOperation => Boolean(op) && !op.isAutre)
-    .map((op) => op.label)
+  return ids.flatMap((id) => {
+    const op = BY_ID.get(id)
+    if (!op || op.isAutre) return []
+    return [op.label]
+  })
 }
 
 function normalizeLabel(s: string): string {

@@ -1081,9 +1081,10 @@ export async function processDevisRappelsAuto(): Promise<{ checked: number; sent
 export async function requestRapportUpdate(
   gestionnaireId: string,
   patientId: string,
-  input: { message: string },
+  input: { message: string; changementDemande?: string },
 ) {
   const message = input.message.trim()
+  const changement = input.changementDemande?.trim() ?? ''
   if (!message) throw new AppError(400, 'EMPTY_MESSAGE', 'Le message ne peut pas être vide.')
 
   const patient = await prisma.patient.findUnique({
@@ -1104,13 +1105,23 @@ export async function requestRapportUpdate(
   const lienAction = `/medecin/chat?channel=equipe&patientId=${patientId}`
   const lienDossier = `/medecin/patients/${patientId}?tab=rapport&nouveau=1`
 
-  const notifMessage =
-    message.length <= 320
+  const chatMessage = changement
+    ? [message, '', 'Retour de la patiente :', changement].join('\n')
+    : message
+
+  const notifMessage = changement
+    ? `${patient.user.fullName} (${patient.dossierNumber}) — ${changement.slice(0, 180)}`
+    : (message.length <= 320
       ? message
-      : `Bonjour Docteur,\n\nPouvez-vous générer un nouveau rapport pour ${patient.user.fullName} (dossier ${patient.dossierNumber}) ?\nLe devis v1 reste conservé.`
+      : `Nouveau rapport demandé pour ${patient.user.fullName} (${patient.dossierNumber}).`)
+
+  await prisma.patient.update({
+    where: { id: patientId },
+    data: { pendingRapportChangeNote: changement || null },
+  })
 
   // 1) Message dans le chat du dossier (interne — pas visible patiente)
-  await sendStaffOnlyMessage(gestionnaireId, patientId, notifMessage)
+  await sendStaffOnlyMessage(gestionnaireId, patientId, chatMessage)
 
   // 2) Notification cloche + email (lien vers le chat du dossier)
   await Promise.all(
@@ -1147,6 +1158,7 @@ export async function requestRapportUpdate(
         patientId,
         dossierNumber: patient.dossierNumber,
         patientName: patient.user.fullName,
+        changementDemande: changement,
         via: 'chat+notification',
       } as never,
     },

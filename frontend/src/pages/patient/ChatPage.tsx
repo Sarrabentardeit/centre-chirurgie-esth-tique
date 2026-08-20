@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -677,6 +677,26 @@ export default function ChatPage() {
     setError(null)
   }
 
+  const onPasteFromClipboard = (e: ClipboardEvent<HTMLElement>) => {
+    if (sending || uploading || (isStaff && !selectedPatientId)) return
+    const items = e.clipboardData?.items
+    if (!items?.length) return
+    for (const item of Array.from(items)) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+      const blob = item.getAsFile()
+      if (!blob) continue
+      e.preventDefault()
+      const ext = item.type === 'image/jpeg' ? 'jpg' : item.type === 'image/webp' ? 'webp' : 'png'
+      const named =
+        blob.name && blob.name !== 'image.png' && blob.name !== 'blob'
+          ? blob
+          : new File([blob], `capture-${Date.now()}.${ext}`, { type: blob.type || 'image/png' })
+      onPickFile(named)
+      window.setTimeout(() => inputRef.current?.focus(), 30)
+      return
+    }
+  }
+
   const runMessageAction = async (
     messageId: string,
     action: () => Promise<void>,
@@ -1265,6 +1285,7 @@ export default function ChatPage() {
         'flex-1 flex flex-col min-h-0 min-w-0 rounded-2xl border border-border/80 bg-white shadow-sm overflow-hidden',
         isStaff && !mobileShowThread ? 'hidden lg:flex' : 'flex',
       )}
+      onPaste={onPasteFromClipboard}
     >
       <header className="px-3 sm:px-4 py-3 border-b border-border/70 bg-white/95 backdrop-blur shrink-0 flex items-center gap-2.5">
         {isStaff && (
@@ -1710,7 +1731,7 @@ export default function ChatPage() {
         {pendingFile && (
           <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
             {pendingFile.previewUrl ? (
-              <img src={pendingFile.previewUrl} alt="" className="h-10 w-10 rounded-lg object-cover" />
+              <img src={pendingFile.previewUrl} alt="" className="h-20 w-20 rounded-lg object-cover border border-slate-200 shrink-0" />
             ) : (
               <FileText className="h-5 w-5 text-slate-500" />
             )}
@@ -1743,6 +1764,7 @@ export default function ChatPage() {
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={onPasteFromClipboard}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -1777,7 +1799,7 @@ export default function ChatPage() {
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1.5 px-1">
-          Pièces jointes : JPG, PNG, WEBP, PDF · max 12 Mo
+          Ctrl+V pour coller une capture · JPG, PNG, WEBP, PDF · max 12 Mo
         </p>
       </footer>
     </section>

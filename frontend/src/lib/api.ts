@@ -709,6 +709,8 @@ export interface PatientListItem {
   pays: string | null
   nationalite: string | null
   sourceContact: string | null
+  /** Interne Houda/Dr — jamais envoyé à la patiente. */
+  pendingRapportChangeNote?: string | null
   createdAt: string
   updatedAt: string
   user: { id?: string; fullName: string; email: string; createdAt: string }
@@ -732,6 +734,7 @@ export interface PatientListItem {
     nbAdultesSejour?: number | null
     nbEnfantsSejour?: number | null
     notes: string | null
+    changementDemande?: string | null
     createdAt: string
   }>
 }
@@ -857,6 +860,7 @@ export const medecinApi = {
         nbAdultesSejour?: number | null
         nbEnfantsSejour?: number | null
         notes: string | null
+        changementDemande?: string | null
         createdAt: string
         updatedAt?: string
       }>
@@ -1119,6 +1123,7 @@ export interface GestionnaireRapportRow {
   nbAdultesSejour?: number | null
   nbEnfantsSejour?: number | null
   notes: string | null
+  changementDemande?: string | null
   createdAt: string
 }
 
@@ -1379,7 +1384,7 @@ export const gestionnaireApi = {
     }),
 
   /** Notification médecin : demande MAJ rapport (lien dossier, sans toucher au devis). */
-  requestRapportUpdate: (patientId: string, body: { message: string }) =>
+  requestRapportUpdate: (patientId: string, body: { message: string; changementDemande?: string }) =>
     request<{
       ok: true
       patientId: string

@@ -132,6 +132,8 @@ model Patient {
   status                  DossierStatus  @default(nouveau)
   /// Statut avant classement en abstention (pour réouverture)
   statusBeforeAbstention  DossierStatus? @map("status_before_abstention")
+  /// Note interne Houda → Dr, collée sur le prochain rapport (R2+). Invisible patiente.
+  pendingRapportChangeNote String?       @map("pending_rapport_change_note") @db.Text
   createdAt               DateTime       @default(now()) @map("created_at")
   updatedAt               DateTime       @updatedAt @map("updated_at")
 
@@ -217,6 +219,8 @@ model Rapport {
   /** Enfants 2–12 ans — repris sur le devis. */
   nbEnfantsSejour          Int?     @map("nb_enfants_sejour")
   notes                    String?
+  /// Demande de changement (Houda) collée à cette version. Invisible patiente.
+  changementDemande        String?  @map("changement_demande") @db.Text
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 

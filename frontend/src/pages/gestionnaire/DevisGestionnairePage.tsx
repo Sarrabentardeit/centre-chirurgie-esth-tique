@@ -358,6 +358,17 @@ function RapportView({ r, currency }: { r: GestionnaireRapportRow; currency: Cur
   const examens = r.examensDemandes ?? []
   return (
     <div className="space-y-4">
+      {r.changementDemande?.trim() && (
+        <div className="rounded-xl border border-[#e8d9c8] bg-[#faf6f1] px-4 py-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            <p className="text-xs font-semibold text-[#6b4a2e]">Retour de la patiente</p>
+            <span className="text-[10px] font-medium text-slate-500 bg-white/80 border border-slate-200 rounded-full px-2 py-0.5">
+              Note interne
+            </span>
+          </div>
+          <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{r.changementDemande}</p>
+        </div>
+      )}
       {r.diagnostic?.trim() && (
         <div>
           <p className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">
@@ -1225,6 +1236,7 @@ export default function DevisGestionnairePage() {
   } | null>(null)
   const [majRapportOpen, setMajRapportOpen] = useState(false)
   const [majRapportMsg, setMajRapportMsg] = useState(DEMANDE_MAJ_RAPPORT_FALLBACK)
+  const [majRapportChange, setMajRapportChange] = useState('')
   const [majRapportSending, setMajRapportSending] = useState(false)
   const [majRapportError, setMajRapportError] = useState<string | null>(null)
   const [deletePicker, setDeletePicker] = useState<{
@@ -2419,6 +2431,7 @@ export default function DevisGestionnairePage() {
   const openMajRapport = () => {
     if (!patientRow) return
     setMajRapportError(null)
+    setMajRapportChange('')
     setMajRapportMsg(
       applyTemplateVars(
         DEMANDE_MAJ_RAPPORT_FALLBACK,
@@ -2432,6 +2445,7 @@ export default function DevisGestionnairePage() {
   const sendMajRapport = async () => {
     if (!patientRow) return
     const message = majRapportMsg.trim()
+    const changement = majRapportChange.trim()
     if (!message) {
       setMajRapportError('Le message ne peut pas être vide.')
       return
@@ -2439,11 +2453,15 @@ export default function DevisGestionnairePage() {
     setMajRapportSending(true)
     setMajRapportError(null)
     try {
-      await gestionnaireApi.requestRapportUpdate(patientRow.id, { message })
+      await gestionnaireApi.requestRapportUpdate(patientRow.id, {
+        message,
+        changementDemande: changement,
+      })
       setMajRapportOpen(false)
+      void loadPatientDetail(patientRow.id)
       feedbackSuccess(
         'Message envoyé au médecin',
-        'Dans le chat du dossier (interne) + notification. Ouvrir Messages côté médecin.',
+        'Demande transmise au médecin.',
       )
     } catch (e) {
       setMajRapportError(e instanceof Error ? e.message : 'Envoi impossible.')
@@ -3296,6 +3314,20 @@ export default function DevisGestionnairePage() {
                       </div>
                     </div>
                   )}
+                  {(patientDetail?.pendingRapportChangeNote ?? patientRow.pendingRapportChangeNote)?.trim() && (
+                    <div className="rounded-xl border border-[#e8d9c8] bg-[#faf6f1] px-4 py-3.5 mb-4">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <p className="text-xs font-semibold text-[#6b4a2e]">Retour de la patiente</p>
+                        <span className="text-[10px] font-medium text-slate-500 bg-white/80 border border-slate-200 rounded-full px-2 py-0.5">
+                          Note interne
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
+                        {(patientDetail?.pendingRapportChangeNote ?? patientRow.pendingRapportChangeNote)?.trim()}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-2">À intégrer dans le prochain rapport médical.</p>
+                    </div>
+                  )}
                   {!rapportsList.length && !isAbstention ? (
                     <p className="text-sm text-slate-400 text-center py-4">Aucun rapport disponible.</p>
                   ) : rapportsList.length > 0 ? (
@@ -3317,6 +3349,11 @@ export default function DevisGestionnairePage() {
                             <p className="text-sm font-semibold text-slate-600">
                               {formatDate(r.createdAt)}
                             </p>
+                            {r.changementDemande?.trim() && (
+                              <span className="text-[11px] font-medium text-[#6b4a2e] bg-[#faf6f1] border border-[#e8d9c8] rounded-md px-2 py-0.5">
+                                Retour patiente
+                              </span>
+                            )}
                           </div>
                           <RapportView r={r} currency={currency} />
                         </div>
@@ -3844,13 +3881,32 @@ export default function DevisGestionnairePage() {
               </button>
             </div>
             <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto space-y-3">
-              <Textarea
-                value={majRapportMsg}
-                onChange={(e) => setMajRapportMsg(e.target.value)}
-                rows={7}
-                className="text-sm leading-relaxed resize-y min-h-[140px]"
-                disabled={majRapportSending}
-              />
+              <div>
+                <p className="text-xs font-semibold text-slate-800 mb-1">
+                  Retour de la patiente
+                </p>
+                <p className="text-[11px] text-muted-foreground mb-1.5">
+                  Résumez son souhait en quelques lignes. Cette note reste interne au cabinet.
+                </p>
+                <Textarea
+                  value={majRapportChange}
+                  onChange={(e) => setMajRapportChange(e.target.value)}
+                  rows={4}
+                  placeholder="Ex. La patiente souhaite une réduction moins importante et conserver davantage de volume."
+                  className="text-sm leading-relaxed resize-y min-h-[88px]"
+                  disabled={majRapportSending}
+                />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-800 mb-1.5">Message au médecin</p>
+                <Textarea
+                  value={majRapportMsg}
+                  onChange={(e) => setMajRapportMsg(e.target.value)}
+                  rows={6}
+                  className="text-sm leading-relaxed resize-y min-h-[120px]"
+                  disabled={majRapportSending}
+                />
+              </div>
               {majRapportError && (
                 <p className="text-xs text-destructive flex items-center gap-1.5">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />

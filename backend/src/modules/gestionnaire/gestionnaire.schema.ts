@@ -92,6 +92,8 @@ export type SendDevisRappelInput = z.infer<typeof sendDevisRappelSchema>
 /** Demande gestionnaire → médecin : MAJ rapport (sans toucher au devis). */
 export const demandeMajRapportSchema = z.object({
   message: z.string().min(1, 'Le message est obligatoire.'),
+  /** Changement demandé par la patiente — interne, jamais visible patiente. */
+  changementDemande: z.string().trim().max(2000).optional(),
 })
 
 export type DemandeMajRapportInput = z.infer<typeof demandeMajRapportSchema>

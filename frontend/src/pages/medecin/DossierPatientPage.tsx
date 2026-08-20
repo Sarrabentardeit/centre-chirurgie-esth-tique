@@ -43,6 +43,7 @@ interface Rapport {
   nbAdultesSejour?: number | null
   nbEnfantsSejour?: number | null
   notes: string | null
+  changementDemande?: string | null
   createdAt: string
   updatedAt?: string
 }
@@ -68,6 +69,7 @@ interface PatientDetail {
   pays: string | null
   nationalite: string | null
   sourceContact: string | null
+  pendingRapportChangeNote?: string | null
   createdAt: string
   updatedAt: string
   user: { fullName: string; email: string; createdAt: string }
@@ -842,6 +844,29 @@ export default function DossierPatientPage() {
                       Prérempli depuis R{rapports.length}. L’ancien rapport reste consultable dans l’historique.
                       Houda pourra créer le devis R{nextVersionNum}, prérempli depuis ce rapport, sans écraser les devis précédents.
                     </p>
+                    {patient.pendingRapportChangeNote?.trim() && (
+                      <div className="mt-2.5 pt-2.5 border-t border-[#e8d9c8]">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="font-semibold">Retour de la patiente</p>
+                          <span className="text-[10px] font-medium text-slate-500 bg-white/80 border border-slate-200 rounded-full px-2 py-0.5">
+                            Note interne
+                          </span>
+                        </div>
+                        <p className="mt-0.5 whitespace-pre-wrap">{patient.pendingRapportChangeNote.trim()}</p>
+                        <p className="mt-1.5 text-[11px] text-slate-500">À reprendre dans ce rapport.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {rapportMode !== 'nouveau' && selectedRapport?.changementDemande?.trim() && (
+                  <div className="rounded-xl border border-[#e8d9c8] bg-[#faf6f1] px-3 py-2.5 text-xs text-slate-800 leading-relaxed">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-semibold text-[#6b4a2e]">Retour de la patiente</p>
+                      <span className="text-[10px] font-medium text-slate-500 bg-white/80 border border-slate-200 rounded-full px-2 py-0.5">
+                        Note interne
+                      </span>
+                    </div>
+                    <p className="mt-0.5 whitespace-pre-wrap">{selectedRapport.changementDemande.trim()}</p>
                   </div>
                 )}
                 {rapportMode === 'consult' && selectedRapport && (

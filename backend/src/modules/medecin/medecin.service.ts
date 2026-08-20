@@ -696,7 +696,21 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
       after: rapport,
     })
   } else {
-    rapport = await prisma.rapport.create({ data: { ...data, patientId, medecinId } })
+    const pendingNote = patient.pendingRapportChangeNote?.trim() || null
+    rapport = await prisma.rapport.create({
+      data: {
+        ...data,
+        patientId,
+        medecinId,
+        changementDemande: pendingNote,
+      },
+    })
+    if (pendingNote) {
+      await prisma.patient.update({
+        where: { id: patientId },
+        data: { pendingRapportChangeNote: null },
+      })
+    }
     await writeAuditLog({
       actorId: medecinId,
       actorRole: 'medecin',
@@ -726,6 +740,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
         nbAdultesSejour: rapport.nbAdultesSejour,
         nbEnfantsSejour: rapport.nbEnfantsSejour,
         notes: rapport.notes,
+        changementDemande: (rapport as { changementDemande?: string | null }).changementDemande ?? null,
         updatedAt: rapport.updatedAt,
       } as never,
     },

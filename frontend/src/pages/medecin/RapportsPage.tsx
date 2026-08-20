@@ -45,6 +45,7 @@ interface Rapport {
   nbAdultesSejour?: number | null
   nbEnfantsSejour?: number | null
   notes: string | null
+  changementDemande?: string | null
   createdAt: string
 }
 
@@ -307,7 +308,11 @@ export default function RapportsPage() {
         setDrainage(r.drainage ?? null)
         setNbSeancesDrainage(r.nbSeancesDrainage != null ? String(r.nbSeancesDrainage) : '')
         setNotes(r.notes ?? '')
-        setPatients((prev) => prev.map((p) => p.id === patientId ? { ...p, rapport: r } : p))
+        setPatients((prev) => prev.map((p) => p.id === patientId ? {
+          ...p,
+          rapport: r,
+          pendingRapportChangeNote: res.patient.pendingRapportChangeNote ?? null,
+        } : p))
         if (r.nbAdultesSejour == null && r.nbEnfantsSejour == null) {
           const payload = res.patient.formulaires?.[0]?.payload as Record<string, unknown> | undefined
           if (payload) {
@@ -323,6 +328,10 @@ export default function RapportsPage() {
           setNbAdultesSejour(acc.nbAdultes)
           setNbEnfantsSejour(acc.nbEnfants)
         }
+        setPatients((prev) => prev.map((p) => p.id === patientId ? {
+          ...p,
+          pendingRapportChangeNote: res.patient.pendingRapportChangeNote ?? null,
+        } : p))
       }
     } catch { /* silent */ }
   }
@@ -627,6 +636,23 @@ export default function RapportsPage() {
         {saveError && (
           <div className="flex items-start gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" /> {saveError}
+          </div>
+        )}
+
+        {(modeNouveauRapport ? selected.pendingRapportChangeNote : selected.rapport?.changementDemande)?.trim() && (
+          <div className="rounded-xl border border-[#e8d9c8] bg-[#faf6f1] px-4 py-3">
+            <div className="flex items-center gap-2 mb-1.5">
+              <p className="text-xs font-semibold text-[#6b4a2e]">Retour de la patiente</p>
+              <span className="text-[10px] font-medium text-slate-500 bg-white/80 border border-slate-200 rounded-full px-2 py-0.5">
+                Note interne
+              </span>
+            </div>
+            <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
+              {(modeNouveauRapport ? selected.pendingRapportChangeNote : selected.rapport?.changementDemande)?.trim()}
+            </p>
+            {modeNouveauRapport && (
+              <p className="text-xs text-slate-500 mt-2">À reprendre dans ce rapport.</p>
+            )}
           </div>
         )}
 

@@ -192,7 +192,7 @@ export function AppLayout() {
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
           <div
             key={location.pathname}
-            className="animate-page-enter px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5 pb-app-nav"
+            className="animate-page-enter min-w-0 px-4 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5 pb-app-nav"
           >
             {/* Suspense ici : la sidebar reste visible pendant le chargement du chunk */}
             <Suspense fallback={<PageLoader />}>

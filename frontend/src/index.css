@@ -67,6 +67,13 @@
   img, video, canvas, svg {
     max-width: 100%;
   }
+
+  /* Chrome : fieldset a min-inline-size: min-content et élargit toute la page. */
+  fieldset {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
 }
 
 @layer utilities {

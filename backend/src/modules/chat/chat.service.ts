@@ -1368,6 +1368,20 @@ export async function markMessageUnread(userId: string, role: UserRole, messageI
       },
       data: { lu: false },
     })
+  } else if (message.staffOnly) {
+    const peerRole = role === 'medecin' ? 'gestionnaire' : 'medecin'
+    if (message.expediteurId === userId || message.expediteurRole !== peerRole) {
+      throw new AppError(400, 'INVALID', 'Sélectionnez un message de l’équipe.')
+    }
+    await prisma.message.updateMany({
+      where: {
+        staffOnly: true,
+        expediteurRole: peerRole,
+        deletedForAll: false,
+        dateEnvoi: { gte: message.dateEnvoi },
+      },
+      data: { lu: false },
+    })
   } else {
     if (message.expediteurRole !== 'patient') {
       throw new AppError(400, 'INVALID', 'Sélectionnez un message de la patiente.')
@@ -1383,15 +1397,23 @@ export async function markMessageUnread(userId: string, role: UserRole, messageI
     })
   }
 
+  const unreadPatientId = message.staffOnly ? EQUIPE_THREAD_ID : message.patientId
   publishChatToUser(userId, {
     type: 'chat:unread',
-    patientId: message.patientId,
+    patientId: unreadPatientId,
   })
-  void publishThreadEvent(message.patientId, {
-    type: 'chat:thread',
-    patientId: message.patientId,
-    messageId,
-  })
+  if (message.staffOnly) {
+    publishChatToStaff({ type: 'chat:unread', patientId: EQUIPE_THREAD_ID })
+  }
+  void publishThreadEvent(
+    message.patientId,
+    {
+      type: 'chat:thread',
+      patientId: message.patientId,
+      messageId,
+    },
+    { includePatient: !message.staffOnly },
+  )
 
   return { ok: true as const, patientId: message.patientId }
 }

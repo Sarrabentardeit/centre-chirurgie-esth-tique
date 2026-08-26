@@ -1,5 +1,5 @@
 import { DIAGNOSTIC_OPERATIONS, inferSelectedOperationIds } from '@/lib/diagnosticTemplates'
-import { paraSalmonHi } from '@/lib/planningSejourBranding'
+import { PLANNING_DOC, paraSalmonHi } from '@/lib/planningSejourBranding'
 
 export type DiagnosticBlock = {
   index: number
@@ -17,7 +17,9 @@ const ITALIC_PREFIXES = [
   'des automassages',
 ]
 
-const FLUO_RE = /prévoir pour le retour en avion/i
+const FLUO_RE = /prévoir pour le retour en avion|prévoir 6 semaines de drainage/i
+
+const DARK_HI_RE = /^n\.b\b/i
 
 /** Expressions en gras dans le document Word (les plus longues d’abord). */
 const BOLD_PHRASES = [
@@ -43,6 +45,21 @@ const BOLD_PHRASES = [
   'volume mammaire suffisant',
   'hypotrophie mammaire',
   'Réduction Mammaire',
+  'écartement des muscles droits de l’abdomen : DIASTASIS',
+  'Lipoaspiration assistée au Vaser et MICROAIRE HD avec lipofilling fessier',
+  'Lipoaspiration assistée au Vaser et MICROAIRE HD',
+  'Lipoaspiration de la graisse du cercle abdominal',
+  'Abdominoplastie (lifting du ventre)',
+  'technique VASER MICROAIRE HD',
+  'technique PAL MICROAIRE',
+  'LYMPHO SPARING liposuction',
+  'lipoméries (localisations graisseuses)',
+  'excédent graisseux et cutané',
+  'un excédent graisseux',
+  'relâchement cutané',
+  'Cure de DIASTASIS',
+  'Lifting des Bras',
+  'une Lipoaspiration',
   ...DIAGNOSTIC_OPERATIONS.filter((op) => !op.isAutre).map((op) => op.label),
 ].sort((a, b) => b.length - a.length)
 
@@ -111,10 +128,38 @@ export function splitDiagnosticBlocks(text: string): DiagnosticBlock[] {
   return blocks
 }
 
+function isDarkHiLine(line: string): boolean {
+  const t = line.trim()
+  if (DARK_HI_RE.test(t)) return true
+  return /^nécessité de porter/i.test(t) && /(panty|gaine|manchettes)/i.test(t)
+}
+
+function splitZoneLine(line: string): { lead: string; rest: string } | null {
+  const t = line.trim()
+  if (!/^(AU NIVEAU|Au niveau)/.test(t)) return null
+  const idx = t.search(/,\s*vous présentez/i)
+  if (idx < 0) return { lead: t, rest: '' }
+  return { lead: t.slice(0, idx + 1), rest: t.slice(idx + 1).trim() }
+}
+
+function paraDarkHi(text: string): string {
+  const bg = PLANNING_DOC.hiDark
+  return `<p><mark data-color="${bg}" style="background-color:${bg};color:#ffffff;-webkit-print-color-adjust:exact;print-color-adjust:exact">${escapeHtml(text)}</mark></p>`
+}
+
+function paraPinkLead(lead: string, rest: string): string {
+  const leadHtml = `<strong style="color:${PLANNING_DOC.pink}">${escapeHtml(lead)}</strong>`
+  const restHtml = rest ? ` ${applyBold(escapeHtml(rest))}` : ''
+  return `<p>${leadHtml}${restHtml}</p>`
+}
+
 function formatBodyLineHtml(line: string): string {
   const t = line.trim()
   if (!t) return '<p></p>'
   if (FLUO_RE.test(t)) return paraSalmonHi(t)
+  if (isDarkHiLine(t)) return paraDarkHi(t)
+  const zone = splitZoneLine(t)
+  if (zone) return paraPinkLead(zone.lead, zone.rest)
   if (isItalicLine(t)) {
     return `<p><em class="diag-italic" style="color:#282727">${escapeHtml(t)}</em></p>`
   }

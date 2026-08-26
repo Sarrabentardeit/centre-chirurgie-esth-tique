@@ -261,6 +261,13 @@ async function request<T>(
         'Données trop volumineuses. Réduisez la taille des photos/documents et réessayez.',
       )
     }
+    if (res.status >= 500) {
+      throw new ApiRequestError(
+        res.status,
+        'INTERNAL_ERROR',
+        'Erreur interne du serveur. Réessayez dans un instant.',
+      )
+    }
     throw new ApiRequestError(
       res.status || 502,
       'INVALID_RESPONSE',

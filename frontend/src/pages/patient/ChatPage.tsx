@@ -817,9 +817,10 @@ export default function ChatPage() {
           ),
         )
         if (isStaff) {
+          const threadId = m.staffOnly || staffTab === 'equipe' ? EQUIPE_THREAD_ID : m.patientId
           setConversations((prev) =>
             prev.map((c) =>
-              c.patientId === m.patientId
+              c.patientId === threadId || c.patientId === m.patientId
                 ? { ...c, unreadCount: Math.max(1, c.unreadCount) }
                 : c,
             ),

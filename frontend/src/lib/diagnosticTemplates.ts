@@ -12,10 +12,11 @@ export type DiagnosticOperation = {
 export const DIAGNOSTIC_CATEGORIES: {
   key: DiagnosticCategoryKey
   title: string
+  shortTitle: string
 }[] = [
-  { key: 'mammaire', title: 'Chirurgie Mammaire' },
-  { key: 'visage', title: 'Chirurgie du Visage' },
-  { key: 'silhouette', title: 'Chirurgie de la Silhouette' },
+  { key: 'mammaire', title: 'Chirurgie Mammaire', shortTitle: 'Mammaire' },
+  { key: 'visage', title: 'Chirurgie du Visage', shortTitle: 'Visage' },
+  { key: 'silhouette', title: 'Chirurgie de la Silhouette', shortTitle: 'Silhouette' },
 ]
 
 function lines(...parts: string[]): string {
@@ -35,6 +36,26 @@ const PROTHESES_CHOIX = lines(
 
 const DELAI_SEINS =
   'La forme et l’aspect définitifs du sein seront observés à partir de 10 à 12 semaines.'
+
+const SIL_VASER =
+  'Lipoaspiration selon la technique VASER MICROAIRE HD pour avoir un rendu plus harmonieux et esthétique au niveau de la silhouette.'
+const SIL_OED_WORDS =
+  'Les œdèmes et les bleus seront présents pendant au moins trois à quatre semaines.'
+const SIL_OED_DIGITS =
+  'Les œdèmes et les bleus seront présents pendant au moins 3 à 4 semaines.'
+const SIL_RESULT =
+  'Le résultat définitif ne pourra être perçu qu’à partir de 12 à 16 semaines après l’intervention.'
+const SIL_CONV =
+  'Convalescence plus facile et confortable car la technique utilisée est moins invasive.'
+const SIL_DRAINAGE = 'Prévoir 6 semaines de drainage lymphatique en post opératoire.'
+const SIL_AVION =
+  'Prévoir pour le retour en avion et pendant les 15 premiers jours des bas de contention anti-varices.'
+const SIL_NB =
+  'N.B : Pour les Lipo, il est assez fréquent d’avoir recours à des transfusions post opératoires donc prévoir un budget supplémentaire de 250DT par poche de sang en cas de besoin.'
+
+function silContention(kind: 'Panty/gaine' | 'Panty' | 'Manchettes'): string {
+  return `Nécessité de porter un vêtement compressif (fourni par le chirurgien) pendant 6 semaines après l’intervention. (${kind})`
+}
 
 export const DIAGNOSTIC_OPERATIONS: DiagnosticOperation[] = [
   // ── Mammaire (textes du document Devis Types Mammaire) ────────────────────
@@ -167,7 +188,108 @@ export const DIAGNOSTIC_OPERATIONS: DiagnosticOperation[] = [
     label: 'Autre (mammaire à préciser)',
     template: '',
     isAutre: true,
-  }
+  },
+
+  // ── Silhouette (textes du document Devis Type silhouette) ─────────────────
+  {
+    id: 'sil-lipo-abdominoplastie',
+    category: 'silhouette',
+    label: 'Lipo Circulaire / Abdominoplastie',
+    template: lines(
+      'AU NIVEAU DU VENTRE, FLANCS ET DOS, vous présentez un excédent graisseux avec relâchement cutané au niveau du ventre et écartement des muscles droits de l’abdomen : DIASTASIS.',
+      'L’intervention indiquée est une Abdominoplastie (lifting du ventre) avec Cure de DIASTASIS associée à une Lipoaspiration de la graisse du cercle abdominal pour à la fois aspirer l’excédent de graisse et retendre la peau en excédent au niveau du bas ventre.',
+      'La cicatrice de l’abdominoplastie se situe d’une épine iliaque à une autre et est à la limite des poils pubiens (souvent cachée par les sous-vêtements).',
+      SIL_VASER,
+      SIL_OED_WORDS,
+      SIL_RESULT,
+      SIL_CONV,
+      silContention('Panty/gaine'),
+      SIL_DRAINAGE,
+      SIL_AVION,
+      SIL_NB,
+    ),
+  },
+  {
+    id: 'sil-liposuccion',
+    category: 'silhouette',
+    label: 'Liposuccion',
+    template: lines(
+      'AU NIVEAU DU ……………, vous présentez des lipoméries (localisations graisseuses)',
+      'L’intervention indiquée est une Lipoaspiration assistée au Vaser et MICROAIRE HD.',
+      'Cette intervention permettra de sculpter et de redéfinir la silhouette.',
+      SIL_OED_WORDS,
+      SIL_RESULT,
+      SIL_CONV,
+      silContention('Panty'),
+      SIL_DRAINAGE,
+      SIL_AVION,
+      SIL_NB,
+    ),
+  },
+  {
+    id: 'sil-lipoedeme',
+    category: 'silhouette',
+    label: 'Lipœdème',
+    template: lines(
+      'Au niveau des membres inférieurs, vous présentez un lipœdème stade…',
+      'Il s’agit d’une accumulation symétrique et disproportionnée de graisse, au niveau des jambes qui s’accompagne fréquemment de douleurs, sensibilité au toucher, sensations de lourdeur et tendance aux ecchymoses.',
+      'L’intervention indiquée est une LYMPHO SPARING liposuction avec des micro canules et assistée par la technique PAL MICROAIRE : canules vibrantes.',
+      'Les suites seront marquées par œdèmes et ecchymoses pendant 3 à 4 semaines.',
+      SIL_RESULT,
+      SIL_CONV,
+      silContention('Panty'),
+      SIL_DRAINAGE,
+      SIL_AVION,
+      SIL_NB,
+    ),
+  },
+  {
+    id: 'sil-bbl',
+    category: 'silhouette',
+    label: 'BBL',
+    template: lines(
+      'AU NIVEAU DU CERCLE ABDOMINALE, vous présentez des lipoméries (localisations graisseuses)',
+      'L’intervention indiquée est une Lipoaspiration assistée au Vaser et MICROAIRE HD avec lipofilling fessier.',
+      'Cette intervention permettra dans un premier temps d’aspirer la graisse en excédent pour affiner et redéfinir la silhouette.',
+      'La graisse aspirée sera traitée et réinjectée au niveau des fesses pour affiner leur volume. Au fil du temps, elle peut parfois se résorber entre 30 % à 40 % et la résorption peut être asymétrique.',
+      'Le risque majeur de cette intervention est l’embolie pulmonaire graisseuse (passage de graisse dans les vaisseaux sanguins) qui peut être parfois fatale.',
+      'Le voyage n’est pas recommandé avant dix jours après l’intervention.',
+      SIL_OED_DIGITS,
+      SIL_RESULT,
+      SIL_CONV,
+      'Un coussin d’assise spécial est recommandé pendant les 6 premières semaines pour diminuer la pression sur la graisse injectée en position assise et allongée.',
+      silContention('Panty'),
+      SIL_DRAINAGE,
+      SIL_AVION,
+      SIL_NB,
+    ),
+  },
+  {
+    id: 'sil-lift-bras',
+    category: 'silhouette',
+    label: 'Lift des bras',
+    template: lines(
+      'AU NIVEAU DES BRAS, vous présentez un excédent graisseux et cutané au niveau des faces internes des bras.',
+      'L’intervention indiquée est un Lifting des Bras.',
+      'Cette intervention sera débutée par une Lipoaspiration pour harmoniser les volumes des bras.',
+      'La cicatrice sera longitudinale discrète et placée le long des faces internes des bras.',
+      SIL_VASER,
+      SIL_OED_DIGITS,
+      SIL_RESULT,
+      SIL_CONV,
+      silContention('Manchettes'),
+      SIL_DRAINAGE,
+      SIL_AVION,
+      SIL_NB,
+    ),
+  },
+  {
+    id: 'sil-autre',
+    category: 'silhouette',
+    label: 'Autre (silhouette à préciser)',
+    template: '',
+    isAutre: true,
+  },
 ]
 
 const BY_ID = new Map(DIAGNOSTIC_OPERATIONS.map((op) => [op.id, op]))

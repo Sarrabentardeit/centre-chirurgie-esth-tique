@@ -462,10 +462,10 @@ export default function DossierPatientPage() {
   )
 
   return (
-    <div className="max-w-5xl mx-auto space-y-0">
+    <div className="max-w-5xl mx-auto min-w-0 w-full space-y-0">
 
       {/* ── Sticky Header ── */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border mb-4 sm:mb-5 -mx-3 sm:-mx-4 lg:-mx-6 px-3 sm:px-4 lg:px-6 py-3">
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border mb-4 sm:mb-5 -mx-4 sm:-mx-4 lg:-mx-6 px-4 sm:px-4 lg:px-6 py-3">
         <div className="flex items-start gap-2 sm:items-center sm:gap-3">
           <Button variant="ghost" size="icon" className="shrink-0 mt-0.5" onClick={() => navigate('/medecin/patients')}>
             <ArrowLeft className="h-4 w-4" />
@@ -647,9 +647,9 @@ export default function DossierPatientPage() {
 
         {/* ── Rapport médical ── */}
         <TabsContent value="rapport">
-          <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+          <div className="grid gap-4 min-w-0 lg:grid-cols-[240px_minmax(0,1fr)]">
             {/* Versions */}
-            <Card className="h-fit lg:sticky lg:top-24">
+            <Card className="h-fit min-w-0 lg:sticky lg:top-24">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
                   <History className="h-4 w-4 text-brand-600" />
@@ -717,8 +717,8 @@ export default function DossierPatientPage() {
             </Card>
 
             {/* Éditeur / consultation */}
-            <Card>
-              <CardHeader className="space-y-3">
+            <Card className="min-w-0 max-w-full overflow-hidden">
+              <CardHeader className="space-y-3 p-4 sm:p-6">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div>
                     <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
@@ -893,14 +893,15 @@ export default function DossierPatientPage() {
                 )}
               </CardHeader>
 
-              <CardContent className={cn('space-y-5', rapportReadOnly && 'opacity-[0.92]')}>
+              <CardContent className={cn('space-y-5 p-4 pt-0 sm:p-6 sm:pt-0 min-w-0', rapportReadOnly && 'opacity-[0.92]')}>
                 {rapportError && (
-                  <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    <AlertCircle className="h-4 w-4 shrink-0" /> {rapportError}
+                  <div className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive min-w-0">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span className="min-w-0 break-words">{rapportError}</span>
                   </div>
                 )}
 
-                <fieldset disabled={!canEditFields} className="space-y-5 border-0 p-0 m-0 min-w-0">
+                <fieldset disabled={!canEditFields} className="space-y-5 border-0 p-0 m-0 min-w-0 w-full max-w-full overflow-x-hidden">
               <div className="space-y-3">
                 <div>
                   <Label>Diagnostic</Label>

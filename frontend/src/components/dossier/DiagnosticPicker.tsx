@@ -39,6 +39,15 @@ export function DiagnosticPicker({
   const selectedOps = selectedIds
     .map((id) => DIAGNOSTIC_OPERATIONS.find((op) => op.id === id))
     .filter((op): op is NonNullable<typeof op> => Boolean(op))
+  const selectedInCategory = selectedOps.filter((op) => op.category === category)
+  const otherCategoryCounts = DIAGNOSTIC_CATEGORIES
+    .filter((cat) => cat.key !== category)
+    .map((cat) => ({
+      key: cat.key,
+      shortTitle: cat.shortTitle,
+      count: selectedOps.filter((op) => op.category === cat.key).length,
+    }))
+    .filter((row) => row.count > 0)
 
   const syncFromDiagnostic = (text: string, fallbackCategory = false) => {
     const inferred = inferSelectedOperationIds(text)
@@ -120,10 +129,11 @@ export function DiagnosticPicker({
   }
 
   return (
-    <div className={cn('space-y-3', disabled && 'pointer-events-none opacity-80')}>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+    <div className={cn('space-y-3 min-w-0 max-w-full', disabled && 'pointer-events-none opacity-80')}>
+      <div className="flex gap-2 overflow-x-auto scrollbar-none -mx-0.5 px-0.5 pb-0.5">
         {DIAGNOSTIC_CATEGORIES.map((cat) => {
           const active = category === cat.key
+          const count = selectedOps.filter((op) => op.category === cat.key).length
           return (
             <button
               key={cat.key}
@@ -131,25 +141,31 @@ export function DiagnosticPicker({
               disabled={disabled}
               onClick={() => setCategory(cat.key)}
               className={cn(
-                'rounded-xl px-3 py-2.5 text-sm font-medium transition-all border',
+                'shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium transition-all border',
                 active
                   ? 'bg-[#062a30] text-white border-[#062a30] shadow-sm'
                   : 'bg-white text-slate-700 border-slate-200 hover:border-[#062a30]/30 hover:bg-slate-50',
               )}
             >
-              {cat.title}
+              <span className="sm:hidden">{cat.shortTitle}</span>
+              <span className="hidden sm:inline">{cat.title}</span>
+              {count > 0 && (
+                <span className={cn('ml-1.5 tabular-nums', active ? 'text-white/80' : 'text-slate-400')}>
+                  {count}
+                </span>
+              )}
             </button>
           )
         })}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:p-4 space-y-3 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-[#062a30]">
             {DIAGNOSTIC_CATEGORIES.find((c) => c.key === category)?.title}
           </p>
           <span className="text-[11px] text-muted-foreground">
-            {selectedOps.length} sélectionnée{selectedOps.length > 1 ? 's' : ''}
+            {selectedInCategory.length} sélectionnée{selectedInCategory.length > 1 ? 's' : ''}
           </span>
           {ops.length > 0 && (
             <span className="text-[11px] text-slate-400 sm:ml-auto">
@@ -158,15 +174,31 @@ export function DiagnosticPicker({
           )}
         </div>
 
+        {otherCategoryCounts.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {otherCategoryCounts.map((row) => (
+              <button
+                key={row.key}
+                type="button"
+                disabled={disabled}
+                onClick={() => setCategory(row.key)}
+                className="text-[11px] text-[#81572d] underline-offset-2 hover:underline"
+              >
+                Aussi {row.shortTitle} ({row.count})
+              </button>
+            ))}
+          </div>
+        )}
+
         {ops.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center">
+          <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-6 text-center">
             <p className="text-sm text-slate-500">Aucune intervention pour le moment.</p>
             <p className="text-[12px] text-slate-400 mt-1">
               Les modèles seront ajoutés dès réception du document.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
             {ops.map((op) => {
               const selected = selectedIds.includes(op.id)
               return (
@@ -176,7 +208,7 @@ export function DiagnosticPicker({
                   disabled={disabled}
                   onClick={() => toggleOperation(op.id)}
                   className={cn(
-                    'rounded-xl border px-3 py-2.5 text-left text-[13px] leading-snug transition-all',
+                    'min-w-0 rounded-xl border px-3 py-2.5 text-left text-[13px] leading-snug transition-all break-words',
                     selected
                       ? 'border-[#062a30]/35 bg-white text-[#062a30] font-medium shadow-sm ring-1 ring-[#062a30]/10'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-[#062a30]/25 hover:bg-white',
@@ -190,17 +222,17 @@ export function DiagnosticPicker({
           </div>
         )}
 
-        {selectedOps.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {selectedOps.map((op) => (
+        {selectedInCategory.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1 min-w-0">
+            {selectedInCategory.map((op) => (
               <button
                 key={op.id}
                 type="button"
                 disabled={disabled}
                 onClick={() => toggleOperation(op.id)}
-                className="inline-flex items-center gap-1 rounded-full border border-[#062a30]/15 bg-white px-2.5 py-1 text-[11px] font-medium text-[#062a30] hover:bg-slate-50"
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-[#062a30]/15 bg-white px-2.5 py-1 text-[11px] font-medium text-[#062a30] hover:bg-slate-50"
               >
-                <span className="truncate max-w-[220px]">{op.label}</span>
+                <span className="truncate">{op.label}</span>
                 <X className="h-3 w-3 shrink-0 opacity-60" />
               </button>
             ))}

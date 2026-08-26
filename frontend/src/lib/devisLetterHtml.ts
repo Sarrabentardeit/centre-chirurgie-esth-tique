@@ -131,18 +131,28 @@ function applyRapportSnapshot(
   }
 }
 
-/** Rapport de CE devis (rapportId ou déjà existant à sa date) — jamais un rapport plus récent. */
+/**
+ * Rapport de CE devis.
+ * - Lié par rapportId : texte actuel de CE rapport (une correction du même R est reprise ;
+ *   un nouveau R3 n’est pas injecté).
+ * - Brouillon sans lien : dernier rapport du dossier.
+ * - Devis envoyé sans lien (ancien) : rapport déjà existant à la date d’envoi, figé.
+ */
 export function pickRapport(ctx: DevisLetterContext): DevisLetterRapport | null {
   const list = ctx.rapports ?? []
   const dv = pickDevis(ctx)
-  const at = devisAsOfMs(dv)
   if (dv?.rapportId) {
     const linked = list.find((r) => r.id === dv.rapportId)
-    if (linked) return applyRapportSnapshot(linked, at)
+    if (linked) return linked
   }
+  if (!isFrozenDevis(dv)) {
+    const latest = list[0]
+    return latest ?? null
+  }
+  const at = devisAsOfMs(dv)
   if (at == null) {
     const latest = list[0]
-    return latest ? applyRapportSnapshot(latest, null) : null
+    return latest ?? null
   }
   const existing = list
     .filter((r) => r.createdAt && new Date(r.createdAt).getTime() <= at + 60_000)
@@ -647,7 +657,7 @@ function refreshDiagnosticInTopHtml(
 /**
  * Applique les règles lettre devis sur le HTML haut (éditeur + PDF).
  * Clinique / hôtel / durées / inclut-exclut se resynchronisent.
- * Devis envoyé : le diagnostic est celui du rapport de CETTE version (pas le dernier).
+ * Diagnostic : rapport lié à ce devis (correction du même rapport reprise ; pas un R plus récent).
  */
 export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext): string {
   const sv = sejourPdfFromContext(ctx)
@@ -659,7 +669,7 @@ export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext)
   out = normalizeInclutExclutLabels(out)
   out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
-  if (isFrozenDevis(active) && Array.isArray(ctx.rapports)) {
+  if (Array.isArray(ctx.rapports)) {
     const rap = pickRapport(ctx)
     out = refreshDiagnosticInTopHtml(
       out,

@@ -30,6 +30,14 @@ function notifyGestionnaires(input: {
   return notifyStaff({ ...input, role: 'gestionnaire', email: input.email === true })
 }
 
+/** Prisma Json n’accepte pas toujours les Date / undefined — on sérialise d’abord. */
+function jsonSafe(value: unknown): unknown {
+  if (value === undefined) return undefined
+  return JSON.parse(
+    JSON.stringify(value, (_key, v) => (typeof v === 'bigint' ? v.toString() : v)),
+  ) as unknown
+}
+
 async function writeAuditLog(input: {
   actorId: string
   actorRole: 'medecin'
@@ -39,17 +47,21 @@ async function writeAuditLog(input: {
   before?: unknown
   after?: unknown
 }) {
-  await prisma.auditLog.create({
-    data: {
-      actorId: input.actorId,
-      actorRole: input.actorRole,
-      action: input.action,
-      entity: input.entity,
-      entityId: input.entityId,
-      before: input.before as never,
-      after: input.after as never,
-    },
-  })
+  try {
+    await prisma.auditLog.create({
+      data: {
+        actorId: input.actorId,
+        actorRole: input.actorRole,
+        action: input.action,
+        entity: input.entity,
+        entityId: input.entityId,
+        before: jsonSafe(input.before) as never,
+        after: jsonSafe(input.after) as never,
+      },
+    })
+  } catch (err) {
+    console.warn('[writeAuditLog] Journal d’audit non enregistré', err)
+  }
 }
 
 async function syncPostOpReminders(userId: string, dateIntervention: Date) {
@@ -660,12 +672,13 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     orderBy: { createdAt: 'desc' },
   })
 
+  const forfaitRounded = Math.round(Number(input.forfaitPropose))
   const data = {
     diagnostic:               input.diagnostic,
     examensDemandes:          input.examensDemandes ?? [],
     interventionsRecommandees: input.interventionsRecommandees ?? [],
     valeurMedicale:           input.valeurMedicale,
-    forfaitPropose:           Math.round(Number(input.forfaitPropose.toFixed(2))),
+    forfaitPropose:           Number.isFinite(forfaitRounded) ? forfaitRounded : undefined,
     nuitsPreoperatoires:      input.nuitsPreoperatoires as never,
     nuitsClinique:            input.nuitsClinique,
     nuitsHotel:               input.nuitsHotel,
@@ -721,30 +734,34 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     })
   }
 
-  await prisma.rapportVersion.create({
-    data: {
-      rapportId: rapport.id,
-      patientId,
-      medecinId,
-      snapshot: {
-        diagnostic: rapport.diagnostic,
-        interventionsRecommandees: rapport.interventionsRecommandees,
-        valeurMedicale: rapport.valeurMedicale,
-        forfaitPropose: rapport.forfaitPropose,
-        nuitsPreoperatoires: (rapport as never as Record<string, unknown>)['nuitsPreoperatoires'],
-        nuitsClinique: rapport.nuitsClinique,
-        anesthesieGenerale: rapport.anesthesieGenerale,
-        drainage: rapport.drainage,
-        nbSeancesDrainage: rapport.nbSeancesDrainage,
-        dureeSejourTunisie: rapport.dureeSejourTunisie,
-        nbAdultesSejour: rapport.nbAdultesSejour,
-        nbEnfantsSejour: rapport.nbEnfantsSejour,
-        notes: rapport.notes,
-        changementDemande: (rapport as { changementDemande?: string | null }).changementDemande ?? null,
-        updatedAt: rapport.updatedAt,
-      } as never,
-    },
-  })
+  try {
+    await prisma.rapportVersion.create({
+      data: {
+        rapportId: rapport.id,
+        patientId,
+        medecinId,
+        snapshot: jsonSafe({
+          diagnostic: rapport.diagnostic,
+          interventionsRecommandees: rapport.interventionsRecommandees,
+          valeurMedicale: rapport.valeurMedicale,
+          forfaitPropose: rapport.forfaitPropose,
+          nuitsPreoperatoires: (rapport as never as Record<string, unknown>)['nuitsPreoperatoires'],
+          nuitsClinique: rapport.nuitsClinique,
+          anesthesieGenerale: rapport.anesthesieGenerale,
+          drainage: rapport.drainage,
+          nbSeancesDrainage: rapport.nbSeancesDrainage,
+          dureeSejourTunisie: rapport.dureeSejourTunisie,
+          nbAdultesSejour: rapport.nbAdultesSejour,
+          nbEnfantsSejour: rapport.nbEnfantsSejour,
+          notes: rapport.notes,
+          changementDemande: (rapport as { changementDemande?: string | null }).changementDemande ?? null,
+          updatedAt: rapport.updatedAt,
+        }) as never,
+      },
+    })
+  } catch (err) {
+    console.warn('[upsertRapport] Snapshot de version non enregistré', err)
+  }
 
   // 1ère génération → rapport_genere
   // Nouveau rapport (R2+) → rapport_genere (Houda doit créer un nouveau devis ; v1 intacte)
@@ -763,20 +780,24 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     isAdditionalRapport
     || (rapportsCount > 1 && ['devis_preparation', 'devis_envoye', 'devis_accepte'].includes(patient.status))
 
-  if (PRE_RAPPORT_STATUSES.includes(patient.status) || needsNouveauDevis) {
-    await prisma.patient.update({
-      where: { id: patientId },
-      data: { status: 'rapport_genere' },
-    })
-  } else if (!createNew && existing && DEVIS_FLOW_STATUSES.includes(patient.status)) {
-    // Un 2e rapport déjà signalé : rester sur rapport_genere (liste « Non traités »).
-    if (patient.status !== 'rapport_genere') {
+  try {
+    if (PRE_RAPPORT_STATUSES.includes(patient.status) || needsNouveauDevis) {
       await prisma.patient.update({
         where: { id: patientId },
-        data: { status: 'rapport_modifie' },
+        data: { status: 'rapport_genere' },
       })
-      await syncBrouillonDevisFromRapport(patientId, rapport)
+    } else if (!createNew && existing && DEVIS_FLOW_STATUSES.includes(patient.status)) {
+      // Un 2e rapport déjà signalé : rester sur rapport_genere (liste « Non traités »).
+      if (patient.status !== 'rapport_genere') {
+        await prisma.patient.update({
+          where: { id: patientId },
+          data: { status: 'rapport_modifie' },
+        })
+        await syncBrouillonDevisFromRapport(patientId, rapport)
+      }
     }
+  } catch (err) {
+    console.warn('[upsertRapport] Statut / devis brouillon non synchronisés', err)
   }
 
   const p = await prisma.patient.findUnique({
@@ -817,7 +838,7 @@ export async function upsertRapport(medecinId: string, patientId: string, input:
     }
   }
 
-  return { rapport }
+  return { rapport: jsonSafe(rapport) as typeof rapport }
 }
 
 export async function deleteRapport(medecinId: string, patientId: string, rapportId: string) {

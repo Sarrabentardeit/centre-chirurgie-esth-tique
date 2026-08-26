@@ -509,7 +509,7 @@ export default function DevisEditorPage() {
   const handleReset = () => {
     if (!patient) return
     if (!window.confirm(
-      'Réinitialiser ce document avec le diagnostic du rapport de CETTE version de devis (pas le rapport le plus récent) ?',
+      'Réinitialiser ce document avec le diagnostic actuel du rapport lié à ce devis (une correction du même rapport est reprise, pas un rapport plus récent) ?',
     )) return
     const dv =
       (devisId ? patient.devis?.find((d) => d.id === devisId) : null)
@@ -690,8 +690,8 @@ export default function DevisEditorPage() {
           <strong className="font-semibold">Contenu personnalisable.</strong>{' '}
           La <strong>clinique</strong>, l&apos;<strong>hôtel</strong>, les <strong>durées</strong> et la liste
           {' '}<strong>« Votre devis inclut / exclut »</strong> se synchronisent automatiquement depuis le devis
-          à chaque ouverture. Le <strong>diagnostic</strong> d’un devis envoyé est celui du <em>rapport de cette version</em>,
-          pas le dernier rapport du dossier.
+          à chaque ouverture. Le <strong>diagnostic</strong> suit le <em>rapport lié à ce devis</em>
+          (une correction du même rapport est reprise ; un nouveau rapport n’est pas injecté).
           Pour tout régénérer (écraser le texte libre), cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
         </div>
       )}

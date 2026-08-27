@@ -57,7 +57,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { PullToRefresh } from '@/components/PullToRefresh'
 import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
-import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
+import { cachedFetch, hasCachedData, invalidateCache } from '@/lib/cachedFetch'
 import { queryKeys } from '@/lib/queryKeys'
 import {
   buildGestionnaireDevisExportHtml,
@@ -1219,6 +1219,7 @@ export default function DevisGestionnairePage() {
   const [savedDraft, setSavedDraft]           = useState(false)
   const [autoSaving, setAutoSaving]           = useState(false)
   const [actionLoading, setActionLoading]     = useState(false)
+  const [acceptDevisId, setAcceptDevisId]     = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<
     | { kind: 'devis'; devisIds: string[] }
     | { kind: 'dossier'; patientId: string; patientName: string }
@@ -2091,6 +2092,28 @@ export default function DevisGestionnairePage() {
       await loadPatientDetail(selectedPatient); await loadPatients()
     } catch (e) { setPageError(e instanceof Error ? e.message : 'Erreur.') }
     finally { setActionLoading(false) }
+  }
+
+  const handleAcceptDevis = async () => {
+    const id = acceptDevisId
+    if (!id) return
+    setActionLoading(true); setPageError(null)
+    try {
+      await gestionnaireApi.acceptDevis(id)
+      setAcceptDevisId(null)
+      await invalidateCache(queryKeys.planningSejour())
+      await invalidateCache(queryKeys.logistique())
+      await loadPatientDetail(selectedPatient)
+      await loadPatients()
+      feedbackSuccess(
+        'Devis accepté',
+        'Le planning séjour et la logistique sont maintenant disponibles pour cette patiente.',
+      )
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Impossible de marquer le devis comme accepté.')
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   const handleCustomize = async () => {
@@ -3007,6 +3030,18 @@ export default function DevisGestionnairePage() {
                             Rappel devis
                           </Button>
                         )}
+                        {existingDevis && existingDevis.statut === 'envoye' && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-1.5 h-10 text-sm border-emerald-200 text-emerald-800 hover:bg-emerald-50 bg-white"
+                            disabled={detailLoading || actionLoading}
+                            onClick={() => setAcceptDevisId(existingDevis.id)}
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            Devis accepté
+                          </Button>
+                        )}
                         <Button
                           type="button"
                           variant="outline"
@@ -3422,6 +3457,17 @@ export default function DevisGestionnairePage() {
                               Supprimer
                             </Button>
                             {d.statut === 'envoye' && (
+                              <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-emerald-700 hover:bg-emerald-50 h-7 px-2.5 gap-1"
+                                onClick={() => setAcceptDevisId(d.id)}
+                                disabled={actionLoading}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Devis accepté
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -3431,6 +3477,7 @@ export default function DevisGestionnairePage() {
                               >
                                 Marquer refusé
                               </Button>
+                              </>
                             )}
                           </div>
                         )
@@ -3532,6 +3579,25 @@ export default function DevisGestionnairePage() {
           hotelNomInvalid={hotelNomInvalid}
         />
       )}
+
+      <ConfirmDialog
+        open={acceptDevisId !== null}
+        onClose={() => {
+          if (actionLoading) return
+          setAcceptDevisId(null)
+        }}
+        title="Marquer ce devis comme accepté ?"
+        description="À utiliser lorsque la patiente a confirmé par téléphone ou WhatsApp. Le dossier passera en « Devis accepté » : le planning séjour et la logistique s’ouvriront."
+        confirmLabel="Devis accepté"
+        confirmVariant="brand"
+        loading={actionLoading}
+        onConfirm={() => void handleAcceptDevis()}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+            <CheckCircle2 className="h-5 w-5 text-emerald-700" />
+          </div>
+        }
+      />
 
       <ConfirmDialog
         open={abstentionDialog !== null}

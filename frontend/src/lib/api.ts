@@ -1458,6 +1458,12 @@ export const gestionnaireApi = {
       body: JSON.stringify(body ?? {}),
     }),
 
+  /** Confirmation orale / WhatsApp : le devis passe en accepté, planning séjour débloqué. */
+  acceptDevis: (devisId: string) =>
+    request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/accepter`, {
+      method: 'POST',
+    }),
+
   deleteDevis: (devisId: string) =>
     request<{ ok: true; deleted: true; softDeleted?: true }>(`/gestionnaire/devis/${devisId}`, {
       method: 'DELETE',

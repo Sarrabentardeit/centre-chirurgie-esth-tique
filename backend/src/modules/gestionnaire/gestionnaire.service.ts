@@ -237,7 +237,7 @@ export async function getDashboard(gestionnaireUserId: string) {
     prisma.agendaEvent.count({
       where: { type: 'rdv', statut: 'planifie', dateDebut: { gte: now } },
     }),
-    prisma.patient.count({ where: { status: { in: ['date_reservee', 'logistique'] } } }),
+    prisma.patient.count({ where: { status: { in: ['devis_accepte', 'date_reservee', 'logistique'] } } }),
     prisma.notification.count({ where: { userId: gestionnaireUserId, lu: false } }),
     prisma.patient.findMany({
       where: { status: { in: ['rapport_genere', 'rapport_modifie', 'devis_preparation'] } },
@@ -281,7 +281,7 @@ export async function getDashboard(gestionnaireUserId: string) {
       take: 6,
     }),
     prisma.patient.findMany({
-      where: { status: { in: ['date_reservee', 'logistique'] } },
+      where: { status: { in: ['devis_accepte', 'date_reservee', 'logistique'] } },
       select: {
         id: true,
         dossierNumber: true,
@@ -1250,6 +1250,72 @@ export async function refuseDevis(gestionnaireId: string, devisId: string, input
   return { devis: updated }
 }
 
+/** Houda saisit l’acceptation (téléphone / WhatsApp) — débloque le planning séjour. */
+export async function acceptDevis(gestionnaireId: string, devisId: string) {
+  const devis = await prisma.devis.findFirst({
+    where: { id: devisId, deletedAt: null },
+    include: { patient: { include: { user: { select: { fullName: true } } } } },
+  })
+  if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+  if (devis.gestionnaireId !== gestionnaireId) {
+    throw new AppError(403, 'FORBIDDEN', 'Ce devis ne vous appartient pas.')
+  }
+  if (devis.statut === 'accepte') {
+    return { devis }
+  }
+  if (devis.statut !== 'envoye') {
+    throw new AppError(400, 'DEVIS_NOT_SENT', 'Seul un devis déjà envoyé peut être marqué comme accepté.')
+  }
+
+  const updated = await prisma.devis.update({
+    where: { id: devisId },
+    data: { statut: 'accepte' },
+  })
+
+  const unlockStatuses = ['devis_envoye', 'devis_preparation', 'rapport_genere', 'rapport_modifie']
+  if (unlockStatuses.includes(devis.patient.status)) {
+    await prisma.patient.update({
+      where: { id: devis.patientId },
+      data: { status: 'devis_accepte' },
+    })
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'status_change',
+      entity: 'devis',
+      entityId: devisId,
+      before: {
+        statut: devis.statut,
+        patientId: devis.patientId,
+        patientStatus: devis.patient.status,
+        numeroDevis: devis.numeroDevis,
+      } as never,
+      after: {
+        statut: updated.statut,
+        patientId: devis.patientId,
+        patientStatus: 'devis_accepte',
+        numeroDevis: devis.numeroDevis,
+        source: 'gestionnaire',
+      } as never,
+    },
+  }).catch(() => undefined)
+
+  await notifyStaff({
+    role: 'medecin',
+    email: false,
+    type: 'success',
+    titre: 'Devis accepté',
+    message:
+      `${devis.patient.user.fullName} (${devis.patient.dossierNumber}) : confirmation saisie par la gestionnaire (téléphone / WhatsApp). Planning séjour disponible.`,
+    lienAction: `/medecin/patients/${devis.patientId}`,
+  }).catch(() => undefined)
+
+  return { devis: updated }
+}
+
 export async function deleteDevis(gestionnaireId: string, devisId: string) {
   const devis = await prisma.devis.findFirst({
     where: { id: devisId, deletedAt: null },
@@ -1582,7 +1648,7 @@ export async function updatePatientFiche(actorId: string, patientId: string, inp
 
 export async function getLogistiquePatients() {
   const patients = await prisma.patient.findMany({
-    where: { status: { in: ['date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine'] } },
+    where: { status: { in: ['devis_accepte', 'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine'] } },
     include: { user: { select: { fullName: true, email: true } } },
     orderBy: { updatedAt: 'desc' },
   })
@@ -1679,7 +1745,7 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
         })
       }
     }
-  } else if (patient.status === 'date_reservee') {
+  } else if (patient.status === 'date_reservee' || patient.status === 'devis_accepte') {
     // Si la logistique est en cours, on explicite l'étape "logistique".
     await prisma.patient.update({
       where: { id: patientId },

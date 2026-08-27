@@ -62,13 +62,23 @@ export function devisSeparator(): string {
   return `<div class="section-hr" aria-hidden="true"></div>`
 }
 
+function escapeDevisHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 /** Bloc « Notre meilleure offre » — tableau + ligne total distincte. */
 export function buildDevisOfferBlockHtml(opts: {
   operationTitle: string
   sejourLine?: string
   totalFormatted: string
 }): string {
-  const { operationTitle, sejourLine = '', totalFormatted } = opts
+  const { sejourLine = '', totalFormatted } = opts
+  const operationTitle = escapeDevisHtml(opts.operationTitle)
+  const sejourSafe = escapeDevisHtml(sejourLine)
   return `
 <div class="offer-block">
   <p class="section-title">Notre meilleure offre</p>
@@ -83,7 +93,7 @@ export function buildDevisOfferBlockHtml(opts: {
       <tr>
         <td class="desc-cell" colspan="2">
           <div class="op-title">${operationTitle}</div>
-          ${sejourLine ? `<div class="sejour-badge">${sejourLine}</div>` : ''}
+          ${sejourSafe ? `<div class="sejour-badge">${sejourSafe}</div>` : ''}
         </td>
       </tr>
     </tbody>
@@ -91,7 +101,7 @@ export function buildDevisOfferBlockHtml(opts: {
       <tr class="offer-total-row">
         <td class="total-label">Total <span class="total-hint">(ferme et définitif)</span></td>
         <td class="total-price">
-          <span class="price-amount">${totalFormatted}</span>
+          <span class="price-amount">${escapeDevisHtml(totalFormatted)}</span>
           <span class="price-currency">dt</span>
         </td>
       </tr>
@@ -214,7 +224,8 @@ export function buildDevisPrintStyles(): string {
 
     /* Rythme vertical régulier */
     p  { margin: 0 0 8px; }
-    ul, ol { padding-left: 20px; margin: 0 0 10px; }
+    p:empty { margin: 0; height: 0; padding: 0; line-height: 0; overflow: hidden; }
+    ul, ol { padding-left: 20px; margin: 0 0 6px; }
     ol { list-style-type: decimal; }
     ol > li {
       margin: 0 0 10px;
@@ -224,7 +235,7 @@ export function buildDevisPrintStyles(): string {
     }
     ol ul { list-style-type: disc; margin-top: 6px; margin-bottom: 0; }
     .devis-heading {
-      margin: 14px 0 8px;
+      margin: 10px 0 6px;
       padding: 0;
       background: transparent;
       border: none;
@@ -236,6 +247,7 @@ export function buildDevisPrintStyles(): string {
       break-inside: avoid;
       page-break-inside: avoid;
     }
+    ul + .devis-heading { margin-top: 6px; }
     .devis-heading strong { color: ${C.bronze}; font-weight: 700; }
     .devis-ref-title {
       text-align: center !important;
@@ -486,5 +498,13 @@ export function buildDevisPrintStyles(): string {
     .devis-contact-footer svg path,
     .devis-contact-footer svg polyline,
     .devis-contact-footer svg circle { stroke: inherit; fill: none; }
+    .devis-contact-footer svg.icon-whatsapp {
+      stroke: none;
+      fill: ${C.bronze};
+    }
+    .devis-contact-footer svg.icon-whatsapp path {
+      stroke: none;
+      fill: inherit;
+    }
   `
 }

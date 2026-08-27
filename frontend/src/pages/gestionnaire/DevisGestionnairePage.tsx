@@ -1838,7 +1838,7 @@ export default function DevisGestionnairePage() {
         r.devis.customContent
         ?? patientDetail?.devis?.find((d) => d.id === r.devis.id)?.customContent
         ?? null
-      if (existingContent?.trim()) {
+      {
         const detail = patientDetail?.id === selectedPatient
           ? patientDetail
           : (await gestionnaireApi.getPatient(selectedPatient)).patient
@@ -1866,6 +1866,9 @@ export default function DevisGestionnairePage() {
           devis: devisForSync,
           letterContext: letterCtx,
           tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
+          syncOfferTotalFromLignes: true,
+          // Description lettre : figée ici ; resync à l’ouverture éditeur / Personnaliser
+          syncOfferTitleFromDevis: false,
         })
         await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
         savedDevis = { ...r.devis, customContent: contentToSave }
@@ -2056,11 +2059,13 @@ export default function DevisGestionnairePage() {
       }
       const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
       const letterCtx = letterContextFromGestionnairePatient(patientForPdf, devisForPdf)
-      const { topHtml, botHtml, contentToSave } = refreshDevisCustomContentParts({
+      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentParts({
         customContent: devisForPdf.customContent,
         devis: devisForPdf,
         letterContext: letterCtx,
         tndPerEur: rate,
+        syncOfferTotalFromLignes: true,
+        syncOfferTitleFromDevis: true,
       })
       // Persister le modèle rafraîchi (sinon patient/médecin gardent l’ancienne lettre TipTap)
       await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
@@ -2070,6 +2075,8 @@ export default function DevisGestionnairePage() {
           patient: patientForPdf,
           topHtml,
           botHtml,
+          operationTitle: offerTitle,
+          operationTotal: offerTotal,
           tndPerEur: rate,
         }),
       )
@@ -2162,6 +2169,8 @@ export default function DevisGestionnairePage() {
         devis: devisForSync,
         letterContext: letterCtx,
         tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
+        syncOfferTotalFromLignes: true,
+        syncOfferTitleFromDevis: true,
       })
       await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
       setShowModal(false)
@@ -2422,11 +2431,13 @@ export default function DevisGestionnairePage() {
       }
       const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
       const letterCtx = letterContextFromGestionnairePatient(detail, devisForPdf)
-      const { topHtml, botHtml, contentToSave } = refreshDevisCustomContentParts({
+      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentParts({
         customContent: devisForPdf.customContent,
         devis: devisForPdf,
         letterContext: letterCtx,
         tndPerEur: rate,
+        syncOfferTotalFromLignes: true,
+        syncOfferTitleFromDevis: true,
       })
       const fullHtml = await inlineHtmlImages(
         buildGestionnaireDevisExportHtml({
@@ -2434,6 +2445,8 @@ export default function DevisGestionnairePage() {
           patient: detail,
           topHtml,
           botHtml,
+          operationTitle: offerTitle,
+          operationTotal: offerTotal,
           tndPerEur: rate,
         }),
       )

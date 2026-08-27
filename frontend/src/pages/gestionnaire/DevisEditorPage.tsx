@@ -61,7 +61,6 @@ import {
   DEVIS_ACCENT,
   DEVIS_CHARTE,
   DEVIS_OFFER_PREVIEW_CSS,
-  buildDevisOfferBlockHtml,
 } from '@/lib/devisCharte'
 import {
   buildDevisLetterBottomHtml,
@@ -72,10 +71,36 @@ import {
   sejourPdfFromContext,
   type DevisLetterContext,
 } from '@/lib/devisLetterHtml'
-import { buildGestionnaireDevisExportHtml, DEVIS_CONTENT_BREAK } from '@/lib/devisExportHtml'
+import { buildGestionnaireDevisExportHtml, joinDevisCustomContent, refreshDevisCustomContentParts, resolveDevisOfferTotal } from '@/lib/devisExportHtml'
 // RichDocToolbar — barre d'outils partagée avec Planning séjour
 
-const CONTENT_BREAK = DEVIS_CONTENT_BREAK
+function escapeHtmlText(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function offerEditorHtmlFromTitle(title: string): string {
+  const safe = escapeHtmlText(title.trim() || 'Séjour médical personnalisé')
+  return `<p>${safe}</p>`
+}
+
+function offerTotalEditorHtml(display: string): string {
+  const safe = escapeHtmlText(display.trim() || '0')
+  return `<p>${safe}</p>`
+}
+
+function readOfferTitle(editor: Editor | null, fallback: string): string {
+  const text = editor?.getText()?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()
+  return text || fallback
+}
+
+function readOfferTotalDisplay(editor: Editor | null, fallback: string): string {
+  const text = editor?.getText()?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()
+  return text || fallback
+}
 
 /* ─────────────────────────────────────────────────────────
    CSS GLOBAL (éditeur + impression)
@@ -90,8 +115,24 @@ const GLOBAL_CSS = `
   min-height: 420px;
 }
 .ProseMirror p { margin: 0 0 8px; }
+/* Évite les grands blancs entre sections (paragraphes vides TipTap) */
+.ProseMirror p:empty,
+.ProseMirror p:has(> br:only-child) {
+  margin: 0;
+  min-height: 0;
+  line-height: 0.2;
+  height: 0.35em;
+  padding: 0;
+  overflow: hidden;
+}
+.ProseMirror ul + p.devis-heading,
+.ProseMirror ul + .devis-heading,
+.doc-shell ul + p.devis-heading,
+.doc-shell ul + .devis-heading {
+  margin-top: 6px;
+}
 .ProseMirror ul,
-.ProseMirror ol { padding-left: 22px; margin: 0 0 10px; }
+.ProseMirror ol { padding-left: 22px; margin: 0 0 6px; }
 .ProseMirror ol { list-style-type: decimal; }
 .ProseMirror ol > li { margin: 0 0 10px; break-inside: avoid; page-break-inside: avoid; }
 .ProseMirror ul > li { margin: 0 0 5px; break-inside: avoid; page-break-inside: avoid; }
@@ -112,11 +153,43 @@ const GLOBAL_CSS = `
 .doc-shell .tiptap { min-height: 420px; }
 .doc-section-bottom .ProseMirror,
 .doc-section-bottom .tiptap { min-height: 180px; }
+.doc-section-offer .ProseMirror,
+.doc-section-offer .tiptap {
+  min-height: 52px;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.45;
+  color: ${DEVIS_CHARTE.charcoal};
+}
+.doc-section-offer .ProseMirror p { margin: 0; }
+.doc-section-offer-total .ProseMirror,
+.doc-section-offer-total .tiptap {
+  min-height: 28px;
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.2;
+  color: ${DEVIS_CHARTE.bronze};
+  text-align: right;
+  letter-spacing: 0.02em;
+}
+.doc-section-offer-total .ProseMirror p { margin: 0; text-align: right; }
+.doc-offer-preview .total-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+.doc-offer-preview.is-editing {
+  outline: 2px solid ${DEVIS_ACCENT}55;
+  outline-offset: 4px;
+  border-radius: 4px;
+}
 
 /* Sous-titres : brun, sans fond ni barre */
 .ProseMirror .devis-heading,
 .doc-shell .devis-heading {
-  margin: 14px 0 8px;
+  margin: 10px 0 6px;
   padding: 0;
   background: transparent;
   border: none;
@@ -171,6 +244,14 @@ const GLOBAL_CSS = `
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.devis-contact-footer svg.icon-whatsapp {
+  stroke: none;
+  fill: ${DEVIS_ACCENT};
+}
+.devis-contact-footer svg.icon-whatsapp path {
+  stroke: none;
+  fill: inherit;
 }
 
 .devis-logo-block { display: flex; flex-direction: column; align-items: center; max-width: 132px; }
@@ -228,7 +309,9 @@ ${DEVIS_OFFER_PREVIEW_CSS}
 /* ─────────────────────────────────────────────────────────
    HELPERS
 ───────────────────────────────────────────────────────── */
-function fmtNum(n: number) { return n.toLocaleString('fr-TN', { minimumFractionDigits: 0 }) }
+function fmtNum(n: number) {
+  return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(n || 0))
+}
 
 function letterCtx(
   p: GestionnairePatientDetail,
@@ -237,8 +320,11 @@ function letterCtx(
   return letterContextFromGestionnairePatient(p, activeDevis)
 }
 
-function sejourPdfFromPatient(p: GestionnairePatientDetail) {
-  return sejourPdfFromContext(letterCtx(p))
+function sejourPdfFromPatient(
+  p: GestionnairePatientDetail,
+  activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
+) {
+  return sejourPdfFromContext(letterCtx(p, activeDevis))
 }
 
 function refreshDossierFieldsInTopHtml(
@@ -282,13 +368,21 @@ export default function DevisEditorPage() {
   const [confirmSendOpen, setConfirmSendOpen] = useState(false)
   const [initialTopHtml, setInitialTopHtml] = useState<string>('')
   const [initialBottomHtml, setInitialBottomHtml] = useState<string>('')
-  const [activeZone, setActiveZone] = useState<'top' | 'bottom'>('top')
+  const [initialOfferTitle, setInitialOfferTitle] = useState<string>('')
+  const [initialOfferTotal, setInitialOfferTotal] = useState<string>('')
+  const [activeZone, setActiveZone] = useState<'top' | 'bottom' | 'offer' | 'offerTotal'>('top')
   const [tndPerEur, setTndPerEur] = useState(DEFAULT_TND_PER_EUR)
 
   const devisIdRef    = useRef<string | null>(null)
   const saveTimerRef  = useRef<ReturnType<typeof setTimeout>>()
   const editorTopRef = useRef<Editor | null>(null)
   const editorBotRef = useRef<Editor | null>(null)
+  const editorOfferRef = useRef<Editor | null>(null)
+  const editorOfferTotalRef = useRef<Editor | null>(null)
+  const tndPerEurRef = useRef(DEFAULT_TND_PER_EUR)
+  /** Empêche une auto-save TipTap trop tôt (ex. total encore à l’ancienne valeur). */
+  const readyToSaveRef = useRef(false)
+  const offerTotalTouchedRef = useRef(false)
 
   /* CSS global */
   useEffect(() => {
@@ -302,6 +396,8 @@ export default function DevisEditorPage() {
   /* Chargement */
   const load = useCallback(async () => {
     if (!patientId) return
+    readyToSaveRef.current = false
+    offerTotalTouchedRef.current = false
     setLoading(true); setError(null)
     try {
       const [{ patient: p }, taux] = await Promise.all([
@@ -310,6 +406,7 @@ export default function DevisEditorPage() {
       ])
       const tndPerEurRate = taux?.tndPerEur ?? DEFAULT_TND_PER_EUR
       setTndPerEur(tndPerEurRate)
+      tndPerEurRef.current = tndPerEurRate
       setPatient(p)
       const dv =
         (requestedDevisId ? p.devis?.find((d) => d.id === requestedDevisId) : null)
@@ -322,31 +419,36 @@ export default function DevisEditorPage() {
 
       const lignes = dv?.lignes ?? []
       const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-      if (dv?.customContent?.trim()) {
-        if (dv.customContent.includes(CONTENT_BREAK)) {
-          const [top, bot] = dv.customContent.split(CONTENT_BREAK)
-          // Sync auto : clinique/hôtel/nuits + cases inclut/exclut depuis notesSejour
-          const topRaw = refreshDossierFieldsInTopHtml(top ?? buildTopHtml(p, dv), p, dv)
-          setInitialTopHtml(topRaw)
-          const bottomRaw = bot ?? buildBottomHtml(total, tndPerEurRate)
-          setInitialBottomHtml(replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate))
-          // Persister le HTML (dont le diagnostic remis sur le rapport de CETTE version)
-          if (id && topRaw !== (top ?? '')) {
-            const contentToSave = `${topRaw}${CONTENT_BREAK}${replaceDevisAmountPlaceholders(bottomRaw, total, tndPerEurRate)}`
-            void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
-          }
-        } else {
-          const topRaw = refreshDossierFieldsInTopHtml(dv.customContent, p, dv)
-          setInitialTopHtml(topRaw)
-          setInitialBottomHtml(buildBottomHtml(total, tndPerEurRate))
-          if (id && topRaw !== dv.customContent) {
-            const contentToSave = `${topRaw}${CONTENT_BREAK}${buildBottomHtml(total, tndPerEurRate)}`
-            void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
-          }
+      const ctx = letterCtx(p, dv ?? undefined)
+      const defaultOffer =
+        (pickRapport(ctx)?.interventionsRecommandees ?? [])
+          .filter(Boolean)
+          .join(' + ')
+        || lignes.find((l) => l.description?.trim())?.description.trim()
+        || 'Séjour médical personnalisé'
+
+      if (dv) {
+        // Synchro complète modal → lettre (séjour, examens, inclut/exclut, total, description)
+        const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentParts({
+          customContent: dv.customContent,
+          devis: dv,
+          letterContext: ctx,
+          tndPerEur: tndPerEurRate,
+          syncOfferTotalFromLignes: true,
+          syncOfferTitleFromDevis: true,
+        })
+        setInitialTopHtml(topHtml.trim() ? topHtml : buildTopHtml(p, dv))
+        setInitialBottomHtml(botHtml.trim() ? botHtml : buildBottomHtml(total, tndPerEurRate))
+        setInitialOfferTitle(offerTitle?.trim() || defaultOffer)
+        setInitialOfferTotal(offerTotal?.trim() || fmtNum(total))
+        if (id && contentToSave !== (dv.customContent ?? '')) {
+          void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
         }
       } else {
-        setInitialTopHtml(buildTopHtml(p, dv))
-        setInitialBottomHtml(buildBottomHtml(total, tndPerEurRate))
+        setInitialTopHtml(buildTopHtml(p, undefined))
+        setInitialBottomHtml(buildBottomHtml(0, tndPerEurRate))
+        setInitialOfferTitle(defaultOffer)
+        setInitialOfferTotal(fmtNum(0))
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -359,17 +461,22 @@ export default function DevisEditorPage() {
 
   const flushSave = useCallback(async () => {
     const id = devisIdRef.current
-    if (!id) return false
+    if (!id || !readyToSaveRef.current) return false
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = undefined
     }
     const topHtml = editorTopRef.current?.getHTML() ?? ''
     const botHtml = editorBotRef.current?.getHTML() ?? ''
+    const offerTitle = readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
+    const offerTotal = readOfferTotalDisplay(editorOfferTotalRef.current, '0')
     if (!topHtml.trim() && !botHtml.trim()) return false
     setSaving(true)
     try {
-      await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
+      await gestionnaireApi.saveDevisCustomContent(
+        id,
+        joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal),
+      )
       setSaved(true)
       return true
     } catch (e) {
@@ -379,6 +486,26 @@ export default function DevisEditorPage() {
       setSaving(false)
     }
   }, [])
+
+  const syncBottomToAmount = useCallback((amount: number) => {
+    const bot = editorBotRef.current
+    if (!bot || !Number.isFinite(amount)) return
+    const next = replaceDevisAmountPlaceholders(bot.getHTML(), amount, tndPerEurRef.current)
+    if (next !== bot.getHTML()) {
+      bot.commands.setContent(next, { emitUpdate: false })
+    }
+  }, [])
+
+  const syncOfferTotalFromLignes = useCallback((amount: number) => {
+    const ed = editorOfferTotalRef.current
+    if (!ed) return
+    const display = fmtNum(amount)
+    const next = offerTotalEditorHtml(display)
+    if (ed.getText().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim() !== display) {
+      ed.commands.setContent(next, { emitUpdate: false })
+    }
+    syncBottomToAmount(amount)
+  }, [syncBottomToAmount])
 
   /* Auto-save rapide (dès qu’on tape, sans cliquer Sauvegarder) */
   const triggerSave = useCallback(() => {
@@ -442,8 +569,66 @@ export default function DevisEditorPage() {
     onFocus: () => setActiveZone('bottom'),
     onUpdate: triggerSave,
   })
+  const editorOffer = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        heading: false,
+        horizontalRule: false,
+        blockquote: false,
+        codeBlock: false,
+        bulletList: false,
+        orderedList: false,
+        listItem: false,
+        paragraph: false,
+      }),
+      DevisParagraph,
+      Underline,
+      TextAlign.configure({ types: ['paragraph'] }),
+      DevisTextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
+    ],
+    content: offerEditorHtmlFromTitle(initialOfferTitle || 'Séjour médical personnalisé'),
+    onFocus: () => setActiveZone('offer'),
+    onUpdate: triggerSave,
+  })
+  const editorOfferTotal = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        heading: false,
+        horizontalRule: false,
+        blockquote: false,
+        codeBlock: false,
+        bulletList: false,
+        orderedList: false,
+        listItem: false,
+        paragraph: false,
+      }),
+      DevisParagraph,
+      Underline,
+      TextAlign.configure({ types: ['paragraph'] }),
+      DevisTextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
+    ],
+    content: offerTotalEditorHtml(initialOfferTotal || '0'),
+    onFocus: () => {
+      setActiveZone('offerTotal')
+      offerTotalTouchedRef.current = true
+    },
+    onUpdate: ({ editor }) => {
+      offerTotalTouchedRef.current = true
+      const amount = resolveDevisOfferTotal(editor.getText(), 0).amount
+      if (amount > 0) syncBottomToAmount(amount)
+      triggerSave()
+    },
+  })
   editorTopRef.current = editorTop
   editorBotRef.current = editorBot
+  editorOfferRef.current = editorOffer
+  editorOfferTotalRef.current = editorOfferTotal
 
   /* Appliquer le HTML chargé (examens rafraîchis inclus) dans l’éditeur */
   useEffect(() => {
@@ -458,6 +643,22 @@ export default function DevisEditorPage() {
       editorBot.commands.setContent(initialBottomHtml, { emitUpdate: false })
     }
   }, [editorBot, initialBottomHtml])
+  useEffect(() => {
+    if (!editorOffer || !initialOfferTitle) return
+    const next = offerEditorHtmlFromTitle(initialOfferTitle)
+    if (editorOffer.getHTML() !== next) {
+      editorOffer.commands.setContent(next, { emitUpdate: false })
+    }
+  }, [editorOffer, initialOfferTitle])
+  useEffect(() => {
+    if (loading || !editorOfferTotal || !initialOfferTotal) return
+    // Toujours forcer le total prestations à l’ouverture (évite 3000 figé vs 3400)
+    editorOfferTotal.commands.setContent(offerTotalEditorHtml(initialOfferTotal), { emitUpdate: false })
+    const amount = resolveDevisOfferTotal(initialOfferTotal, 0).amount
+    if (amount > 0) syncBottomToAmount(amount)
+    readyToSaveRef.current = true
+    void flushSave()
+  }, [loading, editorOfferTotal, initialOfferTotal, syncBottomToAmount, flushSave])
 
   /* Sauvegarde manuelle */
   const handleManualSave = async () => {
@@ -485,7 +686,12 @@ export default function DevisEditorPage() {
       // Re-sauve après refresh éventuel des champs dossier dans le HTML
       const topHtml = editorTopRef.current?.getHTML() ?? ''
       const botHtml = editorBotRef.current?.getHTML() ?? ''
-      await gestionnaireApi.saveDevisCustomContent(id, topHtml + CONTENT_BREAK + botHtml)
+      const offerTitle = readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
+      const offerTotal = readOfferTotalDisplay(editorOfferTotalRef.current, '0')
+      await gestionnaireApi.saveDevisCustomContent(
+        id,
+        joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal),
+      )
       setSaved(true)
 
       await gestionnaireApi.sendDevis(id, { html: fullHtml })
@@ -511,15 +717,26 @@ export default function DevisEditorPage() {
     if (!window.confirm(
       'Réinitialiser ce document avec le diagnostic actuel du rapport lié à ce devis (une correction du même rapport est reprise, pas un rapport plus récent) ?',
     )) return
-    const dv =
+    const dvReset =
       (devisId ? patient.devis?.find((d) => d.id === devisId) : null)
       ?? patient.devis?.find((d) => d.statut === 'brouillon')
       ?? patient.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
       ?? null
-    const total = (dv?.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+    const totalReset = (dvReset?.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+    const rapReset = pickRapport(letterCtx(patient, dvReset ?? undefined))
+    const defaultOffer =
+      (rapReset?.interventionsRecommandees ?? []).filter(Boolean).join(' + ')
+      || (dvReset?.lignes ?? []).find((l) => l.description?.trim())?.description.trim()
+      || 'Séjour médical personnalisé'
     // Régénère depuis cases + tableau prestations (écrase les edits TipTap — voulu)
-    editorTop?.commands.setContent(buildTopHtml(patient, dv ?? undefined))
-    editorBot?.commands.setContent(buildBottomHtml(total, tndPerEur))
+    editorTop?.commands.setContent(buildTopHtml(patient, dvReset ?? undefined))
+    editorBot?.commands.setContent(buildBottomHtml(totalReset, tndPerEur))
+    editorOffer?.commands.setContent(offerEditorHtmlFromTitle(defaultOffer))
+    editorOfferTotal?.commands.setContent(offerTotalEditorHtml(fmtNum(totalReset)))
+    setInitialOfferTitle(defaultOffer)
+    setInitialOfferTotal(fmtNum(totalReset))
+    offerTotalTouchedRef.current = false
+    readyToSaveRef.current = true
     setSaved(false)
     void flushSave()
   }
@@ -537,10 +754,18 @@ export default function DevisEditorPage() {
     getDevisDisplayNumber(dv, patient?.dossierNumber) || patient?.dossierNumber || ''
 
   const interventionLabel = (rap?.interventionsRecommandees ?? []).filter(Boolean).join(' + ')
-  const sejourLine = patient ? sejourPdfFromPatient(patient).sejourLine : ''
+  const sejourLine = patient ? sejourPdfFromPatient(patient, dv ?? undefined).sejourLine : ''
   const firstLigneLabel = lignes.find((l) => l.description?.trim())?.description.trim() ?? ''
-  const operationTitle =
+  const defaultOperationTitle =
     interventionLabel || firstLigneLabel || 'Séjour médical personnalisé'
+  const defaultOfferTotal = fmtNum(total)
+
+  /* Si le total devis change, resynchroniser tableau + phrase */
+  useEffect(() => {
+    if (loading || !readyToSaveRef.current) return
+    offerTotalTouchedRef.current = false
+    syncOfferTotalFromLignes(total)
+  }, [total, loading, syncOfferTotalFromLignes])
 
   /* Construit le HTML complet (même moteur que patient / médecin / chat). */
   const buildDevisFullHtml = () => {
@@ -549,12 +774,29 @@ export default function DevisEditorPage() {
     // Ne rafraîchit PAS la section inclut/exclut (édits TipTap conservés)
     topHtml = refreshDossierFieldsInTopHtml(topHtml, patient, dv)
     editorTopRef.current?.commands.setContent(topHtml, { emitUpdate: false })
-    const botHtml = editorBotRef.current?.getHTML() ?? ''
+
+    // Une seule source : total saisi OU total prestations
+    const offer = readOfferTitle(editorOfferRef.current, defaultOperationTitle)
+    let offerTotalDisp = readOfferTotalDisplay(editorOfferTotalRef.current, defaultOfferTotal)
+    if (!offerTotalTouchedRef.current) {
+      offerTotalDisp = defaultOfferTotal
+      editorOfferTotalRef.current?.commands.setContent(
+        offerTotalEditorHtml(offerTotalDisp),
+        { emitUpdate: false },
+      )
+    }
+    const amount = resolveDevisOfferTotal(offerTotalDisp, total).amount
+    let botHtml = editorBotRef.current?.getHTML() ?? ''
+    botHtml = replaceDevisAmountPlaceholders(botHtml, amount, tndPerEur)
+    editorBotRef.current?.commands.setContent(botHtml, { emitUpdate: false })
+
     return buildGestionnaireDevisExportHtml({
       devis: dv,
       patient,
       topHtml,
       botHtml,
+      operationTitle: offer,
+      operationTotal: offerTotalDisp,
       tndPerEur,
     })
   }
@@ -563,8 +805,9 @@ export default function DevisEditorPage() {
   const handlePrint = async () => {
     const topHtml  = editorTopRef.current?.getHTML() ?? ''
     const botHtml  = editorBotRef.current?.getHTML() ?? ''
+    const offerTitle = readOfferTitle(editorOfferRef.current, defaultOperationTitle)
 
-    if (!topHtml && !botHtml) {
+    if (!topHtml && !botHtml && !offerTitle) {
       window.alert("Le document est vide. Réinitialisez ou saisissez du contenu d'abord.")
       return
     }
@@ -577,9 +820,11 @@ export default function DevisEditorPage() {
       // Sauve aussi après éventuel refresh des champs dossier
       const top = editorTopRef.current?.getHTML() ?? ''
       const bot = editorBotRef.current?.getHTML() ?? ''
+      const offer = readOfferTitle(editorOfferRef.current, defaultOperationTitle)
+      const totalDisp = readOfferTotalDisplay(editorOfferTotalRef.current, defaultOfferTotal)
       const id = devisIdRef.current
       if (id) {
-        await gestionnaireApi.saveDevisCustomContent(id, top + CONTENT_BREAK + bot)
+        await gestionnaireApi.saveDevisCustomContent(id, joinDevisCustomContent(top, bot, offer, totalDisp))
         setSaved(true)
       }
       const blob = await gestionnaireApi.renderDevisPdf(html)
@@ -648,7 +893,15 @@ export default function DevisEditorPage() {
             {dv?.version != null ? ` · Version ${dv.version}` : ''}
             {dv?.dateCreation ? ` · ${formatDate(dv.dateCreation)}` : ''}
             {' · '}
-            Zone active : <strong>{activeZone === 'top' ? 'Corps du document' : 'Bas du document'}</strong>
+            Zone active : <strong>{
+              activeZone === 'top'
+                ? 'Corps du document'
+                : activeZone === 'offer'
+                  ? 'Description offre'
+                  : activeZone === 'offerTotal'
+                    ? 'Total offre'
+                    : 'Bas du document'
+            }</strong>
           </p>
         </div>
 
@@ -692,12 +945,21 @@ export default function DevisEditorPage() {
           {' '}<strong>« Votre devis inclut / exclut »</strong> se synchronisent automatiquement depuis le devis
           à chaque ouverture. Le <strong>diagnostic</strong> suit le <em>rapport lié à ce devis</em>
           (une correction du même rapport est reprise ; un nouveau rapport n’est pas injecté).
+          La <strong>description</strong> et le <strong>total</strong> du tableau « Notre meilleure offre » sont éditables ici.
           Pour tout régénérer (écraser le texte libre), cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
         </div>
       )}
 
       {/* ══ Toolbar ══ */}
-      <RichDocToolbar editor={activeZone === 'top' ? editorTop : editorBot} />
+      <RichDocToolbar editor={
+        activeZone === 'offerTotal'
+          ? editorOfferTotal
+          : activeZone === 'offer'
+            ? editorOffer
+            : activeZone === 'top'
+              ? editorTop
+              : editorBot
+      } />
 
       {/* ══ Document A4 — aperçu écran / mobile ══ */}
       <div className="editor-scroll flex-1 overflow-auto py-4 sm:py-8 px-2 sm:px-4">
@@ -733,19 +995,51 @@ export default function DevisEditorPage() {
             <EditorContent editor={editorTop} />
           </div>
 
-          {/* ── Tableau offre (même structure que le PDF) ── */}
+          {/* ── Tableau offre (description éditable) ── */}
           {lignes.length > 0 && (
             <div
-              className="avoid-break doc-offer-preview"
+              className={`avoid-break doc-offer-preview${
+                activeZone === 'offer' || activeZone === 'offerTotal' ? ' is-editing' : ''
+              }`}
               style={{ flexShrink: 0 }}
-              dangerouslySetInnerHTML={{
-                __html: buildDevisOfferBlockHtml({
-                  operationTitle,
-                  sejourLine,
-                  totalFormatted: fmtNum(total),
-                }),
-              }}
-            />
+            >
+              <div className="offer-block">
+                <p className="section-title">Notre meilleure offre</p>
+                <table className="offer-table">
+                  <thead>
+                    <tr>
+                      <th className="col-desc">Description</th>
+                      <th className="col-price">Tarif</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="desc-cell" colSpan={2}>
+                        <div className="op-title doc-section-offer">
+                          <EditorContent editor={editorOffer} />
+                        </div>
+                        {sejourLine ? (
+                          <div className="sejour-badge">{sejourLine}</div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr className="offer-total-row">
+                      <td className="total-label">
+                        Total <span className="total-hint">(ferme et définitif)</span>
+                      </td>
+                      <td className="total-price">
+                        <span className="price-amount doc-section-offer-total">
+                          <EditorContent editor={editorOfferTotal} />
+                        </span>
+                        <span className="price-currency">dt</span>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
           )}
 
           {/* ── Bas de document (modalités + validité) ── */}

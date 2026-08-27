@@ -10,8 +10,9 @@ import { formatDevisPdfFileName, formatDevisTitle, getDevisDisplayNumber, cn } f
 import { DEVIS_OFFER_PREVIEW_CSS, buildDevisOfferBlockHtml } from '@/lib/devisCharte'
 import {
   buildDevisExportHtml,
-  DEVIS_CONTENT_BREAK,
   refreshDevisCustomContentParts,
+  resolveDevisOfferTotal,
+  splitDevisCustomContent,
 } from '@/lib/devisExportHtml'
 import { sejourPdfFromContext } from '@/lib/devisLetterHtml'
 import { parseSejourMeta, nbAdultesDevisFromAccompagnants } from '@/lib/devisSejourNotes'
@@ -24,8 +25,6 @@ import { PullToRefresh } from '@/components/PullToRefresh'
 import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
 import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
 import { queryKeys } from '@/lib/queryKeys'
-
-const CONTENT_BREAK = DEVIS_CONTENT_BREAK
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 const fmtDate = (iso: string) =>
@@ -76,7 +75,7 @@ function Badge({ statut }: { statut: string }) {
 /* ── PDF — même moteur Chromium que gestionnaire / patient / chat ─────────── */
 async function exportPdf(dv: DevisWithPatient) {
   try {
-    const { topHtml, botHtml } = letterParts(dv)
+    const { topHtml, botHtml, offerTitle, offerTotal } = letterParts(dv)
     const html = await inlineHtmlImages(
       buildDevisExportHtml({
         devis: dv,
@@ -84,6 +83,8 @@ async function exportPdf(dv: DevisWithPatient) {
         patientFullName: dv.patient.fullName,
         topHtml,
         botHtml,
+        operationTitle: offerTitle,
+        operationTotal: offerTotal,
       }),
     )
     const blob = await medecinApi.renderDevisPdf(html)
@@ -220,10 +221,19 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
   const sejourLine = sejourLineFromDevis(dv)
 
   const raw = dv.customContent ?? ''
-  let botHtml = ''
-  if (raw.includes(CONTENT_BREAK)) botHtml = (raw.split(CONTENT_BREAK)[1] ?? '').trim()
-  const { topHtml } = letterParts(dv)
+  const split = splitDevisCustomContent(raw)
+  const botHtml = split.botHtml.trim()
+  const { topHtml, offerTitle, offerTotal } = letterParts(dv)
   const hasContent = !!raw.trim()
+  const offerDescription =
+    offerTitle?.trim()
+    || split.offerTitle?.trim()
+    || lignes.find((l) => l.description?.trim())?.description.trim()
+    || 'Séjour médical personnalisé'
+  const offerTotalDisplay = resolveDevisOfferTotal(
+    offerTotal ?? split.offerTotal,
+    dv.total,
+  ).display
   const cfg = STATUT[dv.statut as Statut]
 
   const startY = useRef(0)
@@ -455,9 +465,9 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
                           className="doc-offer-preview"
                           dangerouslySetInnerHTML={{
                             __html: buildDevisOfferBlockHtml({
-                              operationTitle: lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé',
+                              operationTitle: offerDescription,
                               sejourLine,
-                              totalFormatted: fmtNum(dv.total),
+                              totalFormatted: offerTotalDisplay,
                             }),
                           }}
                         />

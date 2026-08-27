@@ -9,6 +9,7 @@ import {
   buildDevisLetterBottomHtml,
   buildDevisLetterTopHtml,
   letterContextFromGestionnairePatient,
+  pickRapport,
   refreshDevisLetterTopHtml,
   sejourPdfFromContext,
   type DevisLetterContext,
@@ -17,9 +18,80 @@ import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/money
 import { formatDevisListName, getDevisDisplayNumber } from '@/lib/utils'
 
 export const DEVIS_CONTENT_BREAK = '|||EDITOR_BREAK|||'
+/** Titre / description du tableau « Notre meilleure offre » (éditable dans l’éditeur lettre). */
+export const DEVIS_OFFER_TITLE_PREFIX = 'DEVIS_OFFER_TITLE:'
+/** Total affiché du tableau offre (éditable ; défaut = total des lignes devis). */
+export const DEVIS_OFFER_TOTAL_PREFIX = 'DEVIS_OFFER_TOTAL:'
+
+export function splitDevisCustomContent(raw: string | null | undefined): {
+  topHtml: string
+  offerTitle: string | null
+  offerTotal: string | null
+  botHtml: string
+} {
+  const text = raw?.trim() ?? ''
+  if (!text) return { topHtml: '', offerTitle: null, offerTotal: null, botHtml: '' }
+  if (!text.includes(DEVIS_CONTENT_BREAK)) {
+    return { topHtml: text, offerTitle: null, offerTotal: null, botHtml: '' }
+  }
+  const parts = text.split(DEVIS_CONTENT_BREAK)
+  if (parts.length >= 2 && (parts[1] ?? '').startsWith(DEVIS_OFFER_TITLE_PREFIX)) {
+    let botStart = 2
+    let offerTotal: string | null = null
+    if (parts.length >= 3 && (parts[2] ?? '').startsWith(DEVIS_OFFER_TOTAL_PREFIX)) {
+      offerTotal = (parts[2] ?? '').slice(DEVIS_OFFER_TOTAL_PREFIX.length)
+      botStart = 3
+    }
+    return {
+      topHtml: parts[0] ?? '',
+      offerTitle: (parts[1] ?? '').slice(DEVIS_OFFER_TITLE_PREFIX.length),
+      offerTotal,
+      botHtml: parts.slice(botStart).join(DEVIS_CONTENT_BREAK),
+    }
+  }
+  return {
+    topHtml: parts[0] ?? '',
+    offerTitle: null,
+    offerTotal: null,
+    botHtml: parts.slice(1).join(DEVIS_CONTENT_BREAK),
+  }
+}
+
+export function joinDevisCustomContent(
+  topHtml: string,
+  botHtml: string,
+  offerTitle?: string | null,
+  offerTotal?: string | null,
+): string {
+  if (offerTitle == null && offerTotal == null) {
+    return `${topHtml}${DEVIS_CONTENT_BREAK}${botHtml}`
+  }
+  const titleSeg = `${DEVIS_OFFER_TITLE_PREFIX}${offerTitle ?? ''}`
+  if (offerTotal != null) {
+    return `${topHtml}${DEVIS_CONTENT_BREAK}${titleSeg}${DEVIS_CONTENT_BREAK}${DEVIS_OFFER_TOTAL_PREFIX}${offerTotal}${DEVIS_CONTENT_BREAK}${botHtml}`
+  }
+  return `${topHtml}${DEVIS_CONTENT_BREAK}${titleSeg}${DEVIS_CONTENT_BREAK}${botHtml}`
+}
 
 function fmtNum(n: number): string {
   return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(n || 0))
+}
+
+/** Affichage éditable du total + montant numérique (pour lettres / €). */
+export function resolveDevisOfferTotal(
+  display: string | null | undefined,
+  fallbackAmount: number,
+): { display: string; amount: number } {
+  const trimmed = display?.trim() ?? ''
+  if (!trimmed) {
+    return { display: fmtNum(fallbackAmount), amount: fallbackAmount }
+  }
+  const digits = trimmed.replace(/[^\d]/g, '')
+  const amount = digits ? Number(digits) : NaN
+  if (!Number.isFinite(amount) || amount < 0) {
+    return { display: trimmed, amount: fallbackAmount }
+  }
+  return { display: trimmed, amount }
 }
 
 /**
@@ -31,32 +103,55 @@ export function refreshDevisCustomContentParts(input: {
   devis: Devis
   letterContext: DevisLetterContext
   tndPerEur?: number
-}): { topHtml: string; botHtml: string; contentToSave: string } {
+  /**
+   * true (défaut) : le total du tableau offre suit le total des lignes devis
+   * (auto-save modal → éditeur / PDF synchronisés).
+   */
+  syncOfferTotalFromLignes?: boolean
+  /**
+   * true : la description du tableau suit interventions / 1ʳᵉ ligne devis
+   * (ouverture éditeur / Personnaliser). false (défaut) : conserve le texte lettre.
+   */
+  syncOfferTitleFromDevis?: boolean
+}): { topHtml: string; botHtml: string; offerTitle: string | null; offerTotal: string | null; contentToSave: string } {
   const tndPerEur = input.tndPerEur ?? DEFAULT_TND_PER_EUR
   const total = (input.devis.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-  const raw = input.customContent?.trim() ?? ''
-  let topHtml = ''
-  let botHtml = ''
-  if (raw.includes(DEVIS_CONTENT_BREAK)) {
-    const [t, b] = raw.split(DEVIS_CONTENT_BREAK)
-    topHtml = t ?? ''
-    botHtml = b ?? ''
-  } else if (raw) {
-    topHtml = raw
-  }
+  const split = splitDevisCustomContent(input.customContent)
+  let topHtml = split.topHtml
+  let botHtml = split.botHtml
 
   const ctx: DevisLetterContext = {
     ...input.letterContext,
     activeDevis: input.devis,
   }
+
+  const rap = pickRapport(ctx)
+  const defaultOfferTitle =
+    (rap?.interventionsRecommandees ?? []).filter(Boolean).join(' + ')
+    || (input.devis.lignes ?? []).find((l) => l.description?.trim())?.description.trim()
+    || 'Séjour médical personnalisé'
+
+  const syncTitle = input.syncOfferTitleFromDevis === true
+  const offerTitle = syncTitle
+    ? defaultOfferTitle
+    : (split.offerTitle?.trim() || defaultOfferTitle)
+
+  const syncTotal = input.syncOfferTotalFromLignes !== false
+  const offerTotal = syncTotal
+    ? fmtNum(total)
+    : (split.offerTotal?.trim() || fmtNum(total))
+  const letterTotal = total
+
   if (!topHtml.trim()) topHtml = buildDevisLetterTopHtml(ctx)
-  if (!botHtml.trim()) botHtml = buildDevisLetterBottomHtml(total, tndPerEur)
+  if (!botHtml.trim()) botHtml = buildDevisLetterBottomHtml(letterTotal, tndPerEur)
   topHtml = refreshDevisLetterTopHtml(topHtml, ctx)
-  botHtml = replaceDevisAmountPlaceholders(botHtml, total, tndPerEur)
+  botHtml = replaceDevisAmountPlaceholders(botHtml, letterTotal, tndPerEur)
   return {
     topHtml,
     botHtml,
-    contentToSave: `${topHtml}${DEVIS_CONTENT_BREAK}${botHtml}`,
+    offerTitle,
+    offerTotal,
+    contentToSave: joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal),
   }
 }
 
@@ -74,6 +169,10 @@ export function buildDevisExportHtml(input: {
   /** HTML haut déjà saisi (éditeur) — sinon customContent du devis. */
   topHtml?: string
   botHtml?: string
+  /** Description du tableau offre (éditée dans l’éditeur lettre). */
+  operationTitle?: string | null
+  /** Total affiché du tableau offre (éditable). */
+  operationTotal?: string | null
 }): string {
   const { devis: d, dossierNumber, patientFullName } = input
   const origin = input.origin ?? (typeof window !== 'undefined' ? window.location.origin : '')
@@ -86,18 +185,21 @@ export function buildDevisExportHtml(input: {
 
   let topHtml = input.topHtml ?? ''
   let botHtml = input.botHtml ?? ''
+  let offerTitle = input.operationTitle?.trim() || null
+  let offerTotal = input.operationTotal?.trim() || null
   if (!input.topHtml && !input.botHtml) {
-    const raw = d.customContent?.trim() ?? ''
-    if (raw) {
-      if (raw.includes(DEVIS_CONTENT_BREAK)) {
-        const [t, b] = raw.split(DEVIS_CONTENT_BREAK)
-        topHtml = t ?? ''
-        botHtml = b ?? ''
-      } else {
-        topHtml = raw
-      }
-    }
+    const split = splitDevisCustomContent(d.customContent)
+    topHtml = split.topHtml
+    botHtml = split.botHtml
+    if (!offerTitle) offerTitle = split.offerTitle
+    if (!offerTotal) offerTotal = split.offerTotal
+  } else if (d.customContent) {
+    const split = splitDevisCustomContent(d.customContent)
+    if (offerTitle == null) offerTitle = split.offerTitle
+    if (offerTotal == null) offerTotal = split.offerTotal
   }
+
+  const letterTotal = resolveDevisOfferTotal(offerTotal, total)
 
   const ctx: DevisLetterContext = input.letterContext ?? {
     dossierNumber,
@@ -116,20 +218,22 @@ export function buildDevisExportHtml(input: {
     topHtml = buildDevisLetterTopHtml(ctxForRefresh)
   }
   if (!botHtml.trim()) {
-    botHtml = buildDevisLetterBottomHtml(total, tndPerEur)
+    botHtml = buildDevisLetterBottomHtml(letterTotal.amount, tndPerEur)
   }
   topHtml = refreshDevisLetterTopHtml(topHtml, ctxForRefresh)
-  botHtml = replaceDevisAmountPlaceholders(botHtml, total, tndPerEur)
+  botHtml = replaceDevisAmountPlaceholders(botHtml, letterTotal.amount, tndPerEur)
 
   const operationTitle =
-    lignes.find((l) => l.description?.trim())?.description.trim() || 'Séjour médical personnalisé'
+    offerTitle?.trim()
+    || lignes.find((l) => l.description?.trim())?.description.trim()
+    || 'Séjour médical personnalisé'
   const sejourLine = sejourPdfFromContext(ctxForRefresh).sejourLine
   const tableHtml =
     lignes.length > 0
       ? buildDevisOfferBlockHtml({
           operationTitle,
           sejourLine,
-          totalFormatted: fmtNum(total),
+          totalFormatted: letterTotal.display,
         })
       : ''
 
@@ -180,6 +284,8 @@ export function buildGestionnaireDevisExportHtml(input: {
   }
   topHtml?: string
   botHtml?: string
+  operationTitle?: string | null
+  operationTotal?: string | null
   tndPerEur?: number
 }): string {
   const letterContext = letterContextFromGestionnairePatient(input.patient, input.devis)
@@ -190,6 +296,8 @@ export function buildGestionnaireDevisExportHtml(input: {
     letterContext,
     topHtml: input.topHtml,
     botHtml: input.botHtml,
+    operationTitle: input.operationTitle,
+    operationTotal: input.operationTotal,
     tndPerEur: input.tndPerEur,
   })
 }

@@ -531,10 +531,47 @@ function replaceExamensSection(html: string, fresh: string): string {
   if (offreTextIdx >= 0) {
     const offrePStart = out.lastIndexOf('<p', offreTextIdx)
     if (offrePStart >= 0) {
-      return `${out.slice(0, offrePStart)}${fresh}\n<p></p>\n${out.slice(offrePStart)}`
+      const head = stripTrailingEmptyParagraphs(out.slice(0, offrePStart))
+      return `${head}${fresh}\n<p></p>\n${out.slice(offrePStart)}`
     }
   }
-  return `${out}\n${fresh}`
+  return `${stripTrailingEmptyParagraphs(out)}\n${fresh}`
+}
+
+/** Paragraphe TipTap vide (`<p></p>`, `<p><br></p>`, `&nbsp;`). */
+const EMPTY_P_RE = String.raw`<p\b[^>]*>\s*(?:(?:<br\b[^>]*/?>|&nbsp;|\u00a0|\s)*)\s*</p>`
+
+function stripTrailingEmptyParagraphs(html: string): string {
+  return html.replace(new RegExp(`(?:\\s*${EMPTY_P_RE})+$`, 'gi'), '\n')
+}
+
+/** Réduit les trous verticaux (surtout entre traitement préventif et examens). */
+function collapseExcessEmptyParagraphs(html: string): string {
+  let out = html.replace(new RegExp(`(?:${EMPTY_P_RE}\\s*){2,}`, 'gi'), '<p></p>\n')
+  // Aucun paragraphe vide juste avant le titre Examens
+  out = out.replace(
+    new RegExp(
+      `(</ul>)(\\s*(?:${EMPTY_P_RE}\\s*)+)(?=<p\\b[^>]*class="[^"]*devis-heading[^"]*"[^>]*>[\\s\\S]*?Examens médicaux)`,
+      'gi',
+    ),
+    '$1\n',
+  )
+  out = out.replace(
+    new RegExp(
+      `((?:Aspégic|Anti-inflammatoire|Aspirine)[\\s\\S]*?</li>\\s*</ul>)(\\s*(?:${EMPTY_P_RE}\\s*)+)(?=[\\s\\S]{0,200}?Examens médicaux)`,
+      'gi',
+    ),
+    '$1\n',
+  )
+  // Titre Examens précédé de <p> vides (sans </ul> juste avant)
+  out = out.replace(
+    new RegExp(
+      `(?:${EMPTY_P_RE}\\s*)+(?=<p\\b[^>]*>[\\s\\S]*?Examens médicaux nécessaires)`,
+      'gi',
+    ),
+    '',
+  )
+  return out
 }
 
 function refreshExamensInTopHtml(html: string, ctx: DevisLetterContext): string {
@@ -685,8 +722,13 @@ export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext)
   out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
   out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
   out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
+  {
+    const interRec = (pickRapport(ctx)?.interventionsRecommandees ?? []).filter(Boolean).join(', ') || '—'
+    out = refreshDevisFieldByLabel(out, 'Intervention proposée :', interRec)
+  }
   out = refreshSejourBadgeInHtml(out, sv.sejourLine)
   out = normalizeSejourJoursToNuits(out)
+  out = collapseExcessEmptyParagraphs(out)
   return out
 }
 
@@ -808,7 +850,6 @@ ${devisSectionHeading("À titre de traitement préventif, prenez 2 semaines avan
 <li>Arnica montana 9 CH à raison de 5 granulés (4 fois par jour)</li>
 <li>Arrêt de l'Aspégic / Anti-inflammatoire / Aspirine 10 jours avant la chirurgie.</li>
 </ul>
-<p></p>
 
 ${buildExamensMedicauxHtml(ctx)}
 <p></p>

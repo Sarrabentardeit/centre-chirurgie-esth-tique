@@ -24,12 +24,17 @@ const UNITS = [
   'dix-neuf',
 ] as const
 
+const TENS = ['', '', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante'] as const
+
 function under100(n: number): string {
   if (n < 20) return UNITS[n] ?? ''
   if (n < 70) {
+    const tens = Math.floor(n / 10)
     const u = n % 10
-    if (n === 60) return 'soixante'
-    return `soixante-${UNITS[u]}`
+    const tensWord = TENS[tens] ?? ''
+    if (u === 0) return tensWord
+    if (u === 1) return `${tensWord}-et-un`
+    return `${tensWord}-${UNITS[u]}`
   }
   if (n < 80) {
     const u = n - 70
@@ -38,6 +43,7 @@ function under100(n: number): string {
   }
   const u = n - 80
   if (u === 0) return 'quatre-vingts'
+  if (u === 10) return 'quatre-vingt-dix'
   return `quatre-vingt-${UNITS[u]}`
 }
 

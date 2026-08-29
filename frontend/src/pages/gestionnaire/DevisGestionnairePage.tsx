@@ -62,6 +62,9 @@ import { queryKeys } from '@/lib/queryKeys'
 import {
   buildGestionnaireDevisExportHtml,
   refreshDevisCustomContentParts,
+  refreshDevisCustomContentFromDraft,
+  displayDevisOfferTotal,
+  splitDevisCustomContent,
 } from '@/lib/devisExportHtml'
 import { letterContextFromGestionnairePatient } from '@/lib/devisLetterHtml'
 import { inlineHtmlImages } from '@/lib/pdf'
@@ -1369,11 +1372,19 @@ export default function DevisGestionnairePage() {
   }, [])
 
   const loadPatientDetail = useCallback(async (id: string) => {
-    if (!id) return
+    if (!id) return null
     setDetailLoading(true); setPageError(null)
-    try { const r = await gestionnaireApi.getPatient(id); setPatientDetail(r.patient) }
-    catch (e) { setPatientDetail(null); setPageError(e instanceof Error ? e.message : 'Erreur.') }
-    finally { setDetailLoading(false) }
+    try {
+      const r = await gestionnaireApi.getPatient(id)
+      setPatientDetail(r.patient)
+      return r.patient
+    } catch (e) {
+      setPatientDetail(null)
+      setPageError(e instanceof Error ? e.message : 'Erreur.')
+      return null
+    } finally {
+      setDetailLoading(false)
+    }
   }, [])
 
   useEffect(() => { void loadPatients({ useCache: true }) }, [loadPatients])
@@ -1571,12 +1582,35 @@ export default function DevisGestionnairePage() {
     }
   }
 
-  const total        = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+  const pickEditableDevis = (list: Devis[] | null | undefined): Devis | null => {
+    const editable = [...(list ?? [])].filter(
+      (d) => d.statut === 'brouillon' || d.statut === 'envoye' || d.statut === 'accepte',
+    )
+    if (editable.length === 0) return null
+    return editable.sort(
+      (a, b) =>
+        b.version - a.version ||
+        +new Date(b.dateCreation) - +new Date(a.dateCreation),
+    )[0]!
+  }
 
-  const openDevisTable = (
+  const lignesTotal = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
+  const customContentForTotal =
+    modalDevis?.customContent
+    ?? patientDetail?.devis?.find((d) => d.id === modalDevisIdRef.current)?.customContent
+    ?? existingDevis?.customContent
+  const total = displayDevisOfferTotal(customContentForTotal, lignesTotal)
+
+  const openDevisTable = async (
     intent: 'create' | 'edit-draft' | 'view' | 'new-version',
     target?: Devis | null,
   ) => {
+    let detail = patientDetail
+    if (selectedPatient && intent !== 'create') {
+      const fresh = await loadPatientDetail(selectedPatient)
+      if (fresh) detail = fresh
+    }
+    const freshExisting = pickEditableDevis(detail?.devis)
     const status = patientRow?.status ?? patientDetail?.status
     if (!status || !canPatientHaveDevis(status)) {
       setPageError(
@@ -1606,7 +1640,11 @@ export default function DevisGestionnairePage() {
       qteDrainage,
     }
 
-    const source = intent === 'create' ? null : (target ?? existingDevis)
+    const source = intent === 'create'
+      ? null
+      : (target
+        ? (detail?.devis?.find((d) => d.id === target.id) ?? target)
+        : freshExisting)
     const effectiveIntent =
       intent === 'view' && source?.statut === 'brouillon' ? 'edit-draft' : intent
     setTableReadOnly(effectiveIntent === 'view')
@@ -1675,7 +1713,7 @@ export default function DevisGestionnairePage() {
         )
       }
     } else {
-      const template = existingDevis
+      const template = freshExisting ?? existingDevis
       if (template) {
         const baseLignes = template.lignes.map((l) => ({
           description: l.description,
@@ -1861,14 +1899,11 @@ export default function DevisGestionnairePage() {
           },
           devisForSync,
         )
-        const { contentToSave } = refreshDevisCustomContentParts({
+        const { contentToSave } = refreshDevisCustomContentFromDraft({
           customContent: existingContent,
           devis: devisForSync,
           letterContext: letterCtx,
           tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
-          syncOfferTotalFromLignes: true,
-          // Description lettre : figée ici ; resync à l’ouverture éditeur / Personnaliser
-          syncOfferTitleFromDevis: false,
         })
         await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
         savedDevis = { ...r.devis, customContent: contentToSave }
@@ -2059,13 +2094,11 @@ export default function DevisGestionnairePage() {
       }
       const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
       const letterCtx = letterContextFromGestionnairePatient(patientForPdf, devisForPdf)
-      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentParts({
+      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentFromDraft({
         customContent: devisForPdf.customContent,
         devis: devisForPdf,
         letterContext: letterCtx,
         tndPerEur: rate,
-        syncOfferTotalFromLignes: true,
-        syncOfferTitleFromDevis: true,
       })
       // Persister le modèle rafraîchi (sinon patient/médecin gardent l’ancienne lettre TipTap)
       await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
@@ -2078,6 +2111,8 @@ export default function DevisGestionnairePage() {
           operationTitle: offerTitle,
           operationTotal: offerTotal,
           tndPerEur: rate,
+          preserveTopHtml: false,
+          syncInclutExclut: true,
         }),
       )
       await gestionnaireApi.sendDevis(r.devis.id, { html: fullHtml })
@@ -2164,13 +2199,15 @@ export default function DevisGestionnairePage() {
         },
         devisForSync,
       )
+      const savedOfferTitle = splitDevisCustomContent(devisForSync.customContent).offerTitle?.trim()
       const { contentToSave } = refreshDevisCustomContentParts({
         customContent: devisForSync.customContent,
         devis: devisForSync,
         letterContext: letterCtx,
         tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
         syncOfferTotalFromLignes: true,
-        syncOfferTitleFromDevis: true,
+        // 1ʳᵉ ouverture : titre depuis interventions ; sinon garder la description personnalisée
+        syncOfferTitleFromDevis: !savedOfferTitle,
       })
       await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
       setShowModal(false)
@@ -2431,13 +2468,11 @@ export default function DevisGestionnairePage() {
       }
       const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
       const letterCtx = letterContextFromGestionnairePatient(detail, devisForPdf)
-      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentParts({
+      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentFromDraft({
         customContent: devisForPdf.customContent,
         devis: devisForPdf,
         letterContext: letterCtx,
         tndPerEur: rate,
-        syncOfferTotalFromLignes: true,
-        syncOfferTitleFromDevis: true,
       })
       const fullHtml = await inlineHtmlImages(
         buildGestionnaireDevisExportHtml({
@@ -2448,6 +2483,8 @@ export default function DevisGestionnairePage() {
           operationTitle: offerTitle,
           operationTotal: offerTotal,
           tndPerEur: rate,
+          preserveTopHtml: false,
+          syncInclutExclut: true,
         }),
       )
       const r = await gestionnaireApi.sendDevisRappel(devisForPdf.id, {
@@ -3017,7 +3054,7 @@ export default function DevisGestionnairePage() {
                         <Button
                           variant="brand"
                           className="gap-2 h-10 text-sm font-semibold"
-                          onClick={() => openDevisTable(primaryDevisAction.intent, primaryDevisAction.target)}
+                          onClick={() => void openDevisTable(primaryDevisAction.intent, primaryDevisAction.target)}
                           disabled={detailLoading || !devisAllowed}
                         >
                           {primaryDevisAction.intent === 'create'
@@ -3438,7 +3475,7 @@ export default function DevisGestionnairePage() {
                               variant="ghost"
                               size="sm"
                               className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
-                              onClick={() => openDevisTable(
+                              onClick={() => void openDevisTable(
                                 d.statut === 'brouillon' ? 'edit-draft' : 'view',
                                 d,
                               )}
@@ -3451,7 +3488,7 @@ export default function DevisGestionnairePage() {
                                 variant="ghost"
                                 size="sm"
                                 className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
-                                onClick={() => openDevisTable('new-version', d)}
+                                onClick={() => void openDevisTable('new-version', d)}
                                 disabled={!devisAllowed}
                               >
                                 <Pencil className="h-3.5 w-3.5" />
@@ -3576,7 +3613,7 @@ export default function DevisGestionnairePage() {
           readOnly={tableReadOnly}
           onCreateVersion={
             tableReadOnly && modalDevis && modalDevis.statut !== 'refuse'
-              ? () => openDevisTable('new-version', modalDevis)
+              ? () => void openDevisTable('new-version', modalDevis)
               : undefined
           }
           createVersionLabel={(() => {

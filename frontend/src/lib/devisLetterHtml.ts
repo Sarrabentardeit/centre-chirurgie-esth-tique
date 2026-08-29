@@ -283,26 +283,35 @@ function refreshConvalescenceInTopHtml(html: string, ctx: DevisLetterContext): s
   return out
 }
 
+function normalizeFieldLabel(s: string): string {
+  return s.replace(/\s+/g, ' ').trim().replace(/[\u2018\u2019`´]/g, "'")
+}
+
 function refreshDevisFieldByLabel(html: string, label: string, value: string): string {
-  if (typeof window === 'undefined') return html
   if (value == null || value === '—') return html
+  const target = normalizeFieldLabel(label)
+  if (typeof window === 'undefined') {
+    const re = new RegExp(
+      `<p\\b[^>]*>[\\s\\S]*?${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['\u2019]")}[\\s\\S]*?<\\/p>`,
+      'i',
+    )
+    if (!re.test(html)) return html
+    return html.replace(re, devisFieldRow(label, value))
+  }
   const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
   const root = doc.getElementById('__root')
   if (!root) return html
-  const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
-  const target = normalize(label)
   let changed = false
   for (const p of Array.from(root.querySelectorAll('p'))) {
-    if (normalize(p.textContent ?? '').startsWith(target)) {
-      const tmp = doc.createElement('div')
-      tmp.innerHTML = devisFieldRow(label, value)
-      const fresh = tmp.firstElementChild
-      if (fresh) {
-        p.replaceWith(fresh)
-        changed = true
-      }
-      break
+    if (!normalizeFieldLabel(p.textContent ?? '').startsWith(target)) continue
+    const tmp = doc.createElement('div')
+    tmp.innerHTML = devisFieldRow(label, value)
+    const fresh = tmp.firstElementChild
+    if (fresh) {
+      p.replaceWith(fresh)
+      changed = true
     }
+    break
   }
   return changed ? root.innerHTML : html
 }
@@ -693,10 +702,15 @@ function refreshDiagnosticInTopHtml(
 
 /**
  * Applique les règles lettre devis sur le HTML haut (éditeur + PDF).
- * Clinique / hôtel / durées / inclut-exclut se resynchronisent.
+ * Clinique / hôtel / durées / inclut-exclut se resynchronisent (sauf si désactivé).
  * Diagnostic : rapport lié à ce devis (correction du même rapport reprise ; pas un R plus récent).
  */
-export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext): string {
+export function refreshDevisLetterTopHtml(
+  html: string,
+  ctx: DevisLetterContext,
+  opts?: { syncInclutExclut?: boolean },
+): string {
+  const syncInclutExclut = opts?.syncInclutExclut !== false
   const sv = sejourPdfFromContext(ctx)
   const active = pickDevis(ctx)
   const devisTitle = formatDevisTitle(active, ctx.dossierNumber)
@@ -704,7 +718,7 @@ export function refreshDevisLetterTopHtml(html: string, ctx: DevisLetterContext)
   out = stripDureeInterventionLine(out)
   out = refreshExamensInTopHtml(out, ctx)
   out = normalizeInclutExclutLabels(out)
-  out = refreshOffreInclutExclutInTopHtml(out, ctx)
+  if (syncInclutExclut) out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
   if (Array.isArray(ctx.rapports)) {
     const rap = pickRapport(ctx)

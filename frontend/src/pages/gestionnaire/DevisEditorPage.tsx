@@ -67,11 +67,10 @@ import {
   buildDevisLetterTopHtml,
   letterContextFromGestionnairePatient,
   pickRapport,
-  refreshDevisLetterTopHtml,
   sejourPdfFromContext,
   type DevisLetterContext,
 } from '@/lib/devisLetterHtml'
-import { buildGestionnaireDevisExportHtml, joinDevisCustomContent, refreshDevisCustomContentParts, resolveDevisOfferTotal } from '@/lib/devisExportHtml'
+import { buildGestionnaireDevisExportHtml, isManualDevisOfferTotal, joinDevisCustomContent, refreshDevisCustomContentParts, resolveDevisOfferTotal, splitDevisCustomContent } from '@/lib/devisExportHtml'
 // RichDocToolbar — barre d'outils partagée avec Planning séjour
 
 function escapeHtmlText(s: string): string {
@@ -327,14 +326,6 @@ function sejourPdfFromPatient(
   return sejourPdfFromContext(letterCtx(p, activeDevis))
 }
 
-function refreshDossierFieldsInTopHtml(
-  html: string,
-  p: GestionnairePatientDetail,
-  activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
-): string {
-  return refreshDevisLetterTopHtml(html, letterCtx(p, activeDevis))
-}
-
 function buildTopHtml(
   p: GestionnairePatientDetail,
   activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
@@ -428,19 +419,25 @@ export default function DevisEditorPage() {
         || 'Séjour médical personnalisé'
 
       if (dv) {
-        // Synchro complète modal → lettre (séjour, examens, inclut/exclut, total, description)
+        const split = splitDevisCustomContent(dv.customContent)
+        const legacyManualTotal =
+          !split.offerTotalManual
+          && isManualDevisOfferTotal(split.offerTotal, total)
+        // Resync champs auto (séjour, examens, inclut/exclut) — garde description + total manuel
         const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentParts({
           customContent: dv.customContent,
           devis: dv,
           letterContext: ctx,
           tndPerEur: tndPerEurRate,
-          syncOfferTotalFromLignes: true,
-          syncOfferTitleFromDevis: true,
+          syncOfferTitleFromDevis: false,
+          preserveLegacyManualOfferTotal: true,
         })
+        const offerTotalStr = offerTotal?.trim() || fmtNum(total)
         setInitialTopHtml(topHtml.trim() ? topHtml : buildTopHtml(p, dv))
         setInitialBottomHtml(botHtml.trim() ? botHtml : buildBottomHtml(total, tndPerEurRate))
         setInitialOfferTitle(offerTitle?.trim() || defaultOffer)
-        setInitialOfferTotal(offerTotal?.trim() || fmtNum(total))
+        setInitialOfferTotal(offerTotalStr)
+        offerTotalTouchedRef.current = split.offerTotalManual || legacyManualTotal
         if (id && contentToSave !== (dv.customContent ?? '')) {
           void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
         }
@@ -459,9 +456,10 @@ export default function DevisEditorPage() {
 
   useEffect(() => { void load() }, [load])
 
-  const flushSave = useCallback(async () => {
+  const flushSave = useCallback(async (opts?: { force?: boolean }) => {
     const id = devisIdRef.current
-    if (!id || !readyToSaveRef.current) return false
+    if (!id) return false
+    if (!opts?.force && !readyToSaveRef.current) return false
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = undefined
@@ -475,7 +473,7 @@ export default function DevisEditorPage() {
     try {
       await gestionnaireApi.saveDevisCustomContent(
         id,
-        joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal),
+        joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal, offerTotalTouchedRef.current),
       )
       setSaved(true)
       return true
@@ -652,7 +650,6 @@ export default function DevisEditorPage() {
   }, [editorOffer, initialOfferTitle])
   useEffect(() => {
     if (loading || !editorOfferTotal || !initialOfferTotal) return
-    // Toujours forcer le total prestations à l’ouverture (évite 3000 figé vs 3400)
     editorOfferTotal.commands.setContent(offerTotalEditorHtml(initialOfferTotal), { emitUpdate: false })
     const amount = resolveDevisOfferTotal(initialOfferTotal, 0).amount
     if (amount > 0) syncBottomToAmount(amount)
@@ -679,21 +676,10 @@ export default function DevisEditorPage() {
     setSentOk(false)
     try {
       // Toujours persister la version écran actuelle avant PDF / chat
-      await flushSave()
+      await flushSave({ force: true })
 
-      // PDF chat = HTML courant de l’éditeur (version sélectionnée + à jour)
+      // PDF chat = exactement ce qui est à l’écran
       const fullHtml = await inlineHtmlImages(buildDevisFullHtml())
-      // Re-sauve après refresh éventuel des champs dossier dans le HTML
-      const topHtml = editorTopRef.current?.getHTML() ?? ''
-      const botHtml = editorBotRef.current?.getHTML() ?? ''
-      const offerTitle = readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
-      const offerTotal = readOfferTotalDisplay(editorOfferTotalRef.current, '0')
-      await gestionnaireApi.saveDevisCustomContent(
-        id,
-        joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal),
-      )
-      setSaved(true)
-
       await gestionnaireApi.sendDevis(id, { html: fullHtml })
       setSentOk(true)
       toast({
@@ -760,35 +746,25 @@ export default function DevisEditorPage() {
     interventionLabel || firstLigneLabel || 'Séjour médical personnalisé'
   const defaultOfferTotal = fmtNum(total)
 
-  /* Si le total devis change, resynchroniser tableau + phrase */
+  /* Si le total devis change (retour modal), resynchroniser sauf si total modifié à la main */
   useEffect(() => {
     if (loading || !readyToSaveRef.current) return
-    offerTotalTouchedRef.current = false
+    if (offerTotalTouchedRef.current) return
     syncOfferTotalFromLignes(total)
   }, [total, loading, syncOfferTotalFromLignes])
 
-  /* Construit le HTML complet (même moteur que patient / médecin / chat). */
+  /* Construit le HTML complet — reprend l’écran tel quel (pas de resync qui écrase les corrections). */
   const buildDevisFullHtml = () => {
     if (!patient || !dv) return ''
-    let topHtml = editorTopRef.current?.getHTML() ?? ''
-    // Ne rafraîchit PAS la section inclut/exclut (édits TipTap conservés)
-    topHtml = refreshDossierFieldsInTopHtml(topHtml, patient, dv)
-    editorTopRef.current?.commands.setContent(topHtml, { emitUpdate: false })
-
-    // Une seule source : total saisi OU total prestations
+    const topHtml = editorTopRef.current?.getHTML() ?? ''
     const offer = readOfferTitle(editorOfferRef.current, defaultOperationTitle)
-    let offerTotalDisp = readOfferTotalDisplay(editorOfferTotalRef.current, defaultOfferTotal)
-    if (!offerTotalTouchedRef.current) {
-      offerTotalDisp = defaultOfferTotal
-      editorOfferTotalRef.current?.commands.setContent(
-        offerTotalEditorHtml(offerTotalDisp),
-        { emitUpdate: false },
-      )
-    }
+    const offerTotalDisp = readOfferTotalDisplay(editorOfferTotalRef.current, defaultOfferTotal)
     const amount = resolveDevisOfferTotal(offerTotalDisp, total).amount
-    let botHtml = editorBotRef.current?.getHTML() ?? ''
-    botHtml = replaceDevisAmountPlaceholders(botHtml, amount, tndPerEur)
-    editorBotRef.current?.commands.setContent(botHtml, { emitUpdate: false })
+    const botHtml = replaceDevisAmountPlaceholders(
+      editorBotRef.current?.getHTML() ?? '',
+      amount,
+      tndPerEur,
+    )
 
     return buildGestionnaireDevisExportHtml({
       devis: dv,
@@ -798,6 +774,7 @@ export default function DevisEditorPage() {
       operationTitle: offer,
       operationTotal: offerTotalDisp,
       tndPerEur,
+      preserveTopHtml: true,
     })
   }
 
@@ -815,18 +792,8 @@ export default function DevisEditorPage() {
     setExporting(true)
     try {
       // Persister avant export → patient / chat voient la même version
-      await flushSave()
+      await flushSave({ force: true })
       const html = await inlineHtmlImages(buildDevisFullHtml())
-      // Sauve aussi après éventuel refresh des champs dossier
-      const top = editorTopRef.current?.getHTML() ?? ''
-      const bot = editorBotRef.current?.getHTML() ?? ''
-      const offer = readOfferTitle(editorOfferRef.current, defaultOperationTitle)
-      const totalDisp = readOfferTotalDisplay(editorOfferTotalRef.current, defaultOfferTotal)
-      const id = devisIdRef.current
-      if (id) {
-        await gestionnaireApi.saveDevisCustomContent(id, joinDevisCustomContent(top, bot, offer, totalDisp))
-        setSaved(true)
-      }
       const blob = await gestionnaireApi.renderDevisPdf(html)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -860,12 +827,6 @@ export default function DevisEditorPage() {
       <button onClick={() => navigate(-1)} className="text-sm text-slate-500 underline">Retour</button>
     </div>
   )
-
-  const draftForLetter =
-    patient.devis?.find((d) => d.statut === 'brouillon')
-    ?? patient.devis?.find((d) => ['envoye', 'accepte'].includes(d.statut))
-    ?? null
-  const showStaleLetterHint = Boolean(draftForLetter?.customContent?.trim())
 
   return createPortal(
     <div className="editor-root fixed inset-0 bg-white z-[100] flex flex-col">
@@ -937,18 +898,6 @@ export default function DevisEditorPage() {
           </button>
         </div>
       </div>
-
-      {showStaleLetterHint && (
-        <div className="no-print shrink-0 mx-4 sm:mx-6 mb-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900 leading-snug">
-          <strong className="font-semibold">Contenu personnalisable.</strong>{' '}
-          La <strong>clinique</strong>, l&apos;<strong>hôtel</strong>, les <strong>durées</strong> et la liste
-          {' '}<strong>« Votre devis inclut / exclut »</strong> se synchronisent automatiquement depuis le devis
-          à chaque ouverture. Le <strong>diagnostic</strong> suit le <em>rapport lié à ce devis</em>
-          (une correction du même rapport est reprise ; un nouveau rapport n’est pas injecté).
-          La <strong>description</strong> et le <strong>total</strong> du tableau « Notre meilleure offre » sont éditables ici.
-          Pour tout régénérer (écraser le texte libre), cliquez <strong>Réinitialiser</strong> puis Sauvegarder.
-        </div>
-      )}
 
       {/* ══ Toolbar ══ */}
       <RichDocToolbar editor={

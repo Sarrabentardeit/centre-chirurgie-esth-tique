@@ -22,17 +22,27 @@ export const DEVIS_CONTENT_BREAK = '|||EDITOR_BREAK|||'
 export const DEVIS_OFFER_TITLE_PREFIX = 'DEVIS_OFFER_TITLE:'
 /** Total affiché du tableau offre (éditable ; défaut = total des lignes devis). */
 export const DEVIS_OFFER_TOTAL_PREFIX = 'DEVIS_OFFER_TOTAL:'
+/** Présent si le total a été modifié à la main dans l’éditeur (ne pas resync depuis les lignes). */
+export const DEVIS_OFFER_TOTAL_MANUAL_PREFIX = 'DEVIS_OFFER_TOTAL_MANUAL:'
 
 export function splitDevisCustomContent(raw: string | null | undefined): {
   topHtml: string
   offerTitle: string | null
   offerTotal: string | null
+  offerTotalManual: boolean
   botHtml: string
 } {
+  const empty = {
+    topHtml: '',
+    offerTitle: null as string | null,
+    offerTotal: null as string | null,
+    offerTotalManual: false,
+    botHtml: '',
+  }
   const text = raw?.trim() ?? ''
-  if (!text) return { topHtml: '', offerTitle: null, offerTotal: null, botHtml: '' }
+  if (!text) return empty
   if (!text.includes(DEVIS_CONTENT_BREAK)) {
-    return { topHtml: text, offerTitle: null, offerTotal: null, botHtml: '' }
+    return { ...empty, topHtml: text }
   }
   const parts = text.split(DEVIS_CONTENT_BREAK)
   if (parts.length >= 2 && (parts[1] ?? '').startsWith(DEVIS_OFFER_TITLE_PREFIX)) {
@@ -42,10 +52,17 @@ export function splitDevisCustomContent(raw: string | null | undefined): {
       offerTotal = (parts[2] ?? '').slice(DEVIS_OFFER_TOTAL_PREFIX.length)
       botStart = 3
     }
+    let offerTotalManual = false
+    if (parts.length > botStart && (parts[botStart] ?? '').startsWith(DEVIS_OFFER_TOTAL_MANUAL_PREFIX)) {
+      offerTotalManual =
+        (parts[botStart] ?? '').slice(DEVIS_OFFER_TOTAL_MANUAL_PREFIX.length).trim() === '1'
+      botStart += 1
+    }
     return {
       topHtml: parts[0] ?? '',
       offerTitle: (parts[1] ?? '').slice(DEVIS_OFFER_TITLE_PREFIX.length),
       offerTotal,
+      offerTotalManual,
       botHtml: parts.slice(botStart).join(DEVIS_CONTENT_BREAK),
     }
   }
@@ -53,6 +70,7 @@ export function splitDevisCustomContent(raw: string | null | undefined): {
     topHtml: parts[0] ?? '',
     offerTitle: null,
     offerTotal: null,
+    offerTotalManual: false,
     botHtml: parts.slice(1).join(DEVIS_CONTENT_BREAK),
   }
 }
@@ -62,13 +80,19 @@ export function joinDevisCustomContent(
   botHtml: string,
   offerTitle?: string | null,
   offerTotal?: string | null,
+  offerTotalManual = false,
 ): string {
   if (offerTitle == null && offerTotal == null) {
     return `${topHtml}${DEVIS_CONTENT_BREAK}${botHtml}`
   }
   const titleSeg = `${DEVIS_OFFER_TITLE_PREFIX}${offerTitle ?? ''}`
   if (offerTotal != null) {
-    return `${topHtml}${DEVIS_CONTENT_BREAK}${titleSeg}${DEVIS_CONTENT_BREAK}${DEVIS_OFFER_TOTAL_PREFIX}${offerTotal}${DEVIS_CONTENT_BREAK}${botHtml}`
+    let out =
+      `${topHtml}${DEVIS_CONTENT_BREAK}${titleSeg}${DEVIS_CONTENT_BREAK}${DEVIS_OFFER_TOTAL_PREFIX}${offerTotal}`
+    if (offerTotalManual) {
+      out += `${DEVIS_CONTENT_BREAK}${DEVIS_OFFER_TOTAL_MANUAL_PREFIX}1`
+    }
+    return `${out}${DEVIS_CONTENT_BREAK}${botHtml}`
   }
   return `${topHtml}${DEVIS_CONTENT_BREAK}${titleSeg}${DEVIS_CONTENT_BREAK}${botHtml}`
 }
@@ -94,6 +118,31 @@ export function resolveDevisOfferTotal(
   return { display: trimmed, amount }
 }
 
+/** Total tableau offre saisi à la main (différent de la somme des lignes devis). */
+export function isManualDevisOfferTotal(
+  savedTotal: string | null | undefined,
+  lignesSum: number,
+): boolean {
+  const raw = savedTotal?.trim()
+  if (!raw) return false
+  return resolveDevisOfferTotal(raw, lignesSum).amount !== lignesSum
+}
+
+/** Total à afficher (modal) : somme prestations ou total lettre si modifié dans l’éditeur. */
+export function displayDevisOfferTotal(
+  customContent: string | null | undefined,
+  lignesTotal: number,
+): number {
+  const split = splitDevisCustomContent(customContent)
+  const saved = split.offerTotal?.trim()
+  if (!saved) return lignesTotal
+  const resolved = resolveDevisOfferTotal(saved, lignesTotal)
+  if (split.offerTotalManual || resolved.amount !== lignesTotal) {
+    return resolved.amount
+  }
+  return lignesTotal
+}
+
 /**
  * Découpe + rafraîchit le customContent (même règles que le PDF).
  * À sauvegarder en base pour que patient / médecin voient le bon modèle.
@@ -113,6 +162,13 @@ export function refreshDevisCustomContentParts(input: {
    * (ouverture éditeur / Personnaliser). false (défaut) : conserve le texte lettre.
    */
   syncOfferTitleFromDevis?: boolean
+  /**
+   * Anciens devis sans marqueur manuel : conserver un total ≠ somme des lignes
+   * à l’ouverture éditeur (migration vers DEVIS_OFFER_TOTAL_MANUAL).
+   */
+  preserveLegacyManualOfferTotal?: boolean
+  /** false : garder inclut/exclut déjà dans le HTML. Défaut = sync depuis le modal. */
+  syncInclutExclut?: boolean
 }): { topHtml: string; botHtml: string; offerTitle: string | null; offerTotal: string | null; contentToSave: string } {
   const tndPerEur = input.tndPerEur ?? DEFAULT_TND_PER_EUR
   const total = (input.devis.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
@@ -137,22 +193,55 @@ export function refreshDevisCustomContentParts(input: {
     : (split.offerTitle?.trim() || defaultOfferTitle)
 
   const syncTotal = input.syncOfferTotalFromLignes !== false
-  const offerTotal = syncTotal
-    ? fmtNum(total)
-    : (split.offerTotal?.trim() || fmtNum(total))
-  const letterTotal = total
+  const savedTotalRaw = split.offerTotal?.trim() || null
+  const keepManualTotal =
+    split.offerTotalManual
+    || (
+      input.preserveLegacyManualOfferTotal === true
+      && isManualDevisOfferTotal(savedTotalRaw, total)
+    )
+  const offerTotal = keepManualTotal
+    ? (savedTotalRaw || fmtNum(total))
+    : syncTotal
+      ? fmtNum(total)
+      : (savedTotalRaw || fmtNum(total))
+  const letterTotal = resolveDevisOfferTotal(offerTotal, total).amount
 
   if (!topHtml.trim()) topHtml = buildDevisLetterTopHtml(ctx)
   if (!botHtml.trim()) botHtml = buildDevisLetterBottomHtml(letterTotal, tndPerEur)
-  topHtml = refreshDevisLetterTopHtml(topHtml, ctx)
+  topHtml = refreshDevisLetterTopHtml(topHtml, ctx, {
+    syncInclutExclut: input.syncInclutExclut !== false,
+  })
   botHtml = replaceDevisAmountPlaceholders(botHtml, letterTotal, tndPerEur)
   return {
     topHtml,
     botHtml,
     offerTitle,
     offerTotal,
-    contentToSave: joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal),
+    contentToSave: joinDevisCustomContent(
+      topHtml,
+      botHtml,
+      offerTitle,
+      offerTotal,
+      keepManualTotal,
+    ),
   }
+}
+
+/**
+ * Resync lettre depuis le brouillon modal / envoi direct :
+ * clinique, séjour, inclut/exclut (cases modal), total prestations…
+ * Conserve la description du tableau offre déjà personnalisée.
+ */
+export function refreshDevisCustomContentFromDraft(
+  input: Omit<Parameters<typeof refreshDevisCustomContentParts>[0], 'syncOfferTotalFromLignes' | 'syncOfferTitleFromDevis' | 'syncInclutExclut'>,
+) {
+  return refreshDevisCustomContentParts({
+    ...input,
+    syncOfferTotalFromLignes: true,
+    syncOfferTitleFromDevis: false,
+    syncInclutExclut: true,
+  })
 }
 
 /**
@@ -173,6 +262,13 @@ export function buildDevisExportHtml(input: {
   operationTitle?: string | null
   /** Total affiché du tableau offre (éditable). */
   operationTotal?: string | null
+  /**
+   * true : ne pas resynchroniser le HTML haut (export éditeur = WYSIWYG).
+   * false (défaut) : resync clinique, durées, adultes… depuis le devis.
+   */
+  preserveTopHtml?: boolean
+  /** Lors du refresh : false = garder inclut/exclut édités à la main. */
+  syncInclutExclut?: boolean
 }): string {
   const { devis: d, dossierNumber, patientFullName } = input
   const origin = input.origin ?? (typeof window !== 'undefined' ? window.location.origin : '')
@@ -220,7 +316,12 @@ export function buildDevisExportHtml(input: {
   if (!botHtml.trim()) {
     botHtml = buildDevisLetterBottomHtml(letterTotal.amount, tndPerEur)
   }
-  topHtml = refreshDevisLetterTopHtml(topHtml, ctxForRefresh)
+  const preserveTop = input.preserveTopHtml === true
+  if (!preserveTop) {
+    topHtml = refreshDevisLetterTopHtml(topHtml, ctxForRefresh, {
+      syncInclutExclut: input.syncInclutExclut !== false,
+    })
+  }
   botHtml = replaceDevisAmountPlaceholders(botHtml, letterTotal.amount, tndPerEur)
 
   const operationTitle =
@@ -287,6 +388,10 @@ export function buildGestionnaireDevisExportHtml(input: {
   operationTitle?: string | null
   operationTotal?: string | null
   tndPerEur?: number
+  /** Export éditeur : conserver le HTML haut tel quel (inclut/exclut modifiés à la main). */
+  preserveTopHtml?: boolean
+  /** false = ne pas écraser inclut/exclut lors d’un refresh modal. */
+  syncInclutExclut?: boolean
 }): string {
   const letterContext = letterContextFromGestionnairePatient(input.patient, input.devis)
   return buildDevisExportHtml({
@@ -299,5 +404,7 @@ export function buildGestionnaireDevisExportHtml(input: {
     operationTitle: input.operationTitle,
     operationTotal: input.operationTotal,
     tndPerEur: input.tndPerEur,
+    preserveTopHtml: input.preserveTopHtml === true,
+    syncInclutExclut: input.syncInclutExclut,
   })
 }

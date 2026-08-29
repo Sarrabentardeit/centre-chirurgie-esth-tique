@@ -63,7 +63,6 @@ function messageMatchesDevisPdf(
   if (refs.length === 0) return false
   const hay = `${m.pieceJointeNom ?? ''} ${m.pieceJointeUrl ?? ''} ${m.contenu ?? ''}`.toLowerCase()
   if (!hay.trim()) return false
-  // Uniquement les pièces jointes / PDF (pas les SMS texte du template devis)
   const looksLikeAttachment =
     Boolean(m.pieceJointeNom?.trim())
     || Boolean(m.pieceJointeUrl?.trim())
@@ -73,7 +72,13 @@ function messageMatchesDevisPdf(
   return refs.some((ref) => {
     const r = ref.trim().toLowerCase()
     if (r.length < 3) return false
-    return hay.includes(r)
+    // Nom de fichier complet (version -B, -C…) — pas le n° MC seul
+    if (m.pieceJointeNom?.trim().toLowerCase() === r) return true
+    if (r.endsWith('.pdf') && hay.includes(r)) return true
+    if (!r.endsWith('.pdf') && m.pieceJointeNom?.trim().toLowerCase() === `${r}.pdf`) return true
+    // Slug disque chat-…-MC-08-029-…_-B
+    if (m.pieceJointeUrl?.toLowerCase().includes(r.replace(/[^\w.-]+/g, '_'))) return true
+    return false
   })
 }
 
@@ -85,17 +90,24 @@ function buildDevisPdfMatchRefs(input: {
   patientFullName?: string | null
 }): string[] {
   const refs = new Set<string>()
-  if (input.numeroDevis?.trim()) refs.add(input.numeroDevis.trim())
-  if (input.dossierNumber?.trim()) refs.add(input.dossierNumber.trim())
-  if (input.pieceJointeNom?.trim()) {
-    refs.add(input.pieceJointeNom.trim())
-    refs.add(input.pieceJointeNom.replace(/\.pdf$/i, '').trim())
-  }
-  // Slug disque (chat-…-MC-08-029-…)
-  for (const raw of [input.numeroDevis, input.dossierNumber]) {
-    if (!raw?.trim()) continue
-    refs.add(raw.trim().replace(/[^\w.-]+/g, '_'))
-  }
+
+  const fileName =
+    input.pieceJointeNom?.trim()
+    || (input.version != null && (input.numeroDevis?.trim() || input.dossierNumber?.trim())
+      ? formatDevisPdfFileName(
+          input.numeroDevis ?? input.dossierNumber,
+          input.patientFullName,
+          input.version,
+        )
+      : null)
+
+  if (!fileName) return []
+
+  refs.add(fileName)
+  const base = fileName.replace(/\.pdf$/i, '').trim()
+  refs.add(base)
+  const slug = base.replace(/[^\w.-]+/g, '_').slice(0, 80)
+  if (slug) refs.add(slug)
   return [...refs]
 }
 

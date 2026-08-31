@@ -3,7 +3,6 @@
  * Applique les règles actuelles : titre bronze, examens, séjour, chambre, etc.
  */
 import {
-  DEVIS_ACCENT,
   DEVIS_CHARTE,
   devisFieldRow,
   devisLabel,
@@ -556,7 +555,8 @@ function stripTrailingEmptyParagraphs(html: string): string {
 
 /** Réduit les trous verticaux (surtout entre traitement préventif et examens). */
 function collapseExcessEmptyParagraphs(html: string): string {
-  let out = html.replace(new RegExp(`(?:${EMPTY_P_RE}\\s*){2,}`, 'gi'), '<p></p>\n')
+  // Ne pas fusionner les espacements manuels (jusqu’à 6 lignes vides conservées).
+  let out = html.replace(new RegExp(`(?:${EMPTY_P_RE}\\s*){7,}`, 'gi'), '<p></p>\n<p></p>\n<p></p>\n<p></p>\n<p></p>\n<p></p>\n')
   // Aucun paragraphe vide juste avant le titre Examens
   out = out.replace(
     new RegExp(
@@ -625,33 +625,89 @@ function normalizeInclutExclutLabels(html: string): string {
 }
 
 export function devisRefTitleHtml(title: string): string {
-  return `<p class="devis-ref-title" style="text-align:center;color:${DEVIS_ACCENT};font-size:18px;letter-spacing:0.02em;font-weight:700"><strong style="color:${DEVIS_ACCENT};font-size:18px;letter-spacing:0.02em"><span style="color:${DEVIS_ACCENT};font-size:18px;letter-spacing:0.02em">${title}</span></strong></p>`
+  return `<p class="devis-ref-title" style="text-align:center"><strong>${title}</strong></p>`
+}
+
+function titleParagraphHasCustomStyle(el: Element): boolean {
+  if (el.getAttribute('style')?.match(/(?:^|;)\s*(?:color|font-size)\s*:/i)) return true
+  return Boolean(
+    el.querySelector(
+      'span[style*="color"], span[style*="font-size"], mark[style], strong[style*="color"], strong[style*="font-size"]',
+    ),
+  )
 }
 
 function refreshDevisTitleInTopHtml(html: string, title: string): string {
-  const styled = devisRefTitleHtml(title)
-  let out = html
-  // Variantes TipTap / anciennes (centré, class, avec ou sans -a/-b)
-  out = out.replace(/<p[^>]*class="[^"]*devis-ref-title[^"]*"[^>]*>[\s\S]*?<\/p>/gi, styled)
-  out = out.replace(
-    /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
-    styled,
-  )
-  out = out.replace(
-    /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-[\w-]+(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
-    styled,
-  )
-  // Si aucun titre trouvé, l’insérer avant le récapitulatif
-  if (!out.includes('devis-ref-title')) {
-    const recapIdx = out.search(/Récapitulatif de votre demande/i)
-    if (recapIdx >= 0) {
-      const recapP = out.lastIndexOf('<p', recapIdx)
-      if (recapP >= 0) {
-        out = `${out.slice(0, recapP)}${styled}\n<p></p>\n${out.slice(recapP)}`
+  const target = title.trim()
+  if (!target) return html
+
+  if (typeof window === 'undefined') {
+    const styled = devisRefTitleHtml(target)
+    let out = html
+    out = out.replace(/<p[^>]*class="[^"]*devis-ref-title[^"]*"[^>]*>[\s\S]*?<\/p>/gi, styled)
+    out = out.replace(
+      /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+      styled,
+    )
+    out = out.replace(
+      /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-[\w-]+(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+      styled,
+    )
+    if (!out.includes('devis-ref-title')) {
+      const recapIdx = out.search(/Récapitulatif de votre demande/i)
+      if (recapIdx >= 0) {
+        const recapP = out.lastIndexOf('<p', recapIdx)
+        if (recapP >= 0) {
+          out = `${out.slice(0, recapP)}${styled}\n<p></p>\n${out.slice(recapP)}`
+        }
       }
     }
+    return out
   }
-  return out
+
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+
+  const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const findTitleP = () =>
+    (root.querySelector('p.devis-ref-title') as HTMLElement | null)
+    ?? Array.from(root.querySelectorAll('p')).find((p) => /^Devis\b/i.test(normalize(p.textContent ?? '')))
+    ?? null
+
+  let el = findTitleP()
+  if (!el) {
+    const styled = devisRefTitleHtml(target)
+    const recapIdx = html.search(/Récapitulatif de votre demande/i)
+    if (recapIdx >= 0) {
+      const recapP = html.lastIndexOf('<p', recapIdx)
+      if (recapP >= 0) {
+        return `${html.slice(0, recapP)}${styled}\n<p></p>\n${html.slice(recapP)}`
+      }
+    }
+    return `${styled}\n<p></p>\n${html}`
+  }
+
+  if (!el.classList.contains('devis-ref-title')) {
+    el.classList.add('devis-ref-title')
+  }
+  if (normalize(el.textContent ?? '') === target) return html
+
+  if (titleParagraphHasCustomStyle(el)) {
+    const inner = el.innerHTML
+    const replaced = inner.replace(
+      /Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-zA-Z0-9]+)?/i,
+      target,
+    )
+    if (replaced !== inner) {
+      el.innerHTML = replaced
+      return root.innerHTML
+    }
+    return html
+  }
+
+  el.innerHTML = `<strong>${target}</strong>`
+  return root.innerHTML
 }
 
 /**

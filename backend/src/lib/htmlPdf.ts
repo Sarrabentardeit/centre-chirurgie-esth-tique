@@ -90,6 +90,7 @@ const LAYOUT_PAGES_BODY = `
   var available = Math.max(360, pageHeight - headerH - 24);
 
   var measureBox = document.createElement('div');
+  measureBox.className = 'devis-sheet-body doc-body';
   measureBox.style.cssText = 'width:688px;';
   host.appendChild(measureBox);
 
@@ -140,14 +141,20 @@ const LAYOUT_PAGES_BODY = `
     function textOf(el) {
       return ((el && el.textContent) || '').replace(/\s+/g, ' ').trim();
     }
+    function isSpacerParagraph(el) {
+      if (!el || (el.tagName || '').toLowerCase() !== 'p') return false;
+      if (el.classList && el.classList.contains('devis-spacer')) return true;
+      return textOf(el) === '';
+    }
     function isTitleLike(el) {
       if (!el) return false;
+      if (isSpacerParagraph(el)) return false;
       var tag = (el.tagName || '').toLowerCase();
       if (tag === 'hr' || /^h[1-6]$/.test(tag)) return true;
       var cls = String(el.className || '');
       if (/\b(devis-heading|diagnostic-op-title|section-title|devis-ref-title|section-hr)\b/.test(cls)) return true;
       var text = textOf(el);
-      if (!text) return true;
+      if (!text) return false;
       if (text.length <= 96 && /:\s*$/.test(text)) return true;
       return false;
     }

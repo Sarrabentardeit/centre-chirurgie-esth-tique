@@ -45,6 +45,8 @@ type RichDocToolbarProps = {
   highlightColors?: readonly ToolbarColorSwatch[]
 }
 
+const DEVIS_FONT_SIZES = ['12px', '13px', '14px', '16px', '18px', '20px', '22px'] as const
+
 export function RichDocToolbar({ editor, highlightColors }: RichDocToolbarProps) {
   const [colorOpen, setColorOpen] = useState(false)
   const [highlightOpen, setHighlightOpen] = useState(false)
@@ -169,6 +171,26 @@ export function RichDocToolbar({ editor, highlightColors }: RichDocToolbarProps)
           </div>
         )}
       </div>
+
+      <select
+        className="h-8 min-w-[4.5rem] rounded-lg border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600"
+        title="Taille du texte"
+        defaultValue=""
+        onChange={(e) => {
+          const size = e.target.value
+          if (!size) {
+            editor.chain().focus().unsetMark('textStyle').run()
+          } else {
+            editor.chain().focus().setMark('textStyle', { fontSize: size }).run()
+          }
+          e.target.value = ''
+        }}
+      >
+        <option value="" disabled>Taille</option>
+        {DEVIS_FONT_SIZES.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
     </div>
   )
 }

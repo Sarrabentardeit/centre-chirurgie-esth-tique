@@ -23,6 +23,14 @@ const DevisParagraph = Paragraph.extend({
           return { class: attributes.class }
         },
       },
+      style: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('style'),
+        renderHTML: (attributes) => {
+          if (!attributes.style) return {}
+          return { style: attributes.style }
+        },
+      },
     }
   },
 })
@@ -61,6 +69,7 @@ import {
   DEVIS_ACCENT,
   DEVIS_CHARTE,
   DEVIS_OFFER_PREVIEW_CSS,
+  devisEmptyParagraphCss,
 } from '@/lib/devisCharte'
 import {
   buildDevisLetterBottomHtml,
@@ -114,16 +123,8 @@ const GLOBAL_CSS = `
   min-height: 420px;
 }
 .ProseMirror p { margin: 0 0 8px; }
-/* Évite les grands blancs entre sections (paragraphes vides TipTap) */
-.ProseMirror p:empty,
-.ProseMirror p:has(> br:only-child) {
-  margin: 0;
-  min-height: 0;
-  line-height: 0.2;
-  height: 0.35em;
-  padding: 0;
-  overflow: hidden;
-}
+/* Espacements manuels (Entrée) — aligné sur le PDF */
+${devisEmptyParagraphCss('.ProseMirror')}
 .ProseMirror ul + p.devis-heading,
 .ProseMirror ul + .devis-heading,
 .doc-shell ul + p.devis-heading,
@@ -185,34 +186,39 @@ const GLOBAL_CSS = `
   border-radius: 4px;
 }
 
-/* Sous-titres : brun, sans fond ni barre */
+/* Sous-titres : défaut bronze, personnalisation éditeur prioritaire */
 .ProseMirror .devis-heading,
 .doc-shell .devis-heading {
   margin: 10px 0 6px;
   padding: 0;
   background: transparent;
   border: none;
-  font-size: 13px;
   font-weight: 700;
+}
+.ProseMirror .devis-heading:not([style*="color"]):not([style*="font-size"]),
+.doc-shell .devis-heading:not([style*="color"]):not([style*="font-size"]) {
+  font-size: 13px;
   color: ${DEVIS_CHARTE.bronze};
 }
 
-/* Titre centré « Devis MC-… » — bronze + plus grand (éditeur) */
+/* Titre centré « Devis MC-… » — défaut bronze + 18px, sans écraser les styles inline */
 .ProseMirror .devis-ref-title,
 .doc-shell .devis-ref-title {
   text-align: center !important;
   margin: 12px 0 10px;
-  font-size: 18px;
   font-weight: 700;
-  color: ${DEVIS_CHARTE.bronze};
   letter-spacing: 0.02em;
 }
+.ProseMirror .devis-ref-title:not([style*="color"]),
+.doc-shell .devis-ref-title:not([style*="color"]) {
+  color: ${DEVIS_CHARTE.bronze};
+}
+.ProseMirror .devis-ref-title:not([style*="font-size"]),
+.doc-shell .devis-ref-title:not([style*="font-size"]) {
+  font-size: 18px;
+}
 .ProseMirror .devis-ref-title strong,
-.ProseMirror .devis-ref-title span,
-.doc-shell .devis-ref-title strong,
-.doc-shell .devis-ref-title span {
-  color: ${DEVIS_CHARTE.bronze} !important;
-  font-size: 18px !important;
+.doc-shell .devis-ref-title strong {
   font-weight: 700;
   letter-spacing: 0.02em;
 }

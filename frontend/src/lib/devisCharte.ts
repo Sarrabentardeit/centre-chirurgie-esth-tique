@@ -157,6 +157,85 @@ export const DEVIS_OFFER_PREVIEW_CSS = `
 }
 `
 
+/**
+ * Paragraphes vides TipTap — une ligne par Entrée (éditeur + PDF identiques).
+ * @param scopes Préfixes CSS (ex. `.ProseMirror`). Vide = règle globale (PDF paginé).
+ */
+export function devisEmptyParagraphCss(...scopes: string[]): string {
+  const block = `
+  margin: 0 0 8px;
+  min-height: 1.65em;
+  height: auto;
+  line-height: 1.65;
+  padding: 0;
+  overflow: visible;
+`
+  if (scopes.length === 0) {
+    return `
+p:empty,
+p:has(> br:only-child),
+p.devis-spacer {
+${block}}
+`
+  }
+  const selectors = scopes.flatMap((s) => [
+    `${s} p:empty`,
+    `${s} p:has(> br:only-child)`,
+    `${s} p.devis-spacer`,
+  ]).join(',\n')
+  return `
+${selectors} {${block}}
+`
+}
+
+/** Marque les paragraphes vides pour un espacement fiable en PDF paginé. */
+export function markDevisSpacerParagraphs(html: string): string {
+  if (!html.trim()) return html
+  if (typeof window === 'undefined') {
+    return html.replace(
+      /<p\b([^>]*)>\s*(?:(?:<br\b[^>]*\/?>|&nbsp;|\u00a0|\s)*)\s*<\/p>/gi,
+      (full, attrs) => {
+        if (/\bdevis-spacer\b/.test(attrs)) return full
+        if (/\bclass="/i.test(attrs)) {
+          return full.replace(/\bclass="/i, 'class="devis-spacer ')
+        }
+        return full.replace(/<p\b/i, '<p class="devis-spacer"')
+      },
+    )
+  }
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  for (const p of Array.from(root.querySelectorAll('p'))) {
+    const text = (p.textContent ?? '').replace(/\u00a0/g, ' ').trim()
+    if (!text) p.classList.add('devis-spacer')
+  }
+  return root.innerHTML
+}
+
+/** Styles inline éditeur → fidèles à l’impression PDF. */
+export const DEVIS_WYSIWYG_INLINE_PRINT_CSS = `
+.doc-body [style*="color"],
+.doc-body [style*="font-size"],
+.doc-body [style*="background"],
+.doc-body [style*="margin"],
+.doc-body [style*="padding"],
+.doc-body [style*="line-height"],
+.doc-body [style*="text-align"],
+.devis-sheet-body [style*="color"],
+.devis-sheet-body [style*="font-size"],
+.devis-sheet-body [style*="background"],
+.devis-sheet-body [style*="margin"],
+.devis-sheet-body [style*="padding"],
+.devis-sheet-body [style*="line-height"],
+.devis-sheet-body [style*="text-align"],
+.doc-body mark,
+.devis-sheet-body mark {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+`
+
 /** Palette TipTap (éditeur devis). */
 export const DEVIS_TOOLBAR_COLORS = [
   { label: 'Blanc', value: DEVIS_CHARTE.white },
@@ -224,7 +303,8 @@ export function buildDevisPrintStyles(): string {
 
     /* Rythme vertical régulier */
     p  { margin: 0 0 8px; }
-    p:empty { margin: 0; height: 0; padding: 0; line-height: 0; overflow: hidden; }
+    ${devisEmptyParagraphCss()}
+    ${devisEmptyParagraphCss('.doc-body', '.devis-sheet-body', '.devis-top')}
     ul, ol { padding-left: 20px; margin: 0 0 6px; }
     ol { list-style-type: decimal; }
     ol > li {
@@ -239,35 +319,33 @@ export function buildDevisPrintStyles(): string {
       padding: 0;
       background: transparent;
       border: none;
-      font-size: 13px;
       font-weight: 700;
-      color: ${C.bronze};
       break-after: avoid;
       page-break-after: avoid;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     ul + .devis-heading { margin-top: 6px; }
-    .devis-heading strong { color: ${C.bronze}; font-weight: 700; }
+    /* Défauts charte uniquement si pas de style inline (couleur/taille éditeur prioritaire). */
+    .devis-heading:not([style*="color"]):not([style*="font-size"]) {
+      font-size: 13px;
+      color: ${C.bronze};
+    }
     .devis-ref-title {
       text-align: center !important;
       margin: 12px 0 10px;
-      font-size: 18px !important;
-      font-weight: 700 !important;
-      color: ${C.bronze} !important;
+      font-weight: 700;
       letter-spacing: 0.02em;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
-    .devis-ref-title strong,
-    .devis-ref-title span {
-      color: ${C.bronze} !important;
-      font-size: 18px !important;
-      font-weight: 700 !important;
-      letter-spacing: 0.02em;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
+    .devis-ref-title:not([style*="color"]) {
+      color: ${C.bronze};
     }
+    .devis-ref-title:not([style*="font-size"]) {
+      font-size: 18px;
+    }
+    .devis-ref-title strong { font-weight: 700; letter-spacing: 0.02em; }
     .devis-highlight {
       margin: 10px 0;
       padding: 8px 12px;
@@ -323,11 +401,11 @@ export function buildDevisPrintStyles(): string {
     .doc-body ol > li { margin: 0 0 10px; }
     .doc-body ul > li { margin: 0 0 5px; }
     .doc-body ol ul { list-style-type: disc; margin-top: 6px; }
-    .doc-body strong,
-    .doc-body span[style*='color'] {
+    .doc-body strong {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
+    ${DEVIS_WYSIWYG_INLINE_PRINT_CSS}
     .doc-body hr, .section-hr {
       border: none;
       border-top: 1px solid ${C.rose};

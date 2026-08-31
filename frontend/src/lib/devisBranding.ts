@@ -148,6 +148,7 @@ export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGH
   const available = Math.max(360, pageHeight - headerH - 24)
 
   const measureBox = doc.createElement('div')
+  measureBox.className = 'devis-sheet-body doc-body'
   measureBox.style.cssText = 'width:688px;'
   host.appendChild(measureBox)
 
@@ -194,8 +195,14 @@ export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGH
     let cur: HTMLElement[] = []
 
     const textOf = (el: HTMLElement) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+    const isSpacerParagraph = (el: HTMLElement | undefined) => {
+      if (!el || el.tagName.toLowerCase() !== 'p') return false
+      if (el.classList.contains('devis-spacer')) return true
+      return textOf(el) === ''
+    }
     const isTitleLike = (el: HTMLElement | undefined) => {
       if (!el) return false
+      if (isSpacerParagraph(el)) return false
       const tag = el.tagName.toLowerCase()
       if (tag === 'hr' || /^h[1-6]$/.test(tag)) return true
       const cls = String(el.className || '')
@@ -203,7 +210,7 @@ export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGH
         return true
       }
       const text = textOf(el)
-      if (!text) return true
+      if (!text) return false
       if (text.length <= 96 && /:\s*$/.test(text)) return true
       return false
     }

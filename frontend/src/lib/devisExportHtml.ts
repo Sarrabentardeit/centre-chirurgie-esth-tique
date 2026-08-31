@@ -4,7 +4,7 @@ import {
   buildDevisDocumentEndHtml,
   buildDevisHeaderLogoHtml,
 } from '@/lib/devisBranding'
-import { buildDevisOfferBlockHtml, buildDevisPrintStyles } from '@/lib/devisCharte'
+import { buildDevisOfferBlockHtml, buildDevisPrintStyles, markDevisSpacerParagraphs } from '@/lib/devisCharte'
 import {
   buildDevisLetterBottomHtml,
   buildDevisLetterTopHtml,
@@ -322,7 +322,8 @@ export function buildDevisExportHtml(input: {
       syncInclutExclut: input.syncInclutExclut !== false,
     })
   }
-  botHtml = replaceDevisAmountPlaceholders(botHtml, letterTotal.amount, tndPerEur)
+  topHtml = markDevisSpacerParagraphs(topHtml)
+  botHtml = markDevisSpacerParagraphs(replaceDevisAmountPlaceholders(botHtml, letterTotal.amount, tndPerEur))
 
   const operationTitle =
     offerTitle?.trim()

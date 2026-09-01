@@ -166,27 +166,34 @@ SCULPTURE, SMOOTH & SMILE`,
 
 function parseLogistiqueMeta(raw?: string | null) {
   const emptyDocs = () => ({
-    passport: null as { url: string; name: string } | null,
-    billet: null as { url: string; name: string } | null,
-    devisAccepte: null as { url: string; name: string } | null,
+    passport: [] as Array<{ url: string; name: string }>,
+    billet: [] as Array<{ url: string; name: string }>,
+    devisAccepte: [] as Array<{ url: string; name: string }>,
   })
+  const toFiles = (value: unknown): Array<{ url: string; name: string }> => {
+    if (!value) return []
+    const items = Array.isArray(value) ? value : [value]
+    const out: Array<{ url: string; name: string }> = []
+    for (const d of items) {
+      if (!d || typeof d !== 'object') continue
+      const url = typeof (d as { url?: unknown }).url === 'string' ? (d as { url: string }).url.trim() : ''
+      const name = typeof (d as { name?: unknown }).name === 'string' ? (d as { name: string }).name.trim() : ''
+      if (url && name) out.push({ url, name })
+    }
+    return out
+  }
   if (!raw) {
     return { documents: emptyDocs(), notes: '', dateIntervention: null as string | null }
   }
   try {
     const parsed = JSON.parse(raw) as {
-      documents?: Partial<
-        Record<'passport' | 'billet' | 'devisAccepte', { url?: string; name?: string } | null>
-      >
+      documents?: Partial<Record<'passport' | 'billet' | 'devisAccepte', unknown>>
       dateIntervention?: string | null
       notes?: string
     }
     const documents = emptyDocs()
     for (const key of ['passport', 'billet', 'devisAccepte'] as const) {
-      const d = parsed.documents?.[key]
-      if (d?.url?.trim() && d?.name?.trim()) {
-        documents[key] = { url: d.url.trim(), name: d.name.trim() }
-      }
+      documents[key] = toFiles(parsed.documents?.[key])
     }
     const dateIntervention =
       typeof parsed.dateIntervention === 'string' && parsed.dateIntervention.trim()
@@ -1782,9 +1789,9 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
   })
 
   const complete =
-    Boolean(input.documents.passport?.url)
-    && Boolean(input.documents.billet?.url)
-    && Boolean(input.documents.devisAccepte?.url)
+    input.documents.passport.length > 0
+    && input.documents.billet.length > 0
+    && input.documents.devisAccepte.length > 0
     && Boolean(input.dateArrivee)
     && Boolean(input.dateDepart)
     && Boolean(input.dateIntervention)

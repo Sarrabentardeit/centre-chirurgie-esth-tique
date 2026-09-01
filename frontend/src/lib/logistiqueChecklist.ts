@@ -6,9 +6,9 @@ import { FileText, Plane, Receipt } from 'lucide-react'
 export type LogistiqueDocumentKey = keyof GestionnaireLogistiqueDocuments
 
 export const LOGISTIQUE_DOCUMENT_SLOTS = [
-  { key: 'passport', label: 'Passeport', hint: 'Joindre une image ou un PDF', icon: FileText },
-  { key: 'billet', label: "Billet d'avion", hint: 'Joindre une image ou un PDF', icon: Plane },
-  { key: 'devisAccepte', label: 'Devis accepté', hint: 'Joindre une image ou un PDF', icon: Receipt },
+  { key: 'passport', label: 'Passeport', hint: 'Plusieurs images ou PDF', icon: FileText },
+  { key: 'billet', label: "Billet d'avion", hint: 'Plusieurs images ou PDF', icon: Plane },
+  { key: 'devisAccepte', label: 'Devis accepté', hint: 'Plusieurs images ou PDF', icon: Receipt },
 ] as const satisfies ReadonlyArray<{
   key: LogistiqueDocumentKey
   label: string
@@ -20,14 +20,24 @@ export const LOGISTIQUE_DOCUMENT_TOTAL = LOGISTIQUE_DOCUMENT_SLOTS.length
 export const LOGISTIQUE_ESSENTIAL_TOTAL = LOGISTIQUE_DOCUMENT_TOTAL + 3
 
 export function emptyLogistiqueDocuments(): GestionnaireLogistiqueDocuments {
-  return { passport: null, billet: null, devisAccepte: null }
+  return { passport: [], billet: [], devisAccepte: [] }
+}
+
+function normalizeSlotFiles(value: unknown): GestionnaireLogistiqueDocuments['passport'] {
+  if (!value) return []
+  const items = Array.isArray(value) ? value : [value]
+  return items.filter(
+    (d): d is { url: string; name: string } =>
+      Boolean(d && typeof d === 'object' && typeof (d as { url?: string }).url === 'string' && (d as { url: string }).url.trim()
+        && typeof (d as { name?: string }).name === 'string' && (d as { name: string }).name.trim()),
+  )
 }
 
 export function logistiqueDocumentsDoneCount(
   documents: GestionnaireLogistiqueDocuments | null | undefined,
 ): number {
   if (!documents) return 0
-  return LOGISTIQUE_DOCUMENT_SLOTS.filter(({ key }) => Boolean(documents[key]?.url)).length
+  return LOGISTIQUE_DOCUMENT_SLOTS.filter(({ key }) => normalizeSlotFiles(documents[key]).length > 0).length
 }
 
 export function logistiqueEssentialsDoneCount(row: GestionnaireLogistiqueRow | null | undefined): number {
@@ -50,7 +60,11 @@ export function logistiqueFromPatientRow(
     dateArrivee: row?.dateArrivee ? toDatetimeLocalInput(row.dateArrivee) : null,
     dateDepart: row?.dateDepart ? toDatetimeLocalInput(row.dateDepart) : null,
     dateIntervention: row?.dateIntervention ? toDatetimeLocalInput(row.dateIntervention) : null,
-    documents: row?.documents ?? emptyLogistiqueDocuments(),
+    documents: {
+      passport: normalizeSlotFiles(row?.documents?.passport),
+      billet: normalizeSlotFiles(row?.documents?.billet),
+      devisAccepte: normalizeSlotFiles(row?.documents?.devisAccepte),
+    },
     notes: row?.notes ?? '',
   }
 }

@@ -1189,9 +1189,9 @@ export interface GestionnaireLogistiqueDocument {
 }
 
 export type GestionnaireLogistiqueDocuments = {
-  passport: GestionnaireLogistiqueDocument | null
-  billet: GestionnaireLogistiqueDocument | null
-  devisAccepte: GestionnaireLogistiqueDocument | null
+  passport: GestionnaireLogistiqueDocument[]
+  billet: GestionnaireLogistiqueDocument[]
+  devisAccepte: GestionnaireLogistiqueDocument[]
 }
 
 /** @deprecated Ancienne checklist — conservé pour compatibilité types */

@@ -31,18 +31,28 @@ export const refuseDevisSchema = z.preprocess(
 
 export type RefuseDevisInput = z.infer<typeof refuseDevisSchema>
 
-const logistiqueDocumentSchema = z
-  .object({
-    url: z.string().min(1).max(2048),
-    name: z.string().min(1).max(255),
-  })
-  .nullable()
+const logistiqueFileSchema = z.object({
+  url: z.string().min(1).max(2048),
+  name: z.string().min(1).max(255),
+})
+
+function asLogistiqueFiles(value: unknown): Array<{ url: string; name: string }> {
+  if (!value) return []
+  const items = Array.isArray(value) ? value : [value]
+  return items.filter(
+    (d): d is { url: string; name: string } =>
+      Boolean(d && typeof d === 'object' && typeof (d as { url?: unknown }).url === 'string' && String((d as { url: string }).url).trim()
+        && typeof (d as { name?: unknown }).name === 'string' && String((d as { name: string }).name).trim()),
+  ).map((d) => ({ url: d.url.trim(), name: d.name.trim() }))
+}
+
+const logistiqueSlotSchema = z.preprocess(asLogistiqueFiles, z.array(logistiqueFileSchema).max(20))
 
 export const logistiqueSchema = z.object({
   documents: z.object({
-    passport: logistiqueDocumentSchema,
-    billet: logistiqueDocumentSchema,
-    devisAccepte: logistiqueDocumentSchema,
+    passport: logistiqueSlotSchema,
+    billet: logistiqueSlotSchema,
+    devisAccepte: logistiqueSlotSchema,
   }),
   dateArrivee: z.string().optional().nullable(),
   dateDepart: z.string().optional().nullable(),

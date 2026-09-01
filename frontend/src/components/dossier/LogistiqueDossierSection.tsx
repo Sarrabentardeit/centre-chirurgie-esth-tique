@@ -36,27 +36,26 @@ type LogistiqueDossierSectionProps = {
 function DocumentSlot({
   label,
   hint,
-  doc,
+  files,
   uploading,
   onPick,
   onRemove,
 }: {
   label: string
   hint: string
-  doc: GestionnaireLogistiqueDocument | null
+  files: GestionnaireLogistiqueDocument[]
   uploading: boolean
-  onPick: (file: File) => void
-  onRemove: () => void
+  onPick: (files: File[]) => void
+  onRemove: (index: number) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const resolvedUrl = doc?.url ? resolveAttachmentUrl(doc.url) : null
-  const isPdf = Boolean(doc?.url && isPdfUrl(doc.url, doc.name))
+  const hasFiles = files.length > 0
 
   return (
     <div
       className={cn(
         'rounded-xl border p-4 space-y-3',
-        doc?.url ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white',
+        hasFiles ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white',
       )}
     >
       <div>
@@ -64,77 +63,88 @@ function DocumentSlot({
         <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
       </div>
 
-      {doc?.url ? (
-        <div className="flex items-start gap-3">
-          {isPdf ? (
-            <div className="h-14 w-14 rounded-lg border border-emerald-200 bg-white flex items-center justify-center shrink-0">
-              <FileText className="h-6 w-6 text-emerald-700" />
-            </div>
-          ) : (
-            <img
-              src={resolvedUrl ?? doc.url}
-              alt={label}
-              className="h-14 w-14 rounded-lg border border-emerald-200 object-cover shrink-0 bg-white"
-            />
-          )}
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-xs font-medium text-slate-800 truncate">{doc.name}</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="text-xs font-semibold text-brand-700 hover:underline"
-                onClick={() => {
-                  if (resolvedUrl) window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
-                }}
-              >
-                Voir
-              </button>
-              {!isPdf && resolvedUrl && (
+      {files.map((doc, index) => {
+        const resolvedUrl = doc.url ? resolveAttachmentUrl(doc.url) : null
+        const isPdf = Boolean(doc.url && isPdfUrl(doc.url, doc.name))
+        return (
+          <div key={`${doc.url}-${index}`} className="flex items-start gap-3">
+            {isPdf ? (
+              <div className="h-14 w-14 rounded-lg border border-emerald-200 bg-white flex items-center justify-center shrink-0">
+                <FileText className="h-6 w-6 text-emerald-700" />
+              </div>
+            ) : (
+              <img
+                src={resolvedUrl ?? doc.url}
+                alt={doc.name}
+                className="h-14 w-14 rounded-lg border border-emerald-200 object-cover shrink-0 bg-white"
+              />
+            )}
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="text-xs font-medium text-slate-800 truncate">{doc.name}</p>
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="text-xs font-semibold text-slate-600 hover:underline"
-                  onClick={() => void downloadAttachment(resolvedUrl, doc.name)}
+                  className="text-xs font-semibold text-brand-700 hover:underline"
+                  onClick={() => {
+                    if (resolvedUrl) window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+                  }}
                 >
-                  Télécharger
+                  Voir
                 </button>
-              )}
+                {!isPdf && resolvedUrl && (
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-slate-600 hover:underline"
+                    onClick={() => void downloadAttachment(resolvedUrl, doc.name)}
+                  >
+                    Télécharger
+                  </button>
+                )}
+              </div>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive shrink-0"
+              onClick={() => onRemove(index)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
-          <Button type="button" variant="ghost" size="sm" className="text-destructive shrink-0" onClick={onRemove}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      ) : (
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full h-11 gap-2 text-sm font-semibold"
-          disabled={uploading}
-          onClick={() => inputRef.current?.click()}
-        >
-          {uploading ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Envoi en cours…
-            </>
-          ) : (
-            <>
-              <Upload className="h-4 w-4" />
-              Joindre image ou PDF
-            </>
-          )}
-        </Button>
-      )}
+        )
+      })}
+
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full h-11 gap-2 text-sm font-semibold"
+        disabled={uploading}
+        onClick={() => inputRef.current?.click()}
+      >
+        {uploading ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Envoi en cours…
+          </>
+        ) : (
+          <>
+            <Upload className="h-4 w-4" />
+            {hasFiles ? 'Ajouter un fichier' : 'Joindre image ou PDF'}
+          </>
+        )}
+      </Button>
 
       <input
         ref={inputRef}
         type="file"
+        multiple
         accept="image/jpeg,image/png,image/webp,application/pdf"
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0]
+          const picked = Array.from(e.target.files ?? [])
           e.target.value = ''
-          if (file) onPick(file)
+          if (picked.length > 0) onPick(picked)
         }}
       />
     </div>
@@ -198,18 +208,25 @@ export function LogistiqueDossierSection({
     onSaved?.()
   }
 
-  const handleUpload = async (key: keyof GestionnaireLogistiqueDocuments, file: File) => {
+  const handleUpload = async (key: keyof GestionnaireLogistiqueDocuments, files: File[]) => {
     setUploadingKey(key)
     setError(null)
     try {
-      const uploaded = await chatApi.upload(file)
+      const uploaded: GestionnaireLogistiqueDocument[] = []
+      for (const file of files) {
+        const res = await chatApi.upload(file)
+        uploaded.push({ url: res.url, name: res.name || file.name })
+      }
       const nextDocuments = {
         ...documents,
-        [key]: { url: uploaded.url, name: uploaded.name || file.name },
+        [key]: [...(documents[key] ?? []), ...uploaded],
       }
       setDocuments(nextDocuments)
       await persist(nextDocuments)
-      feedbackSuccess('Document enregistré', LOGISTIQUE_DOCUMENT_SLOTS.find((s) => s.key === key)?.label ?? 'Fichier')
+      feedbackSuccess(
+        uploaded.length > 1 ? 'Documents enregistrés' : 'Document enregistré',
+        LOGISTIQUE_DOCUMENT_SLOTS.find((s) => s.key === key)?.label ?? 'Fichier',
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Impossible de joindre le fichier.')
     } finally {
@@ -217,10 +234,13 @@ export function LogistiqueDossierSection({
     }
   }
 
-  const handleRemove = async (key: keyof GestionnaireLogistiqueDocuments) => {
+  const handleRemove = async (key: keyof GestionnaireLogistiqueDocuments, index: number) => {
     setError(null)
     try {
-      const nextDocuments = { ...documents, [key]: null }
+      const nextDocuments = {
+        ...documents,
+        [key]: (documents[key] ?? []).filter((_, i) => i !== index),
+      }
       setDocuments(nextDocuments)
       await persist(nextDocuments)
     } catch (e) {
@@ -332,10 +352,10 @@ export function LogistiqueDossierSection({
             key={key}
             label={label}
             hint={hint}
-            doc={documents[key]}
+            files={documents[key] ?? []}
             uploading={uploadingKey === key}
-            onPick={(file) => void handleUpload(key, file)}
-            onRemove={() => void handleRemove(key)}
+            onPick={(picked) => void handleUpload(key, picked)}
+            onRemove={(index) => void handleRemove(key, index)}
           />
         ))}
       </div>

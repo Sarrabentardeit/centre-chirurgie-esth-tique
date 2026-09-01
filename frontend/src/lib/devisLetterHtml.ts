@@ -4,10 +4,18 @@
  */
 import {
   DEVIS_CHARTE,
+  DEVIS_FIELD_LABEL_STYLE,
+  DEVIS_REF_TITLE_STYLE,
+  DEVIS_SECTION_HEADING_STYLE,
+  buildDevisRefTitleHtml,
   devisFieldRow,
   devisLabel,
+  devisSalmonLabelStyleAttr,
   devisSectionHeading,
-  devisSeparator,
+  buildPaymentModalitiesBodyHtml,
+  buildOfferValidityBlockHtml,
+  buildOfferSejourBadgeLine,
+  offerSejourFluoHtml,
 } from '@/lib/devisCharte'
 import {
   DEVIS_EXCLUT_ITEMS,
@@ -19,10 +27,10 @@ import {
   resolveInclutIds,
 } from '@/lib/devisOfferInclus'
 import { devisSejourDefaultsFromRapport, nbAdultesDevisFromAccompagnants, parseSejourMeta, typeChambreFromNbAdultesDevis } from '@/lib/devisSejourNotes'
-import { buildDevisAmountSentence, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
+import { buildDevisAmountSentenceHtml, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { paraSalmonHi } from '@/lib/planningSejourBranding'
 import { formatDevisTitle } from '@/lib/utils'
-import { formatDiagnosticLetterHtml } from '@/lib/diagnosticFormat'
+import { formatDiagnosticLetterHtml, normalizeDiagnosticBlockGapsInHtml, normalizeDiagnosticDarkFluoInHtml, normalizeDiagnosticZoneLeadInHtml, stripDiagnosticOpTitlesFromHtml, upgradeDiagnosticMissingLayoutInHtml } from '@/lib/diagnosticFormat'
 
 export type DevisLetterDevis = {
   statut?: string
@@ -164,6 +172,13 @@ function isFrozenDevis(dv: DevisLetterDevis | null): boolean {
   return dv?.statut === 'envoye' || dv?.statut === 'accepte'
 }
 
+function formatNightsAndDays(nights: number): string {
+  const n = Math.round(nights)
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  const days = n + 1
+  return `${n} nuit${n > 1 ? 's' : ''} / ${days} jour${days > 1 ? 's' : ''}`
+}
+
 /** Textes séjour / clinique / hôtel pour le PDF. */
 export function sejourPdfFromContext(ctx: DevisLetterContext) {
   const rap = pickRapport(ctx)
@@ -221,7 +236,7 @@ export function sejourPdfFromContext(ctx: DevisLetterContext) {
 
   const dureeTotale =
     Number.isFinite(dureeNuits) && dureeNuits > 0
-      ? `${dureeNuits} nuit${dureeNuits > 1 ? 's' : ''}`
+      ? formatNightsAndDays(dureeNuits)
       : '—'
   const sejourLine =
     Number.isFinite(dureeNuits) && dureeNuits > 0
@@ -286,37 +301,70 @@ function normalizeFieldLabel(s: string): string {
   return s.replace(/\s+/g, ' ').trim().replace(/[\u2018\u2019`´]/g, "'")
 }
 
-function refreshDevisFieldByLabel(html: string, label: string, value: string): string {
-  if (value == null || value === '—') return html
+function fieldValueFromParagraph(p: Element, label: string): string {
   const target = normalizeFieldLabel(label)
-  if (typeof window === 'undefined') {
-    const re = new RegExp(
-      `<p\\b[^>]*>[\\s\\S]*?${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['\u2019]")}[\\s\\S]*?<\\/p>`,
-      'i',
-    )
-    if (!re.test(html)) return html
-    return html.replace(re, devisFieldRow(label, value))
+  const full = normalizeFieldLabel(p.textContent ?? '')
+  if (!full.startsWith(target)) return ''
+  return full.slice(target.length).trim()
+}
+
+function removeNodesAfter(node: ChildNode): void {
+  while (node.nextSibling) node.nextSibling.remove()
+}
+
+function appendFieldValueSpan(p: Element, value: string): void {
+  const doc = p.ownerDocument
+  if (!doc) return
+  p.appendChild(doc.createTextNode(' '))
+  const span = doc.createElement('span')
+  span.setAttribute('style', `color:${DEVIS_CHARTE.charcoal}`)
+  span.textContent = value
+  p.appendChild(span)
+}
+
+/** Met à jour uniquement la valeur — conserve couleurs / surlignages du libellé. */
+function updateFieldParagraphValue(p: Element, value: string): boolean {
+  const labelEl = p.querySelector('.devis-field-label')
+  if (labelEl) {
+    removeNodesAfter(labelEl)
+    appendFieldValueSpan(p, value)
+    return true
   }
+  const children = Array.from(p.childNodes)
+  let labelEndIdx = -1
+  for (let i = 0; i < children.length; i++) {
+    if ((children[i].textContent ?? '').includes(':')) {
+      labelEndIdx = i
+      break
+    }
+  }
+  if (labelEndIdx < 0) return false
+  while (p.childNodes.length > labelEndIdx + 1) {
+    p.lastChild?.remove()
+  }
+  appendFieldValueSpan(p, value)
+  return true
+}
+
+function refreshDevisFieldByLabel(html: string, label: string, value: string): string {
+  if (value == null) return html
+  const target = normalizeFieldLabel(label)
+  if (typeof window === 'undefined') return html
   const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
   const root = doc.getElementById('__root')
   if (!root) return html
-  let changed = false
   for (const p of Array.from(root.querySelectorAll('p'))) {
     if (!normalizeFieldLabel(p.textContent ?? '').startsWith(target)) continue
-    const tmp = doc.createElement('div')
-    tmp.innerHTML = devisFieldRow(label, value)
-    const fresh = tmp.firstElementChild
-    if (fresh) {
-      p.replaceWith(fresh)
-      changed = true
-    }
+    const current = fieldValueFromParagraph(p, label)
+    if (normalizeFieldLabel(current) === normalizeFieldLabel(value)) return html
+    if (updateFieldParagraphValue(p, value)) return root.innerHTML
     break
   }
-  return changed ? root.innerHTML : html
+  return html
 }
 
 function refreshHighlightByLabel(html: string, label: string, value: string): string {
-  if (value == null || value === '—') return html
+  if (value == null) return html
   // Uniquement via DOM : un seul <p> (jamais de regex multi-paragraphes —
   // sinon on écrase tout le début de la lettre jusqu’à « Durée TOTALE »).
   if (typeof window === 'undefined') {
@@ -350,20 +398,34 @@ function refreshHighlightByLabel(html: string, label: string, value: string): st
   return html
 }
 
-function refreshSejourBadgeInHtml(html: string, sejourLine: string): string {
-  if (!sejourLine.trim()) return html
+/** Met à jour la ligne « Durée TOTALE du séjour » (nuits + jours). */
+export function syncDureeTotaleSejourInHtml(html: string, dureeTotale: string): string {
+  return refreshHighlightByLabel(html, 'Durée TOTALE du séjour :', dureeTotale)
+}
+
+function refreshSejourBadgeInHtml(html: string, sejourLine: string, typeChambre = ''): string {
+  return syncOfferSejourInHtml(html, sejourLine, typeChambre)
+}
+
+/** Met à jour le badge séjour dans le HTML (lettre ou cellule offre éditeur). */
+export function syncOfferSejourInHtml(html: string, sejourLine: string, typeChambre = ''): string {
+  const badgeLine = buildOfferSejourBadgeLine(sejourLine, typeChambre)
+  if (!html?.trim() || !badgeLine.trim()) return html
+  const badgeHtml = offerSejourFluoHtml(badgeLine)
   let out = html.replace(
-    /(<div class="sejour-badge">)([\s\S]*?)(<\/div>)/gi,
-    `$1${sejourLine}$3`,
+    /<mark\b[^>]*\boffer-fluo-sejour\b[^>]*>[\s\S]*?<\/mark>/gi,
+    badgeHtml,
   )
   out = out.replace(
-    /Séjour\s+(\d+)\s+jours?\s*\(\s*\d+\s+nuits?\s*\)/gi,
-    (_, n: string) => `Séjour ${n} nuit${Number(n) > 1 ? 's' : ''}`,
+    /(<div class="sejour-badge">)[\s\S]*?(<\/div>)/gi,
+    `$1${badgeHtml}$2`,
   )
-  out = out.replace(
-    /Séjour\s+(\d+)\s+jours?\b/gi,
-    (_, n: string) => `Séjour ${n} nuit${Number(n) > 1 ? 's' : ''}`,
-  )
+  if (out === html) {
+    out = html.replace(
+      /S[ée]jour\s+\d+\s+nuits?(?:\s+Chambre\s+[A-Za-zÀ-ÿ]+)?/gi,
+      badgeLine,
+    )
+  }
   return out
 }
 
@@ -386,9 +448,9 @@ export function buildExamensMedicauxHtml(ctx: DevisLetterContext): string {
   const otherExamens = examens.filter((e) => !e.toLowerCase().includes('bilan sanguin'))
   const ink = DEVIS_CHARTE.charcoal
   const examTitle = (label: string) =>
-    `<strong><span style="color:${ink}">${label}</span></strong>`
+    `<span class="devis-examen-item" style="color:${ink}">${label}</span>`
   const examSubItem = (label: string) =>
-    `<li><strong><span style="color:${ink}">${label}</span></strong></li>`
+    `<li class="devis-examen-item"><span style="color:${ink}">${label}</span></li>`
 
   let body = paraSalmonHi(
     "Les examens doivent avoir une validité maximum de 3 mois — À envoyer à J-10 de la date d'intervention",
@@ -397,7 +459,7 @@ export function buildExamensMedicauxHtml(ctx: DevisLetterContext): string {
   if (hasBilan) {
     examItems.push(
       `${examTitle('Bilan sanguin préopératoire complet')} — à effectuer avant la date d'intervention, afin de s'assurer de la faisabilité de l'intervention, qui comprend :
-<ul style="margin:6px 0 0;padding-left:22px;list-style-type:disc">
+<ul style="padding-left:22px;list-style-type:disc">
 ${examSubItem('Bilan biologique (groupe sanguin, NFS, plaquettes, TP, TCA, CRP)')}
 ${examSubItem('Bilan virologique HIV, Hépatite B et C.')}
 ${examSubItem('URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT')}
@@ -412,8 +474,8 @@ ${examSubItem('URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT')}
   if (examItems.length === 0) {
     examItems.push(examTitle('À compléter par le médecin'))
   }
-  body += `<ol style="margin:8px 0 10px;padding-left:22px;list-style-type:decimal">
-${examItems.map((item) => `<li style="margin:0 0 10px">${item}</li>`).join('\n')}
+  body += `<ol class="devis-examens-list" style="padding-left:22px;list-style-type:decimal">
+${examItems.map((item) => `<li class="devis-examen-item" style="color:${ink}">${item}</li>`).join('\n')}
 </ol>`
   body += paraSalmonHi(
     "Prévoir une copie papier des rapports médicaux pour la constitution de votre dossier médical à l'entrée de la clinique.",
@@ -546,40 +608,46 @@ function replaceExamensSection(html: string, fresh: string): string {
   return `${stripTrailingEmptyParagraphs(out)}\n${fresh}`
 }
 
-/** Paragraphe TipTap vide (`<p></p>`, `<p><br></p>`, `&nbsp;`). */
-const EMPTY_P_RE = String.raw`<p\b[^>]*>\s*(?:(?:<br\b[^>]*/?>|&nbsp;|\u00a0|\s)*)\s*</p>`
+/** Paragraphe TipTap vide (`<p></p>`, `<p><br></p>`, `&nbsp;`) — sauf espacements manuels. */
+const EMPTY_P_RE = String.raw`<p\b(?![^>]*\bdevis-spacer\b)[^>]*>\s*(?:(?:<br\b[^>]*/?>|&nbsp;|\u00a0|\s)*)\s*</p>`
+const SECTION_HR_RE = String.raw`<div\b[^>]*\bsection-hr\b[^>]*>\s*</div>`
+
+/** Même espace autour de chaque titre de section (pas de lignes vides en trop). */
+function normalizeHeadingRhythmInHtml(html: string): string {
+  const headingOpen = String.raw`<p\b[^>]*class="[^"]*devis-heading[^"]*"[^>]*>[\s\S]*?</p>`
+  let out = html.replace(
+    new RegExp(`(${headingOpen})\\s*(?:${EMPTY_P_RE}\\s*)+`, 'gi'),
+    '$1\n',
+  )
+  out = out.replace(
+    new RegExp(`(?:${EMPTY_P_RE}\\s*)+(?=${headingOpen})`, 'gi'),
+    '',
+  )
+  return out
+}
+
+/** Plus de ligne vide forcée ni tight-top : même rythme que les autres titres. */
+function normalizeGapBeforeDetailsIntervention(html: string): string {
+  if (!/Durée\s+TOTALE/i.test(html) || !/Détails de l['’]intervention/i.test(html)) return html
+  let out = html.replace(
+    new RegExp(
+      String.raw`(<p\b[^>]*>[\s\S]*?Durée\s+TOTALE\s+du\s+séjour\s*:[\s\S]*?</p>)\s*(?:(?:${EMPTY_P_RE})|(?:${SECTION_HR_RE})|\s*)+(?=<p\b[^>]*class="[^"]*devis-heading)`,
+      'gi',
+    ),
+    '$1\n',
+  )
+  out = out.replace(/\sdevis-heading-tight-top\b/g, '')
+  return out
+}
 
 function stripTrailingEmptyParagraphs(html: string): string {
   return html.replace(new RegExp(`(?:\\s*${EMPTY_P_RE})+$`, 'gi'), '\n')
 }
 
-/** Réduit les trous verticaux (surtout entre traitement préventif et examens). */
+/** Réduit les trous verticaux autour des titres de section. */
 function collapseExcessEmptyParagraphs(html: string): string {
-  // Ne pas fusionner les espacements manuels (jusqu’à 6 lignes vides conservées).
   let out = html.replace(new RegExp(`(?:${EMPTY_P_RE}\\s*){7,}`, 'gi'), '<p></p>\n<p></p>\n<p></p>\n<p></p>\n<p></p>\n<p></p>\n')
-  // Aucun paragraphe vide juste avant le titre Examens
-  out = out.replace(
-    new RegExp(
-      `(</ul>)(\\s*(?:${EMPTY_P_RE}\\s*)+)(?=<p\\b[^>]*class="[^"]*devis-heading[^"]*"[^>]*>[\\s\\S]*?Examens médicaux)`,
-      'gi',
-    ),
-    '$1\n',
-  )
-  out = out.replace(
-    new RegExp(
-      `((?:Aspégic|Anti-inflammatoire|Aspirine)[\\s\\S]*?</li>\\s*</ul>)(\\s*(?:${EMPTY_P_RE}\\s*)+)(?=[\\s\\S]{0,200}?Examens médicaux)`,
-      'gi',
-    ),
-    '$1\n',
-  )
-  // Titre Examens précédé de <p> vides (sans </ul> juste avant)
-  out = out.replace(
-    new RegExp(
-      `(?:${EMPTY_P_RE}\\s*)+(?=<p\\b[^>]*>[\\s\\S]*?Examens médicaux nécessaires)`,
-      'gi',
-    ),
-    '',
-  )
+  out = normalizeHeadingRhythmInHtml(out)
   return out
 }
 
@@ -615,21 +683,22 @@ function stripDureeInterventionLine(html: string): string {
 function normalizeInclutExclutLabels(html: string): string {
   return html
     .replace(
-      /<span[^>]*style="[^"]*color:[^"]*"[^>]*>\s*Votre devis inclut\s*:\s*<\/span>/gi,
-      '<strong>Votre devis inclut :</strong>',
+      /<(?:strong|span)[^>]*>\s*Votre devis inclut\s*:\s*<\/(?:strong|span)>/gi,
+      devisLabel('Votre devis inclut :'),
     )
     .replace(
-      /<span[^>]*style="[^"]*color:[^"]*"[^>]*>\s*Notre forfait exclut\s*:\s*<\/span>/gi,
-      '<strong>Notre forfait exclut :</strong>',
+      /<(?:strong|span)[^>]*>\s*Notre forfait exclut\s*:\s*<\/(?:strong|span)>/gi,
+      devisLabel('Notre forfait exclut :'),
     )
 }
 
 export function devisRefTitleHtml(title: string): string {
-  return `<p class="devis-ref-title" style="text-align:center"><strong>${title}</strong></p>`
+  return buildDevisRefTitleHtml(title)
 }
 
 function titleParagraphHasCustomStyle(el: Element): boolean {
-  if (el.getAttribute('style')?.match(/(?:^|;)\s*(?:color|font-size)\s*:/i)) return true
+  if (el.getAttribute('style')?.match(/(?:^|;)\s*(?:color|font-size|background)\s*:/i)) return true
+  if (el.querySelector('mark[style], mark[data-color]')) return true
   return Boolean(
     el.querySelector(
       'span[style*="color"], span[style*="font-size"], mark[style], strong[style*="color"], strong[style*="font-size"]',
@@ -646,11 +715,11 @@ function refreshDevisTitleInTopHtml(html: string, title: string): string {
     let out = html
     out = out.replace(/<p[^>]*class="[^"]*devis-ref-title[^"]*"[^>]*>[\s\S]*?<\/p>/gi, styled)
     out = out.replace(
-      /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+      /<p[^>]*(?:style="[^"]*text-align:\s*center[^"]*")[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-\d{2}-\d{3}[A-Z]?-\d{4}\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
       styled,
     )
     out = out.replace(
-      /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-[\w-]+(?:\s+-?[a-zA-Z0-9]+)?\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
+      /<p[^>]*>\s*(?:<strong[^>]*>)?\s*(?:<span[^>]*>)?\s*Devis\s+MC-\d{2}-\d{3}[A-Z]?-\d{4}\s*(?:<\/span>)?\s*(?:<\/strong>)?\s*<\/p>/gi,
       styled,
     )
     if (!out.includes('devis-ref-title')) {
@@ -691,23 +760,103 @@ function refreshDevisTitleInTopHtml(html: string, title: string): string {
   if (!el.classList.contains('devis-ref-title')) {
     el.classList.add('devis-ref-title')
   }
-  if (normalize(el.textContent ?? '') === target) return html
+  const hasSalmonTitleStyle = Boolean(
+    el.querySelector('mark[data-color], mark[style*="background"]')
+    && el.querySelector('u'),
+  )
+  const titleSpan = el.querySelector('span[style*="font-size"]')
+  const hasCurrentTitleSize = Boolean(
+    titleSpan?.getAttribute('style')?.includes(DEVIS_REF_TITLE_STYLE.fontSize),
+  )
+  if (normalize(el.textContent ?? '') === target && hasSalmonTitleStyle && hasCurrentTitleSize) return html
 
   if (titleParagraphHasCustomStyle(el)) {
     const inner = el.innerHTML
     const replaced = inner.replace(
-      /Devis(?:\s+MC-[\w-]+)?(?:\s+-?[a-zA-Z0-9]+)?/i,
+      /Devis\s+MC-\d{2}-\d{3}[A-Z]?-\d{4}/i,
       target,
     )
     if (replaced !== inner) {
       el.innerHTML = replaced
       return root.innerHTML
     }
-    return html
+    if (normalize(el.textContent ?? '') === target) return html
   }
 
-  el.innerHTML = `<strong>${target}</strong>`
+  const styled = devisRefTitleHtml(target)
+  const tmp = doc.createElement('div')
+  tmp.innerHTML = styled
+  const freshP = tmp.firstElementChild
+  if (freshP) el.replaceWith(freshP)
   return root.innerHTML
+}
+
+export function stripDiagnosticOpTitlesInTopHtml(html: string): string {
+  if (!/diagnostic du chirurgien/i.test(html)) return html
+
+  if (typeof window === 'undefined') {
+    const re =
+      /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
+    if (!re.test(html)) return html
+    return html.replace(re, (_full, head, body) => `${head}${stripDiagnosticOpTitlesFromHtml(body)}`)
+  }
+
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const heading = Array.from(root.querySelectorAll('p')).find((p) =>
+    /diagnostic du chirurgien/i.test(normalize(p.textContent ?? '')),
+  )
+  if (!heading) return html
+
+  const toRemove: Element[] = []
+  let node = heading.nextSibling
+  while (node) {
+    const el = node.nodeType === 1 ? (node as Element) : null
+    const txt = normalize(el?.textContent ?? node.textContent ?? '')
+    if (el && /durée\s+totale\s+du\s+séjour/i.test(txt)) break
+    if (el && /détails de l['’]intervention/i.test(txt)) break
+    if (el?.classList.contains('section-hr')) break
+    if (el?.classList.contains('diagnostic-op-title') || el?.classList.contains('diag-visage-op-title')) {
+      toRemove.push(el)
+    } else if (el?.tagName === 'P') {
+      const strong = el.querySelector(':scope > strong')
+      const strongText = normalize(strong?.textContent ?? '')
+      if (strong && /^\d+\s*[-–.]\s+/.test(strongText) && el.childElementCount === 1) {
+        toRemove.push(el)
+      }
+    }
+    node = node.nextSibling
+  }
+  for (const el of toRemove) el.remove()
+  return root.innerHTML
+}
+
+function normalizeDiagnosticDarkFluoInTopHtml(html: string): string {
+  if (!/diagnostic du chirurgien/i.test(html)) return normalizeDiagnosticDarkFluoInHtml(html)
+  const re =
+    /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
+  if (!re.test(html)) return normalizeDiagnosticDarkFluoInHtml(html)
+  return html.replace(re, (_full, head, body) =>
+    `${head}${normalizeDiagnosticZoneLeadInHtml(
+      normalizeDiagnosticBlockGapsInHtml(normalizeDiagnosticDarkFluoInHtml(body)),
+    )}`,
+  )
+}
+
+function normalizeDiagnosticBlockGapsInTopHtml(html: string): string {
+  if (!/diagnostic du chirurgien/i.test(html)) {
+    return normalizeDiagnosticBlockGapsInHtml(normalizeDiagnosticZoneLeadInHtml(html))
+  }
+  const re =
+    /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
+  if (!re.test(html)) {
+    return normalizeDiagnosticBlockGapsInHtml(normalizeDiagnosticZoneLeadInHtml(html))
+  }
+  return html.replace(re, (_full, head, body) =>
+    `${head}${normalizeDiagnosticBlockGapsInHtml(normalizeDiagnosticZoneLeadInHtml(body))}`,
+  )
 }
 
 /**
@@ -756,12 +905,289 @@ function refreshDiagnosticInTopHtml(
   return root.innerHTML
 }
 
+/** True si la lettre contient déjà un corps de diagnostic (hors simple titre). */
+export function hasDiagnosticBodyInTopHtml(html: string): boolean {
+  if (!/diagnostic du chirurgien/i.test(html)) return false
+
+  if (typeof window === 'undefined') {
+    const re =
+      /diagnostic du chirurgien[\s\S]*?<\/p>\s*([\s\S]*?)(?=<p\b[^>]*>[\s\S]*?(?:Durée\s+TOTALE|Détails de l['’]intervention))/i
+    const body = (re.exec(html)?.[1] ?? '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').trim()
+    return body.length > 0 && body !== '—'
+  }
+
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return false
+
+  const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const heading = Array.from(root.querySelectorAll('p')).find((p) =>
+    /diagnostic du chirurgien/i.test(normalize(p.textContent ?? '')),
+  )
+  if (!heading) return false
+
+  let node = heading.nextSibling
+  while (node) {
+    const el = node.nodeType === 1 ? (node as Element) : null
+    const txt = normalize(el?.textContent ?? node.textContent ?? '')
+    if (el && /durée\s+totale\s+du\s+séjour/i.test(txt)) break
+    if (el && /détails de l['’]intervention/i.test(txt)) break
+    if (el?.classList.contains('section-hr')) break
+    if (txt && txt !== '—') return true
+    node = node.nextSibling
+  }
+  return false
+}
+
+/** Détecte une couleur bronze (hex ou rgb TipTap). */
+const DEVIS_BRONZE_COLOR_RE = /#81572d|rgb\(\s*129\s*,\s*87\s*,\s*45\s*\)/i
+
+function isDevisFieldLabelText(text: string): boolean {
+  return /:\s*$/.test(text.replace(/\s+/g, ' ').trim())
+}
+
+function paragraphLooksLikeFieldRow(text: string): boolean {
+  const t = text.replace(/\s+/g, ' ').trim()
+  return /^[^:]+:\s/.test(t) && t.length < 600
+}
+
+function elementHasBronzeLabelColor(el: Element): boolean {
+  const style = el.getAttribute('style') ?? ''
+  return DEVIS_BRONZE_COLOR_RE.test(style) || el.classList.contains('devis-field-label--bronze')
+}
+
+/** Libellé recoloré / surligné manuellement dans l’éditeur — ne pas écraser par la charte saumon. */
+function elementHasUserCustomLabelStyle(el: Element): boolean {
+  if (el.querySelector('mark')) return true
+  const style = el.getAttribute('style') ?? ''
+  if (!/color\s*:/i.test(style)) return false
+  if (elementHasBronzeLabelColor(el)) return false
+  if (style.includes(DEVIS_REF_TITLE_STYLE.color)) return false
+  return true
+}
+
+function replaceWithSalmonLabel(doc: Document, el: Element, label: string): void {
+  const span = doc.createElement('span')
+  span.className = 'devis-field-label devis-field-label--salmon'
+  span.setAttribute('style', devisSalmonLabelStyleAttr())
+  span.textContent = label.replace(/\s+/g, ' ').trim()
+  const parent = el.parentElement
+  if (el.tagName === 'SPAN' && parent?.tagName === 'STRONG' && parent.childNodes.length === 1) {
+    parent.replaceWith(span)
+  } else {
+    el.replaceWith(span)
+  }
+}
+
+function upgradeParagraphFieldLabel(p: Element, doc: Document): void {
+  if (p.classList.contains('devis-heading') || p.classList.contains('devis-ref-title')) return
+  const normalized = (p.textContent ?? '').replace(/\s+/g, ' ').trim()
+  if (!paragraphLooksLikeFieldRow(normalized)) return
+  p.classList.add('devis-field-row')
+
+  const directStrong = p.querySelector(':scope > strong')
+  if (directStrong && isDevisFieldLabelText(directStrong.textContent ?? '')) {
+    if (elementHasUserCustomLabelStyle(directStrong)) return
+    const style = directStrong.getAttribute('style') ?? ''
+    const alreadySalmon = style.includes(DEVIS_REF_TITLE_STYLE.color)
+      || directStrong.classList.contains('devis-field-label--salmon')
+    if (!directStrong.querySelector('mark') && !alreadySalmon) {
+      if (elementHasBronzeLabelColor(directStrong) || !/color\s*:/i.test(style)) {
+        replaceWithSalmonLabel(doc, directStrong, directStrong.textContent ?? '')
+        return
+      }
+    }
+  }
+
+  for (const el of Array.from(p.querySelectorAll('span, strong'))) {
+    const labelText = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!isDevisFieldLabelText(labelText)) continue
+    if (elementHasUserCustomLabelStyle(el)) continue
+    if (el.querySelector('mark')) continue
+    if (el.classList.contains('devis-field-label')) {
+      const style = el.getAttribute('style') ?? ''
+      const needsStyleBump = !style.includes(DEVIS_FIELD_LABEL_STYLE.fontSize)
+        || !style.includes(DEVIS_REF_TITLE_STYLE.color)
+        || !/font-weight:\s*700/i.test(style)
+        || elementHasBronzeLabelColor(el)
+        || !/!important/.test(style)
+      if (needsStyleBump) {
+        el.className = 'devis-field-label devis-field-label--salmon'
+        el.setAttribute('style', devisSalmonLabelStyleAttr())
+      }
+      return
+    }
+    if (elementHasBronzeLabelColor(el)) {
+      replaceWithSalmonLabel(doc, el, labelText)
+      return
+    }
+    const innerSpan = el.tagName === 'STRONG' ? el.querySelector('span[style*="color"]') : null
+    if (innerSpan && elementHasBronzeLabelColor(innerSpan)) {
+      replaceWithSalmonLabel(doc, innerSpan, labelText)
+      return
+    }
+  }
+}
+
+function refreshSalmonFieldLabelsDom(html: string): string {
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  for (const p of Array.from(root.querySelectorAll('p'))) {
+    upgradeParagraphFieldLabel(p, doc)
+  }
+  return root.innerHTML
+}
+
+function refreshSalmonFieldLabelsSsr(html: string): string {
+  const bronzeHex = DEVIS_CHARTE.bronze.replace('#', '\\#')
+  const salmonStyle = devisSalmonLabelStyleAttr()
+  let out = html.replace(/devis-field-label--bronze/g, 'devis-field-label--salmon')
+  out = out.replace(
+    new RegExp(`(<span[^>]*style="[^"]*color:\\s*)${bronzeHex}([^"]*"[^>]*>)([^<]+:)(<\\/span>)`, 'gi'),
+    `$1${DEVIS_REF_TITLE_STYLE.color}$2$3$4`,
+  )
+  out = out.replace(
+    /<span([^>]*style="[^"]*color:\s*rgb\(\s*129\s*,\s*87\s*,\s*45\s*\)[^"]*"[^>]*)>([^<]+:)<\/span>/gi,
+    `<span class="devis-field-label devis-field-label--salmon" style="${salmonStyle}">$2</span>`,
+  )
+  out = out.replace(
+    new RegExp(`<strong([^>]*style="[^"]*color:\\s*${bronzeHex}[^"]*"[^>]*)>([^<]+:)<\\/strong>`, 'gi'),
+    `<span class="devis-field-label devis-field-label--salmon" style="${salmonStyle}">$2</span>`,
+  )
+  out = out.replace(
+    /<strong([^>]*style="[^"]*color:\s*rgb\(\s*129\s*,\s*87\s*,\s*45\s*\)[^"]*"[^>]*)>([^<]+:)<\/strong>/gi,
+    `<span class="devis-field-label devis-field-label--salmon" style="${salmonStyle}">$2</span>`,
+  )
+  out = out.replace(
+    /<p(?![^>]*class="[^"]*devis-field-row)([^>]*)>\s*(<span class="devis-field-label)/gi,
+    '<p class="devis-field-row"$1>$2',
+  )
+  out = out.replace(
+    /(<span class="devis-field-label[^"]*"[^>]*style="[^"]*)font-weight:\s*600/gi,
+    '$1font-weight:700',
+  )
+  out = out.replace(
+    /(<span class="devis-field-label[^"]*"[^>]*style="[^"]*)font-size:\s*14px/gi,
+    `$1font-size:${DEVIS_FIELD_LABEL_STYLE.fontSize}`,
+  )
+  return out
+}
+
+/** Libellés « Intervention souhaitée : » etc. — bronze → saumon (lettres enregistrées). */
+function refreshSalmonFieldLabelsInTopHtml(html: string): string {
+  if (typeof window !== 'undefined') {
+    return refreshSalmonFieldLabelsDom(html)
+  }
+  return refreshSalmonFieldLabelsSsr(html)
+}
+
+/** True si le titre de section a déjà une mise en page personnalisée (couleur, surlignage…). */
+function headingHasUserCustomStyle(inner: string): boolean {
+  if (/<mark\b/i.test(inner)) return true
+  const gray = DEVIS_SECTION_HEADING_STYLE.color.toLowerCase()
+  const bronze = DEVIS_CHARTE.bronze.toLowerCase()
+  const colorMatches = inner.match(/color:\s*([^;"']+)/gi) ?? []
+  for (const raw of colorMatches) {
+    const val = raw.replace(/^color:\s*/i, '').trim().toLowerCase()
+    if (!val) continue
+    if (val.includes(gray) || val.includes('#555555') || val.includes('85, 85, 85')) continue
+    if (val.includes(bronze) || val.includes('#81572d') || val.includes('129, 87, 45')) continue
+    return true
+  }
+  return false
+}
+
+/** Bronze → gris uniquement (sans écraser une personnalisation existante). */
+function migrateBronzeSectionHeadingsOnly(html: string): string {
+  const bronze = DEVIS_CHARTE.bronze.replace('#', '\\#')
+  const bronzeRe = new RegExp(
+    `<p\\b([^>]*class="[^"]*devis-heading[^"]*"[^>]*)>\\s*<strong[^>]*(?:style="[^"]*color:\\s*${bronze}[^"]*")?[^>]*>([\\s\\S]*?)<\\/strong>\\s*<\\/p>`,
+    'gi',
+  )
+  return html.replace(bronzeRe, (_full, _attrs, inner) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!text) return _full
+    return devisSectionHeading(text)
+  })
+}
+
+/** Met à jour les titres de section bronze → gris souligné gras (lettres enregistrées avant la charte). */
+function refreshSectionHeadingsInTopHtml(html: string): string {
+  const bronze = DEVIS_CHARTE.bronze.replace('#', '\\#')
+  const gray = DEVIS_SECTION_HEADING_STYLE.color.replace('#', '\\#')
+  const bronzeRe = new RegExp(
+    `<p\\b([^>]*class="[^"]*devis-heading[^"]*"[^>]*)>\\s*<strong[^>]*(?:style="[^"]*color:\\s*${bronze}[^"]*")?[^>]*>([\\s\\S]*?)<\\/strong>\\s*<\\/p>`,
+    'gi',
+  )
+  let out = html.replace(bronzeRe, (_full, _attrs, inner) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!text) return _full
+    return devisSectionHeading(text)
+  })
+
+  const headingRe = new RegExp(
+    `<p\\b([^>]*class="[^"]*devis-heading[^"]*"[^>]*)>([\\s\\S]*?)<\\/p>`,
+    'gi',
+  )
+  out = out.replace(headingRe, (_full, _attrs, inner) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!text) return _full
+    if (headingHasUserCustomStyle(inner)) return _full
+    const hasBold = /<strong\b/i.test(inner)
+    const hasGray = new RegExp(gray, 'i').test(inner)
+    const hasCurrentSize = new RegExp(
+      `font-size:\\s*${DEVIS_SECTION_HEADING_STYLE.fontSize.replace('.', '\\.')}`,
+      'i',
+    ).test(inner)
+    if (hasBold && hasGray && hasCurrentSize) return _full
+    if (hasBold && /<u\b/i.test(inner)) return _full
+    return devisSectionHeading(text)
+  })
+
+  const sectionSizeRe = new RegExp(
+    `font-size:\\s*(?:${DEVIS_SECTION_HEADING_STYLE.fontSize.replace('.', '\\.')}|17px)`,
+    'i',
+  )
+  const looseGrayRe =
+    /<p\b(?![^>]*class="[^"]*devis-heading)([^>]*)>\s*(?:<strong[^>]*>)?(?:<u[^>]*>)?<span([^>]*)>([\s\S]*?)<\/span>[\s\S]*?<\/p>/gi
+  return out.replace(looseGrayRe, (full, _pAttrs, spanAttrs, inner) => {
+    if (!/#555555|rgb\(\s*85\s*,\s*85\s*,\s*85\s*\)/i.test(spanAttrs)) return full
+    if (!sectionSizeRe.test(spanAttrs)) return full
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!text) return full
+    return devisSectionHeading(text)
+  })
+}
+
+function recapAndDetailsFromContext(ctx: DevisLetterContext) {
+  const pay = (ctx.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
+  const rap = pickRapport(ctx)
+  const patient = ctx.patient
+  const inter = arr(pay.typeIntervention).join(', ') || '—'
+  const nom = patient?.fullName || '—'
+  const age = str(pay.dateNaissance) ? computeAge(str(pay.dateNaissance)) : ''
+  const mensStr = [
+    str(pay.poids) ? `${str(pay.poids)} kg` : '',
+    str(pay.taille) ? `${str(pay.taille)} cm` : '',
+  ].filter(Boolean).join(' ')
+  const ageMens = [age, mensStr].filter(Boolean).join(' — ') || '—'
+  const trait = pay.traitementEnCours === true ? (str(pay.traitementDetails) || 'Oui') : 'Aucun'
+  const allerg = arr(pay.allergies).join(', ') || 'Aucune'
+  const antecMed = [...arr(pay.antecedentsMedicaux), str(pay.autresMaladiesChroniques)].filter(Boolean).join(', ') || 'Aucun'
+  const antecCh = pay.chirurgiesAnterieures === true ? (str(pay.chirurgiesDetails) || 'Oui') : 'Aucun'
+  const adresse = [patient?.ville, patient?.pays].filter(Boolean).join(' — ') || '—'
+  const tel = patient?.phone || '—'
+  const interRec = (rap?.interventionsRecommandees ?? []).filter(Boolean).join(', ') || '—'
+  const anesthType = rap?.anesthesieGenerale === true ? 'Générale' : 'Locale / Sédation'
+  return { inter, nom, ageMens, trait, allerg, antecMed, antecCh, adresse, tel, interRec, anesthType }
+}
+
 /**
- * Applique les règles lettre devis sur le HTML haut (éditeur + PDF).
- * Clinique / hôtel / durées / inclut-exclut se resynchronisent (sauf si désactivé).
- * Diagnostic : rapport lié à ce devis (correction du même rapport reprise ; pas un R plus récent).
+ * Met à jour uniquement les données (nom, séjour, clinique, total…) sans reformater
+ * couleurs / polices déjà personnalisées dans l’éditeur.
  */
-export function refreshDevisLetterTopHtml(
+export function syncDevisLetterDataOnlyTopHtml(
   html: string,
   ctx: DevisLetterContext,
   opts?: { syncInclutExclut?: boolean },
@@ -773,18 +1199,23 @@ export function refreshDevisLetterTopHtml(
   let out = refreshConvalescenceInTopHtml(html, ctx)
   out = stripDureeInterventionLine(out)
   out = refreshExamensInTopHtml(out, ctx)
-  out = normalizeInclutExclutLabels(out)
   if (syncInclutExclut) out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
-  if (Array.isArray(ctx.rapports)) {
-    const rap = pickRapport(ctx)
-    out = refreshDiagnosticInTopHtml(
-      out,
-      rap?.diagnostic,
-      rap?.interventionsRecommandees ?? [],
-    )
-  }
   out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
+  {
+    const recap = recapAndDetailsFromContext(ctx)
+    out = refreshDevisFieldByLabel(out, 'Intervention souhaitée :', recap.inter)
+    out = refreshDevisFieldByLabel(out, 'Nom Prénom :', recap.nom)
+    out = refreshDevisFieldByLabel(out, 'Âge / Mensurations :', recap.ageMens)
+    out = refreshDevisFieldByLabel(out, 'Traitement en cours :', recap.trait)
+    out = refreshDevisFieldByLabel(out, 'Allergie :', recap.allerg)
+    out = refreshDevisFieldByLabel(out, 'Antécédents médicaux :', recap.antecMed)
+    out = refreshDevisFieldByLabel(out, 'Antécédents chirurgicaux :', recap.antecCh)
+    out = refreshDevisFieldByLabel(out, 'Adresse :', recap.adresse)
+    out = refreshDevisFieldByLabel(out, 'Tél. Mobile :', recap.tel)
+    out = refreshDevisFieldByLabel(out, "Type d'anesthésie :", recap.anesthType)
+    out = refreshDevisFieldByLabel(out, 'Intervention proposée :', recap.interRec)
+  }
   out = refreshDevisFieldByLabel(out, "Durée d'Hospitalisation :", sv.dureeHosp)
   out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
   out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
@@ -792,14 +1223,124 @@ export function refreshDevisLetterTopHtml(
   out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
   out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
   out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
-  {
-    const interRec = (pickRapport(ctx)?.interventionsRecommandees ?? []).filter(Boolean).join(', ') || '—'
-    out = refreshDevisFieldByLabel(out, 'Intervention proposée :', interRec)
-  }
-  out = refreshSejourBadgeInHtml(out, sv.sejourLine)
+  out = refreshSejourBadgeInHtml(out, sv.sejourLine, sv.typeChambre)
   out = normalizeSejourJoursToNuits(out)
-  out = collapseExcessEmptyParagraphs(out)
   return out
+}
+
+/** Complète la charte uniquement sur les éléments encore « nus » (sans toucher aux styles utilisateur). */
+export function upgradeDevisMissingLayoutInTopHtml(html: string): string {
+  let out = migrateBronzeSectionHeadingsOnly(html)
+  out = refreshSalmonFieldLabelsInTopHtml(out)
+  if (/diagnostic du chirurgien/i.test(out)) {
+    const re =
+      /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
+    if (re.test(out)) {
+      out = out.replace(re, (_full, head, body) =>
+        `${head}${upgradeDiagnosticMissingLayoutInHtml(body)}`,
+      )
+    }
+  }
+  return stripDiagnosticOpTitlesInTopHtml(out)
+}
+
+/**
+ * Applique les règles lettre devis sur le HTML haut (éditeur + PDF).
+ * Clinique / hôtel / durées / inclut-exclut se resynchronisent (sauf si désactivé).
+ * Diagnostic : conservé si déjà présent dans la lettre (personnalisation gestionnaire).
+ */
+export function refreshDevisLetterTopHtml(
+  html: string,
+  ctx: DevisLetterContext,
+  opts?: { syncInclutExclut?: boolean; preserveManualLayout?: boolean; preserveManualDiagnostic?: boolean },
+): string {
+  const syncInclutExclut = opts?.syncInclutExclut !== false
+  const preserveManualLayout = opts?.preserveManualLayout === true
+  const preserveManualDiagnostic = opts?.preserveManualDiagnostic === true
+  const sv = sejourPdfFromContext(ctx)
+  const active = pickDevis(ctx)
+  const devisTitle = formatDevisTitle(active, ctx.dossierNumber)
+  let out = refreshConvalescenceInTopHtml(html, ctx)
+  out = stripDureeInterventionLine(out)
+  out = refreshExamensInTopHtml(out, ctx)
+  out = normalizeInclutExclutLabels(out)
+  if (syncInclutExclut) out = refreshOffreInclutExclutInTopHtml(out, ctx)
+  out = refreshDevisTitleInTopHtml(out, devisTitle)
+  out = refreshSectionHeadingsInTopHtml(out)
+  out = refreshSalmonFieldLabelsInTopHtml(out)
+  if (Array.isArray(ctx.rapports) && !preserveManualDiagnostic) {
+    const rap = pickRapport(ctx)
+    out = refreshDiagnosticInTopHtml(
+      out,
+      rap?.diagnostic,
+      rap?.interventionsRecommandees ?? [],
+    )
+  }
+  out = stripDiagnosticOpTitlesInTopHtml(out)
+  out = normalizeDiagnosticDarkFluoInTopHtml(out)
+  out = normalizeDiagnosticBlockGapsInTopHtml(out)
+  out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
+  {
+    const recap = recapAndDetailsFromContext(ctx)
+    out = refreshDevisFieldByLabel(out, 'Intervention souhaitée :', recap.inter)
+    out = refreshDevisFieldByLabel(out, 'Nom Prénom :', recap.nom)
+    out = refreshDevisFieldByLabel(out, 'Âge / Mensurations :', recap.ageMens)
+    out = refreshDevisFieldByLabel(out, 'Traitement en cours :', recap.trait)
+    out = refreshDevisFieldByLabel(out, 'Allergie :', recap.allerg)
+    out = refreshDevisFieldByLabel(out, 'Antécédents médicaux :', recap.antecMed)
+    out = refreshDevisFieldByLabel(out, 'Antécédents chirurgicaux :', recap.antecCh)
+    out = refreshDevisFieldByLabel(out, 'Adresse :', recap.adresse)
+    out = refreshDevisFieldByLabel(out, 'Tél. Mobile :', recap.tel)
+    out = refreshDevisFieldByLabel(out, "Type d'anesthésie :", recap.anesthType)
+    out = refreshDevisFieldByLabel(out, 'Intervention proposée :', recap.interRec)
+  }
+  out = refreshDevisFieldByLabel(out, "Durée d'Hospitalisation :", sv.dureeHosp)
+  out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
+  out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
+  out = refreshDevisFieldByLabel(out, 'Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)
+  out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
+  out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
+  out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
+  out = refreshSejourBadgeInHtml(out, sv.sejourLine, sv.typeChambre)
+  out = normalizeSejourJoursToNuits(out)
+  out = normalizeGapBeforeDetailsIntervention(out)
+  out = normalizeHeadingRhythmInHtml(out)
+  if (!preserveManualLayout) {
+    out = collapseExcessEmptyParagraphs(out)
+  }
+  return italicizeDevisLetterIntroHtml(out)
+}
+
+const DEVIS_LETTER_INTRO_RE = [
+  /^Tunis le /i,
+  /^Bonjour,?$/i,
+  /^Nous vous remercions de la confiance/i,
+  /^Suite à votre demande de devis/i,
+]
+
+/** Met en italique la date et le préambule (Bonjour + formules d’ouverture). */
+export function italicizeDevisLetterIntroHtml(html: string): string {
+  if (!html) return html
+  return html.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (full, attrs: string, inner: string) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!DEVIS_LETTER_INTRO_RE.some((re) => re.test(text))) return full
+    let newAttrs = attrs
+    if (!/\bdevis-letter-intro\b/.test(newAttrs)) {
+      if (/\bclass="/i.test(newAttrs)) {
+        newAttrs = newAttrs.replace(/\bclass="/i, 'class="devis-letter-intro ')
+      } else {
+        newAttrs += ' class="devis-letter-intro"'
+      }
+    }
+    if (
+      /font-style\s*:\s*italic/i.test(newAttrs)
+      || /<em\b/i.test(inner)
+      || /<i\b/i.test(inner)
+    ) {
+      return `<p${newAttrs}>${inner}</p>`
+    }
+    return `<p${newAttrs}><em>${inner}</em></p>`
+  })
 }
 
 /** Helper pour l’écran gestionnaire (patient détail). */
@@ -842,77 +1383,50 @@ function str(v: unknown): string { return typeof v === 'string' ? v.trim() : '' 
 
 /** Lettre haute initiale (sans customContent). */
 export function buildDevisLetterTopHtml(ctx: DevisLetterContext): string {
-  const pay = (ctx.formulaires?.[0]?.payload ?? {}) as Record<string, unknown>
+  const recap = recapAndDetailsFromContext(ctx)
   const rap = pickRapport(ctx)
   const sv = sejourPdfFromContext(ctx)
-  const patient = ctx.patient
-
-  const inter = arr(pay.typeIntervention).join(', ') || '—'
-  const nom = patient?.fullName || '—'
-  const age = str(pay.dateNaissance) ? computeAge(str(pay.dateNaissance)) : ''
-  const mensStr = [
-    str(pay.poids) ? `${str(pay.poids)} kg` : '',
-    str(pay.taille) ? `${str(pay.taille)} cm` : '',
-  ].filter(Boolean).join(' ')
-  const ageMens = [age, mensStr].filter(Boolean).join(' — ') || '—'
-  const trait = pay.traitementEnCours === true ? (str(pay.traitementDetails) || 'Oui') : 'Aucun'
-  const allerg = arr(pay.allergies).join(', ') || 'Aucune'
-  const antecMed = [...arr(pay.antecedentsMedicaux), str(pay.autresMaladiesChroniques)].filter(Boolean).join(', ') || 'Aucun'
-  const antecCh = pay.chirurgiesAnterieures === true ? (str(pay.chirurgiesDetails) || 'Oui') : 'Aucun'
-  const adresse = [patient?.ville, patient?.pays].filter(Boolean).join(' — ') || '—'
-  const tel = patient?.phone || '—'
-
   const diagnosticHtml = formatDiagnosticLetterHtml(
     rap?.diagnostic?.trim() || '',
     rap?.interventionsRecommandees ?? [],
   )
-  const interRec = (rap?.interventionsRecommandees ?? []).join(', ') || '—'
-  const anesthType = rap?.anesthesieGenerale === true ? 'Générale' : 'Locale / Sédation'
   const active = pickDevis(ctx)
   const ref = formatDevisTitle(active, ctx.dossierNumber)
   const date = `Tunis le ${todayFr()}`
 
-  return `
-<p style="text-align:right">${date}</p>
+  return italicizeDevisLetterIntroHtml(`
+<p style="text-align:right"><em>${date}</em></p>
 <p></p>
-<p>Bonjour,</p>
-<p>Nous vous remercions de la confiance que vous nous avez accordée.</p>
-<p>Suite à votre demande de devis, nous avons le plaisir de vous faire parvenir ci-dessous notre meilleure offre pour l'organisation de votre séjour médical en Tunisie.</p>
+<p><em>Bonjour,</em></p>
+<p><em>Nous vous remercions de la confiance que vous nous avez accordée.</em></p>
+<p><em>Suite à votre demande de devis, nous avons le plaisir de vous faire parvenir ci-dessous notre meilleure offre pour l'organisation de votre séjour médical en Tunisie.</em></p>
 <p></p>
 ${devisRefTitleHtml(ref)}
-<p></p>
 
 ${devisSectionHeading('Récapitulatif de votre demande :')}
-${devisFieldRow('Intervention souhaitée :', inter)}
-${devisFieldRow('Nom Prénom :', nom)}
-${devisFieldRow('Âge / Mensurations :', ageMens)}
-${devisFieldRow('Traitement en cours :', trait)}
-${devisFieldRow('Allergie :', allerg)}
-${devisFieldRow('Antécédents médicaux :', antecMed)}
-${devisFieldRow('Antécédents chirurgicaux :', antecCh)}
-${devisFieldRow('Adresse :', adresse)}
-${devisFieldRow('Tél. Mobile :', tel)}
-<p></p>
+${devisFieldRow('Intervention souhaitée :', recap.inter)}
+${devisFieldRow('Nom Prénom :', recap.nom)}
+${devisFieldRow('Âge / Mensurations :', recap.ageMens)}
+${devisFieldRow('Traitement en cours :', recap.trait)}
+${devisFieldRow('Allergie :', recap.allerg)}
+${devisFieldRow('Antécédents médicaux :', recap.antecMed)}
+${devisFieldRow('Antécédents chirurgicaux :', recap.antecCh)}
+${devisFieldRow('Adresse :', recap.adresse)}
+${devisFieldRow('Tél. Mobile :', recap.tel)}
 
 ${devisSectionHeading('Diagnostic du chirurgien : Dr CHENNOUFI Mehdi')}
 ${diagnosticHtml}
-<p></p>
 ${paraSalmonHi(`Durée TOTALE du séjour : ${sv.dureeTotale}`)}
-<p></p>
-
-${devisSeparator()}
 
 ${devisSectionHeading("Détails de l'intervention :")}
-${devisFieldRow('Intervention proposée :', interRec)}
-${devisFieldRow("Type d'anesthésie :", anesthType)}
+${devisFieldRow('Intervention proposée :', recap.interRec)}
+${devisFieldRow("Type d'anesthésie :", recap.anesthType)}
 ${devisFieldRow("Durée d'Hospitalisation :", sv.dureeHosp)}
 ${devisFieldRow('Clinique retenue :', sv.cliniqueRetenue)}
 ${devisFieldRow("Durée d'arrêt de travail (depuis l'intervention) :", '15 jours en moyenne')}
 ${devisFieldRow('Chirurgien traitant :', 'Dr. CHENNOUFI Mehdi')}
-<p></p>
 
 ${buildSejourConvalescenceHtml(sv)}
-<p></p>
 
 ${devisSectionHeading("À titre de traitement préventif, prenez 2 semaines avant l'intervention :")}
 <ul>
@@ -922,11 +1436,10 @@ ${devisSectionHeading("À titre de traitement préventif, prenez 2 semaines avan
 </ul>
 
 ${buildExamensMedicauxHtml(ctx)}
-<p></p>
 
 ${devisSectionHeading('Offre de prix :')}
 ${buildOffreInclutExclutHtml(ctx)}
-`
+`)
 }
 
 const OFFRE_INCLUT_START = '<!-- DEVIS_OFFRE_INCLUT -->'
@@ -949,12 +1462,11 @@ export function buildOffreInclutExclutHtml(ctx: DevisLetterContext): string {
   const inclut = labelsForInclut(resolveInclutIds(notes), drainageNb, contentionDetail)
   const exclut = labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes))
   return `${OFFRE_INCLUT_START}
-<p><strong>Votre devis inclut :</strong></p>
+<p>${devisLabel('Votre devis inclut :')}</p>
 ${ulFromLabels(inclut)}
 ${OFFRE_INCLUT_END}
-<p></p>
 ${OFFRE_EXCLUT_START}
-<p><strong>Notre forfait exclut :</strong></p>
+<p>${devisLabel('Notre forfait exclut :')}</p>
 ${ulFromLabels(exclut)}
 ${OFFRE_EXCLUT_END}`
 }
@@ -1006,17 +1518,14 @@ export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetter
 }
 
 export function buildDevisLetterBottomHtml(total: number, tndPerEur = DEFAULT_TND_PER_EUR): string {
-  const amountLine = buildDevisAmountSentence(total, tndPerEur)
+  const amountLine = buildDevisAmountSentenceHtml(total, tndPerEur)
   return `
 <p>${amountLine}</p>
 <p></p>
-<p><strong>${devisLabel('Modalités de paiement :')}</strong></p>
-<p>Elle devra être réglée en dinars tunisiens et en espèces et ce au moment de votre admission à la clinique en Tunisie.</p>
-<p>Les cartes de crédit ne sont pas acceptées.</p>
+<p>${devisLabel('Modalités de paiement :')}</p>
+<p>${buildPaymentModalitiesBodyHtml()}</p>
 <p></p>
-<p><strong>${devisLabel("Validité de l'offre :")}</strong></p>
-<p>La présente offre de prix sera valable pour une durée de trois (3) mois à compter de ce jour et seulement en période hors saison pour les hôtels (hors juillet/août et décembre).</p>
-<p></p>
-<p>Nous espérons que notre offre de prix vous agréera et nous tenons à votre entière disposition pour vous conseiller au mieux pour réussir votre séjour.</p>
+<p>${devisLabel("Validité de l'offre :")}</p>
+<p>${buildOfferValidityBlockHtml()}</p>
 `
 }

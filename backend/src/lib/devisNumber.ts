@@ -7,10 +7,38 @@ export function formatDevisNumber(month: number, seq: number, year: number): str
   return `MC-${mm}-${nnn}-${year}`
 }
 
-export function parseMcReference(numero: string): { month: number; seq: number; year: number } | null {
-  const m = numero.trim().match(/^MC-(\d{2})-(\d{3})-(\d{4})$/)
+export function parseMcReference(numero: string): { month: number; seq: number; year: number; letter?: string } | null {
+  const trimmed = numero.trim()
+  let m = trimmed.match(/^MC-(\d{2})-(\d{3})-(\d{4})$/)
+  if (m) {
+    return { month: parseInt(m[1], 10), seq: parseInt(m[2], 10), year: parseInt(m[3], 10) }
+  }
+  m = trimmed.match(/^MC-(\d{2})-(\d{3})([A-Z])-(\d{4})$/)
   if (!m) return null
-  return { month: parseInt(m[1], 10), seq: parseInt(m[2], 10), year: parseInt(m[3], 10) }
+  return {
+    month: parseInt(m[1], 10),
+    seq: parseInt(m[2], 10),
+    year: parseInt(m[4], 10),
+    letter: m[3] || undefined,
+  }
+}
+
+export function normalizeMcReferenceBase(numero: string): string {
+  const parsed = parseMcReference(numero)
+  if (!parsed) return numero.trim()
+  const mm = String(parsed.month).padStart(2, '0')
+  const nnn = String(parsed.seq).padStart(3, '0')
+  return `MC-${mm}-${nnn}-${parsed.year}`
+}
+
+export function formatMcReferenceWithVersion(baseNumero: string, version: number): string {
+  const base = normalizeMcReferenceBase(baseNumero)
+  const parsed = parseMcReference(base)
+  if (!parsed) return baseNumero.trim()
+  const letter = getDevisVersionLetter(version)
+  const mm = String(parsed.month).padStart(2, '0')
+  const nnn = String(parsed.seq).padStart(3, '0')
+  return letter ? `MC-${mm}-${nnn}${letter}-${parsed.year}` : `MC-${mm}-${nnn}-${parsed.year}`
 }
 
 export function isMcReference(numero: string | null | undefined): boolean {
@@ -105,17 +133,15 @@ export function getDevisVersionLetter(version: number): string | null {
   return String.fromCharCode(code)
 }
 
-/** Nom affiché : `MC-… NOM PRENOM` (+ ` -B`, ` -C`, … dès la 2ᵉ version). */
+/** Nom affiché : `MC-07-002B-2026 NOM PRENOM`. */
 export function formatDevisListName(
   dossierNumber: string | null | undefined,
   patientFullName: string | null | undefined,
   version: number,
 ): string {
-  const dossier = dossierNumber?.trim() || 'Dossier'
+  const ref = formatMcReferenceWithVersion(dossierNumber?.trim() || 'Dossier', version)
   const name = patientFullName?.trim() || ''
-  const base = name ? `${dossier} ${name}` : dossier
-  const letter = getDevisVersionLetter(version)
-  return letter ? `${base} -${letter}` : base
+  return name ? `${ref} ${name}` : ref
 }
 
 /** Nom de fichier PDF (export / pièce jointe chat). */

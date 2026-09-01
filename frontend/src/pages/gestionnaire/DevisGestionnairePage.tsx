@@ -15,7 +15,7 @@ import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { feedbackSuccess, toast } from '@/store/toastStore'
-import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, getDevisDisplayNumber, getDevisVersionLetter, STATUS_COLORS, dossierStatusLabel, type CurrencyUnit } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, formatDevisTitle, formatMcReferenceWithVersion, getDevisDisplayNumber, STATUS_COLORS, dossierStatusLabel, type CurrencyUnit } from '@/lib/utils'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
@@ -61,9 +61,9 @@ import { cachedFetch, hasCachedData, invalidateCache } from '@/lib/cachedFetch'
 import { queryKeys } from '@/lib/queryKeys'
 import {
   buildGestionnaireDevisExportHtml,
-  refreshDevisCustomContentParts,
-  refreshDevisCustomContentFromDraft,
-  displayDevisOfferTotal,
+  mergeDevisCustomContentOnModalSave,
+  hasPersonalizedDevisLetter,
+  devisOfferSegmentPlainText,
   splitDevisCustomContent,
 } from '@/lib/devisExportHtml'
 import { letterContextFromGestionnairePatient } from '@/lib/devisLetterHtml'
@@ -1594,12 +1594,7 @@ export default function DevisGestionnairePage() {
     )[0]!
   }
 
-  const lignesTotal = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
-  const customContentForTotal =
-    modalDevis?.customContent
-    ?? patientDetail?.devis?.find((d) => d.id === modalDevisIdRef.current)?.customContent
-    ?? existingDevis?.customContent
-  const total = displayDevisOfferTotal(customContentForTotal, lignesTotal)
+  const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
 
   const openDevisTable = async (
     intent: 'create' | 'edit-draft' | 'view' | 'new-version',
@@ -1687,13 +1682,12 @@ export default function DevisGestionnairePage() {
             : `Version ${source.version} · même numéro MC`,
         )
       } else if (effectiveIntent === 'view') {
-        const letter = getDevisVersionLetter(source.version)
         setIsEditingExisting(false)
         setModalDevis(source)
         createNewVersionOnceRef.current = false
         modalDevisIdRef.current = source.id
         modalRapportIdRef.current = source.rapportId ?? null
-        setModalTitle(letter ? `Devis -${letter}` : 'Devis envoyé')
+        setModalTitle(formatDevisTitle(source, patientRow?.dossierNumber ?? detail?.dossierNumber) || 'Devis envoyé')
         setModalHint(
           sourceRapNum
             ? `Lecture · version ${source.version} · rapport R${sourceRapNum}. Pour changer : Nouvelle version.`
@@ -1701,15 +1695,16 @@ export default function DevisGestionnairePage() {
         )
       } else {
         const nextVer = Math.max(source.version, ...devisVersions.map((d) => d.version)) + 1
-        const nextLetter = getDevisVersionLetter(nextVer)
+        const mcRef = getDevisDisplayNumber(source, patientRow?.dossierNumber ?? detail?.dossierNumber)
+        const nextRef = mcRef ? formatMcReferenceWithVersion(mcRef, nextVer) : null
         setIsEditingExisting(false)
         setModalDevis(null)
         createNewVersionOnceRef.current = true
         modalDevisIdRef.current = undefined
         modalRapportIdRef.current = source.rapportId ?? rap?.id ?? null
-        setModalTitle(nextLetter ? `Nouvelle version -${nextLetter}` : 'Nouvelle version du devis')
+        setModalTitle(nextRef ? `Nouvelle version ${nextRef}` : 'Nouvelle version du devis')
         setModalHint(
-          `Le devis déjà envoyé est conservé. Cette copie créera une nouvelle version${nextLetter ? ` (-${nextLetter})` : ''} avec le même numéro MC.`,
+          `Le devis déjà envoyé est conservé. Cette copie créera la version ${nextVer}${nextRef ? ` (${nextRef})` : ''} avec le même numéro MC.`,
         )
       }
     } else {
@@ -1899,14 +1894,18 @@ export default function DevisGestionnairePage() {
           },
           devisForSync,
         )
-        const { contentToSave } = refreshDevisCustomContentFromDraft({
+        const contentToPersist = mergeDevisCustomContentOnModalSave({
           customContent: existingContent,
           devis: devisForSync,
           letterContext: letterCtx,
           tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
+          syncOfferTotalFromLignes: true,
+          syncOfferTitleFromDevis: false,
+          syncInclutExclut: true,
+          preserveLegacyManualOfferTotal: false,
         })
-        await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
-        savedDevis = { ...r.devis, customContent: contentToSave }
+        await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToPersist)
+        savedDevis = { ...r.devis, customContent: contentToPersist }
       }
 
       setPatientDetail((prev) => {
@@ -2094,24 +2093,39 @@ export default function DevisGestionnairePage() {
       }
       const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
       const letterCtx = letterContextFromGestionnairePatient(patientForPdf, devisForPdf)
-      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentFromDraft({
+      const personalized = hasPersonalizedDevisLetter(devisForPdf.customContent)
+      const contentToSave = mergeDevisCustomContentOnModalSave({
         customContent: devisForPdf.customContent,
         devis: devisForPdf,
         letterContext: letterCtx,
         tndPerEur: rate,
+        syncOfferTotalFromLignes: true,
+        syncOfferTitleFromDevis: false,
+        syncInclutExclut: true,
+        preserveLegacyManualOfferTotal: false,
       })
-      // Persister le modèle rafraîchi (sinon patient/médecin gardent l’ancienne lettre TipTap)
-      await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
+      if (!personalized) {
+        await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
+      }
+      const split = splitDevisCustomContent(contentToSave)
       const fullHtml = await inlineHtmlImages(
         buildGestionnaireDevisExportHtml({
           devis: { ...devisForPdf, customContent: contentToSave },
           patient: patientForPdf,
-          topHtml,
-          botHtml,
-          operationTitle: offerTitle,
-          operationTotal: offerTotal,
+          topHtml: split.topHtml,
+          botHtml: split.botHtml,
+          operationTitle: split.offerTitle?.trim().startsWith('<')
+            ? split.offerTitle
+            : devisOfferSegmentPlainText(split.offerTitle),
+          operationTotal: split.offerTotal?.trim().startsWith('<')
+            ? split.offerTotal
+            : (devisOfferSegmentPlainText(split.offerTotal) || split.offerTotal),
+          subtitleHtml: split.offerSubtitle,
+          headDescHtml: split.offerHeadDesc,
+          headPriceHtml: split.offerHeadPrice,
           tndPerEur: rate,
-          preserveTopHtml: false,
+          preserveTopHtml: personalized,
+          preserveBotHtml: personalized,
           syncInclutExclut: true,
         }),
       )
@@ -2200,14 +2214,15 @@ export default function DevisGestionnairePage() {
         devisForSync,
       )
       const savedOfferTitle = splitDevisCustomContent(devisForSync.customContent).offerTitle?.trim()
-      const { contentToSave } = refreshDevisCustomContentParts({
+      const contentToSave = mergeDevisCustomContentOnModalSave({
         customContent: devisForSync.customContent,
         devis: devisForSync,
         letterContext: letterCtx,
         tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
         syncOfferTotalFromLignes: true,
-        // 1ʳᵉ ouverture : titre depuis interventions ; sinon garder la description personnalisée
         syncOfferTitleFromDevis: !savedOfferTitle,
+        syncInclutExclut: true,
+        preserveLegacyManualOfferTotal: false,
       })
       await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
       setShowModal(false)
@@ -2468,22 +2483,36 @@ export default function DevisGestionnairePage() {
       }
       const rate = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
       const letterCtx = letterContextFromGestionnairePatient(detail, devisForPdf)
-      const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentFromDraft({
+      const personalized = hasPersonalizedDevisLetter(devisForPdf.customContent)
+      const contentToSave = mergeDevisCustomContentOnModalSave({
         customContent: devisForPdf.customContent,
         devis: devisForPdf,
         letterContext: letterCtx,
         tndPerEur: rate,
+        syncOfferTotalFromLignes: true,
+        syncOfferTitleFromDevis: false,
+        syncInclutExclut: true,
+        preserveLegacyManualOfferTotal: false,
       })
+      const split = splitDevisCustomContent(contentToSave)
       const fullHtml = await inlineHtmlImages(
         buildGestionnaireDevisExportHtml({
           devis: { ...devisForPdf, customContent: contentToSave },
           patient: detail,
-          topHtml,
-          botHtml,
-          operationTitle: offerTitle,
-          operationTotal: offerTotal,
+          topHtml: split.topHtml,
+          botHtml: split.botHtml,
+          operationTitle: split.offerTitle?.trim().startsWith('<')
+            ? split.offerTitle
+            : devisOfferSegmentPlainText(split.offerTitle),
+          operationTotal: split.offerTotal?.trim().startsWith('<')
+            ? split.offerTotal
+            : (devisOfferSegmentPlainText(split.offerTotal) || split.offerTotal),
+          subtitleHtml: split.offerSubtitle,
+          headDescHtml: split.offerHeadDesc,
+          headPriceHtml: split.offerHeadPrice,
           tndPerEur: rate,
-          preserveTopHtml: false,
+          preserveTopHtml: personalized,
+          preserveBotHtml: personalized,
           syncInclutExclut: true,
         }),
       )
@@ -2946,9 +2975,10 @@ export default function DevisGestionnairePage() {
           ? { label: 'Modifier', intent: 'edit-draft', target: existingDevis }
           : (() => {
               const nextVer = Math.max(existingDevis.version, ...devisVersions.map((d) => d.version)) + 1
-              const letter = getDevisVersionLetter(nextVer)
+              const mcRef = getDevisDisplayNumber(existingDevis, patientRow?.dossierNumber)
+              const nextRef = mcRef ? formatMcReferenceWithVersion(mcRef, nextVer) : null
               return {
-                label: letter ? `Nouvelle version -${letter}` : 'Nouvelle version',
+                label: nextRef ? `Nouvelle version ${nextRef}` : 'Nouvelle version',
                 intent: 'new-version' as const,
                 target: existingDevis,
               }
@@ -3619,8 +3649,9 @@ export default function DevisGestionnairePage() {
           createVersionLabel={(() => {
             if (!modalDevis) return 'Nouvelle version'
             const nextVer = Math.max(modalDevis.version, ...devisVersions.map((d) => d.version)) + 1
-            const letter = getDevisVersionLetter(nextVer)
-            return letter ? `Nouvelle version -${letter}` : 'Nouvelle version'
+            const mcRef = getDevisDisplayNumber(modalDevis, patientRow?.dossierNumber ?? patientDetail?.dossierNumber)
+            const nextRef = mcRef ? formatMcReferenceWithVersion(mcRef, nextVer) : null
+            return nextRef ? `Nouvelle version ${nextRef}` : 'Nouvelle version'
           })()}
           currency={currency}
           tauxEur={tauxEur}

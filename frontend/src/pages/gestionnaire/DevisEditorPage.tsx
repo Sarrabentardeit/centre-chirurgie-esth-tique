@@ -10,6 +10,29 @@ import { Color } from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
 
+/** Couleur texte — !important pour passer devant les styles charte (libellés saumon, etc.). */
+const DevisColor = Color.extend({
+  addGlobalAttributes() {
+    const parent = this.parent?.()
+    if (!parent) return []
+    return parent.map((group) => ({
+      ...group,
+      attributes: {
+        ...group.attributes,
+        color: {
+          ...group.attributes?.color,
+          parseHTML: (element: HTMLElement) =>
+            element.style.color?.replace(/\s*!important\s*$/i, '').trim() || null,
+          renderHTML: (attributes: { color?: string | null }) => {
+            if (!attributes.color) return {}
+            return { style: `color: ${attributes.color} !important` }
+          },
+        },
+      },
+    }))
+  },
+})
+
 /** Garde les classes HTML (ex. devis-ref-title) — TipTap les retire sinon. */
 const DevisParagraph = Paragraph.extend({
   addAttributes() {
@@ -45,7 +68,32 @@ const DevisTextStyle = TextStyle.extend({
         parseHTML: (element) => element.style.fontSize || null,
         renderHTML: (attributes) => {
           if (!attributes.fontSize) return {}
-          return { style: `font-size: ${attributes.fontSize}` }
+          return { style: `font-size: ${attributes.fontSize} !important` }
+        },
+      },
+      class: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('class'),
+        renderHTML: (attributes) => {
+          if (!attributes.class) return {}
+          return { class: attributes.class }
+        },
+      },
+    }
+  },
+})
+
+/** Conserve les classes fluo (offer-fluo-disclaimer, offer-fluo-payment, etc.) sur les surlignages. */
+const DevisHighlight = Highlight.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      class: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('class'),
+        renderHTML: (attributes) => {
+          if (!attributes.class) return {}
+          return { class: attributes.class }
         },
       },
     }
@@ -57,19 +105,37 @@ import { toast } from '@/store/toastStore'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
 import { formatDate, formatDevisPdfFileName, formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
-import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
+import { DEFAULT_TND_PER_EUR, replaceDevisAmountPlaceholders } from '@/lib/moneyWords'
 import { inlineHtmlImages } from '@/lib/pdf'
 import {
   DEVIS_LOGO_SRC,
-  DEVIS_SIGNATURE,
+  DEVIS_SIGNATURE_BLOCK,
+  DEVIS_SIGNATURE_BLOCK_STYLE,
   buildDevisContactFooterHtml,
   buildDevisHeaderLogoHtml,
 } from '@/lib/devisBranding'
 import {
   DEVIS_ACCENT,
   DEVIS_CHARTE,
+  DEVIS_FLUO_GRAY,
+  DEVIS_FONT_FAMILY,
+  DEVIS_BODY_FONT_SIZE,
+  DEVIS_OFFER_PRICE_FONT_SIZE,
+  DEVIS_HIGHLIGHT_COLORS,
   DEVIS_OFFER_PREVIEW_CSS,
   devisEmptyParagraphCss,
+  devisOfferSejourFluoCss,
+  devisRefTitleCss,
+  devisSectionHeadingCss,
+  markDevisSpacerParagraphs,
+  prepareDevisHtmlForEditor,
+  buildOfferDescEditorHtml,
+  defaultOfferSubtitleHtml,
+  defaultOfferHeadDescHtml,
+  defaultOfferHeadPriceHtml,
+  ensureTarifHintSalmonHtml,
+  looksLikeOfferDescHtml,
+  restoreOfferSejourFluoInHtml,
 } from '@/lib/devisCharte'
 import {
   buildDevisLetterBottomHtml,
@@ -77,9 +143,11 @@ import {
   letterContextFromGestionnairePatient,
   pickRapport,
   sejourPdfFromContext,
+  syncDureeTotaleSejourInHtml,
   type DevisLetterContext,
 } from '@/lib/devisLetterHtml'
-import { buildGestionnaireDevisExportHtml, isManualDevisOfferTotal, joinDevisCustomContent, refreshDevisCustomContentParts, resolveDevisOfferTotal, splitDevisCustomContent } from '@/lib/devisExportHtml'
+import { diagnosticDarkFluoCss, diagnosticBlockGapCss, diagnosticZoneLeadCss, diagnosticVisageCss } from '@/lib/diagnosticFormat'
+import { buildGestionnaireDevisExportHtml, hasPersonalizedDevisLetter, joinDevisCustomContent, loadDevisCustomContentForEditor } from '@/lib/devisExportHtml'
 // RichDocToolbar — barre d'outils partagée avec Planning séjour
 
 function escapeHtmlText(s: string): string {
@@ -90,14 +158,31 @@ function escapeHtmlText(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function offerEditorHtmlFromTitle(title: string): string {
-  const safe = escapeHtmlText(title.trim() || 'Séjour médical personnalisé')
-  return `<p>${safe}</p>`
+function loadOfferEditorHtml(
+  stored: string | null | undefined,
+  fallbackTitle: string,
+  sejourLine = '',
+  typeChambre = '',
+): string {
+  const raw = stored?.trim() ?? ''
+  if (looksLikeOfferDescHtml(raw) && raw.startsWith('<')) return restoreOfferSejourFluoInHtml(raw)
+  return buildOfferDescEditorHtml(raw || fallbackTitle, sejourLine, typeChambre)
 }
 
 function offerTotalEditorHtml(display: string): string {
   const safe = escapeHtmlText(display.trim() || '0')
   return `<p>${safe}</p>`
+}
+
+function loadOfferTotalEditorHtml(stored: string | null | undefined, fallback: string): string {
+  const raw = stored?.trim() ?? ''
+  if (!raw) return offerTotalEditorHtml(fallback)
+  if (raw.startsWith('<')) return raw
+  return offerTotalEditorHtml(raw)
+}
+
+function htmlToPlainText(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 function readOfferTitle(editor: Editor | null, fallback: string): string {
@@ -114,9 +199,13 @@ function readOfferTotalDisplay(editor: Editor | null, fallback: string): string 
    CSS GLOBAL (éditeur + impression)
 ───────────────────────────────────────────────────────── */
 const GLOBAL_CSS = `
+.doc-shell {
+  font-family: ${DEVIS_FONT_FAMILY};
+  font-size: ${DEVIS_BODY_FONT_SIZE};
+}
 .ProseMirror {
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 13px;
+  font-family: ${DEVIS_FONT_FAMILY};
+  font-size: ${DEVIS_BODY_FONT_SIZE};
   line-height: 1.7;
   color: ${DEVIS_CHARTE.charcoal};
   outline: none;
@@ -125,21 +214,21 @@ const GLOBAL_CSS = `
 .ProseMirror p { margin: 0 0 8px; }
 /* Espacements manuels (Entrée) — aligné sur le PDF */
 ${devisEmptyParagraphCss('.ProseMirror')}
-.ProseMirror ul + p.devis-heading,
-.ProseMirror ul + .devis-heading,
-.doc-shell ul + p.devis-heading,
-.doc-shell ul + .devis-heading {
-  margin-top: 6px;
-}
 .ProseMirror ul,
-.ProseMirror ol { padding-left: 22px; margin: 0 0 6px; }
+.ProseMirror ol { padding-left: 22px; margin: 0 0 8px; }
 .ProseMirror ol { list-style-type: decimal; }
-.ProseMirror ol > li { margin: 0 0 10px; break-inside: avoid; page-break-inside: avoid; }
-.ProseMirror ul > li { margin: 0 0 5px; break-inside: avoid; page-break-inside: avoid; }
-.ProseMirror ol ul { list-style-type: disc; margin-top: 6px; margin-bottom: 0; }
+.ProseMirror ol > li,
+.ProseMirror ul > li { margin: 0 0 6px; break-inside: avoid; page-break-inside: avoid; }
+.ProseMirror ol ul { list-style-type: disc; margin-top: 4px; margin-bottom: 0; }
 .ProseMirror hr { border: none; border-top: 1px solid ${DEVIS_CHARTE.rose}; margin: 14px 0 12px; }
 .ProseMirror strong { font-weight: 700; }
 .ProseMirror em { font-style: italic; color: ${DEVIS_CHARTE.charcoal}; }
+.ProseMirror .devis-letter-intro,
+.ProseMirror .devis-letter-intro em,
+.doc-shell .devis-letter-intro,
+.doc-shell .devis-letter-intro em {
+  font-style: italic;
+}
 .ProseMirror u { text-decoration: none; border-bottom: 1px solid ${DEVIS_CHARTE.rose}; }
 .ProseMirror mark {
   padding: 0 1px;
@@ -153,74 +242,100 @@ ${devisEmptyParagraphCss('.ProseMirror')}
 .doc-shell .tiptap { min-height: 420px; }
 .doc-section-bottom .ProseMirror,
 .doc-section-bottom .tiptap { min-height: 180px; }
+.doc-section-bottom .ProseMirror mark.offer-fluo-disclaimer,
+.doc-shell .doc-section-bottom mark.offer-fluo-disclaimer,
+.doc-section-bottom .ProseMirror mark.offer-fluo-payment,
+.doc-shell .doc-section-bottom mark.offer-fluo-payment,
+.doc-section-bottom .ProseMirror mark.offer-fluo-validity,
+.doc-shell .doc-section-bottom mark.offer-fluo-validity,
+.doc-section-bottom .ProseMirror mark[data-color="#808080"] {
+  background-color: ${DEVIS_FLUO_GRAY.gray50};
+  color: #FFFFFF;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+${diagnosticDarkFluoCss('.doc-section-top .ProseMirror', '.doc-shell .doc-section-top', { editable: true })}
+${diagnosticBlockGapCss('.doc-section-top .ProseMirror', '.doc-shell .doc-section-top')}
+${diagnosticZoneLeadCss('.doc-section-top .ProseMirror', '.doc-shell .doc-section-top', { editable: true })}
+${diagnosticVisageCss('.doc-section-top .ProseMirror', '.doc-shell .doc-section-top')}
+.doc-section-offer,
+.doc-section-offer > div,
 .doc-section-offer .ProseMirror,
 .doc-section-offer .tiptap {
-  min-height: 52px;
-  font-weight: 700;
-  font-size: 13px;
-  line-height: 1.45;
-  color: ${DEVIS_CHARTE.charcoal};
+  display: block;
+  min-height: 1.4em;
+  font-weight: inherit;
+  font-size: inherit;
+  line-height: 1.5;
+  color: inherit;
+  cursor: text;
 }
-.doc-section-offer .ProseMirror p { margin: 0; }
+.doc-section-offer .ProseMirror p { margin: 0 0 6px; display: block; }
+.doc-section-offer .ProseMirror p:last-child { margin-bottom: 0; }
+${devisOfferSejourFluoCss('.doc-section-offer')}
+${devisOfferSejourFluoCss('.doc-offer-preview')}
+.doc-section-offer-sub,
+.doc-section-offer-head {
+  cursor: text;
+}
+.doc-section-offer-sub .ProseMirror,
+.doc-section-offer-sub .tiptap,
+.doc-section-offer-head .ProseMirror,
+.doc-section-offer-head .tiptap {
+  min-height: 1.2em;
+  outline: none;
+}
+.doc-section-offer-sub .ProseMirror p,
+.doc-section-offer-head .ProseMirror p {
+  margin: 0;
+}
+.doc-offer-preview .op-title {
+  line-height: 1.5;
+}
 .doc-section-offer-total .ProseMirror,
 .doc-section-offer-total .tiptap {
   min-height: 28px;
   font-weight: 700;
-  font-size: 22px;
+  font-size: ${DEVIS_OFFER_PRICE_FONT_SIZE};
   line-height: 1.2;
-  color: ${DEVIS_CHARTE.bronze};
-  text-align: right;
+  color: ${DEVIS_CHARTE.charcoal};
+  text-align: center;
   letter-spacing: 0.02em;
 }
-.doc-section-offer-total .ProseMirror p { margin: 0; text-align: right; }
-.doc-offer-preview .total-price {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 4px;
-  white-space: nowrap;
-}
+.doc-section-offer-total .ProseMirror p { margin: 0; text-align: center; }
 .doc-offer-preview.is-editing {
   outline: 2px solid ${DEVIS_ACCENT}55;
   outline-offset: 4px;
   border-radius: 4px;
 }
 
-/* Sous-titres : défaut bronze, personnalisation éditeur prioritaire */
-.ProseMirror .devis-heading,
-.doc-shell .devis-heading {
-  margin: 10px 0 6px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  font-weight: 700;
+/* Titres de section + libellés saumon — mode éditable (palette couleur) */
+${devisSectionHeadingCss('.ProseMirror', { editable: true })}
+${devisSectionHeadingCss('.doc-shell', { editable: true })}
+/* Couleur / surlignage manuel TipTap — y compris titres de section */
+.ProseMirror span[style*="color"],
+.ProseMirror mark[style*="background"],
+.doc-shell .ProseMirror span[style*="color"],
+.doc-shell .ProseMirror mark[style*="background"] {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
-.ProseMirror .devis-heading:not([style*="color"]):not([style*="font-size"]),
-.doc-shell .devis-heading:not([style*="color"]):not([style*="font-size"]) {
-  font-size: 13px;
-  color: ${DEVIS_CHARTE.bronze};
+.ProseMirror .devis-heading [style*="color"],
+.ProseMirror .devis-heading mark,
+.doc-shell .devis-heading [style*="color"],
+.doc-shell .devis-heading mark {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
-/* Titre centré « Devis MC-… » — défaut bronze + 18px, sans écraser les styles inline */
-.ProseMirror .devis-ref-title,
-.doc-shell .devis-ref-title {
-  text-align: center !important;
-  margin: 12px 0 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.ProseMirror .devis-ref-title:not([style*="color"]),
-.doc-shell .devis-ref-title:not([style*="color"]) {
-  color: ${DEVIS_CHARTE.bronze};
-}
-.ProseMirror .devis-ref-title:not([style*="font-size"]),
-.doc-shell .devis-ref-title:not([style*="font-size"]) {
-  font-size: 18px;
-}
-.ProseMirror .devis-ref-title strong,
-.doc-shell .devis-ref-title strong {
-  font-weight: 700;
-  letter-spacing: 0.02em;
+/* Titre centré « Devis MC-… » — saumon + fond gris (réf. Word) */
+${devisRefTitleCss('.ProseMirror')}
+${devisRefTitleCss('.doc-shell')}
+.ProseMirror .devis-ref-title u,
+.doc-shell .devis-ref-title u {
+  text-decoration: underline !important;
+  border-bottom: none !important;
+  text-underline-offset: 2px;
 }
 
 .devis-contact-footer {
@@ -294,7 +409,15 @@ ${DEVIS_OFFER_PREVIEW_CSS}
   }
   .ProseMirror,
   .doc-shell .tiptap { min-height: 280px; }
-  .ProseMirror { font-size: 14px; line-height: 1.75; }
+  .doc-section-offer .ProseMirror,
+  .doc-section-offer .tiptap,
+  .doc-section-offer-sub .ProseMirror,
+  .doc-section-offer-sub .tiptap,
+  .doc-section-offer-head .ProseMirror,
+  .doc-section-offer-head .tiptap,
+  .doc-section-offer-total .ProseMirror,
+  .doc-section-offer-total .tiptap { min-height: 1.2em !important; }
+  .ProseMirror { font-size: ${DEVIS_BODY_FONT_SIZE}; line-height: 1.75; }
 }
 
 @media print {
@@ -323,13 +446,6 @@ function letterCtx(
   activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
 ): DevisLetterContext {
   return letterContextFromGestionnairePatient(p, activeDevis)
-}
-
-function sejourPdfFromPatient(
-  p: GestionnairePatientDetail,
-  activeDevis?: Parameters<typeof letterContextFromGestionnairePatient>[1],
-) {
-  return sejourPdfFromContext(letterCtx(p, activeDevis))
 }
 
 function buildTopHtml(
@@ -367,7 +483,12 @@ export default function DevisEditorPage() {
   const [initialBottomHtml, setInitialBottomHtml] = useState<string>('')
   const [initialOfferTitle, setInitialOfferTitle] = useState<string>('')
   const [initialOfferTotal, setInitialOfferTotal] = useState<string>('')
-  const [activeZone, setActiveZone] = useState<'top' | 'bottom' | 'offer' | 'offerTotal'>('top')
+  const [initialOfferSubtitle, setInitialOfferSubtitle] = useState<string>('')
+  const [initialOfferHeadDesc, setInitialOfferHeadDesc] = useState<string>('')
+  const [initialOfferHeadPrice, setInitialOfferHeadPrice] = useState<string>('')
+  const [activeZone, setActiveZone] = useState<
+    'top' | 'bottom' | 'offer' | 'offerTotal' | 'offerSub' | 'offerHeadDesc' | 'offerHeadPrice'
+  >('top')
   const [tndPerEur, setTndPerEur] = useState(DEFAULT_TND_PER_EUR)
 
   const devisIdRef    = useRef<string | null>(null)
@@ -376,10 +497,16 @@ export default function DevisEditorPage() {
   const editorBotRef = useRef<Editor | null>(null)
   const editorOfferRef = useRef<Editor | null>(null)
   const editorOfferTotalRef = useRef<Editor | null>(null)
+  const editorOfferSubRef = useRef<Editor | null>(null)
+  const editorOfferHeadDescRef = useRef<Editor | null>(null)
+  const editorOfferHeadPriceRef = useRef<Editor | null>(null)
   const tndPerEurRef = useRef(DEFAULT_TND_PER_EUR)
   /** Empêche une auto-save TipTap trop tôt (ex. total encore à l’ancienne valeur). */
   const readyToSaveRef = useRef(false)
   const offerTotalTouchedRef = useRef(false)
+  const hydratedRef = useRef({
+    top: '', bot: '', offer: '', total: '', sub: '', headDesc: '', headPrice: '',
+  })
 
   /* CSS global */
   useEffect(() => {
@@ -395,6 +522,7 @@ export default function DevisEditorPage() {
     if (!patientId) return
     readyToSaveRef.current = false
     offerTotalTouchedRef.current = false
+    hydratedRef.current = { top: '', bot: '', offer: '', total: '', sub: '', headDesc: '', headPrice: '' }
     setLoading(true); setError(null)
     try {
       const [{ patient: p }, taux] = await Promise.all([
@@ -417,41 +545,65 @@ export default function DevisEditorPage() {
       const lignes = dv?.lignes ?? []
       const total = lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
       const ctx = letterCtx(p, dv ?? undefined)
+      const sv = sejourPdfFromContext(ctx)
       const defaultOffer =
         (pickRapport(ctx)?.interventionsRecommandees ?? [])
           .filter(Boolean)
           .join(' + ')
         || lignes.find((l) => l.description?.trim())?.description.trim()
         || 'Séjour médical personnalisé'
+      const defaultDescHtml = buildOfferDescEditorHtml(defaultOffer, sv.sejourLine, sv.typeChambre)
 
       if (dv) {
-        const split = splitDevisCustomContent(dv.customContent)
-        const legacyManualTotal =
-          !split.offerTotalManual
-          && isManualDevisOfferTotal(split.offerTotal, total)
-        // Resync champs auto (séjour, examens, inclut/exclut) — garde description + total manuel
-        const { topHtml, botHtml, offerTitle, offerTotal, contentToSave } = refreshDevisCustomContentParts({
+        const personalized = hasPersonalizedDevisLetter(dv.customContent)
+        const loaded = loadDevisCustomContentForEditor({
           customContent: dv.customContent,
+          defaultTopHtml: buildTopHtml(p, dv),
+          defaultBotHtml: buildBottomHtml(total, tndPerEurRate),
+          defaultOfferTitle: defaultDescHtml,
+          defaultOfferTotal: fmtNum(total),
+          defaultOfferSubtitle: defaultOfferSubtitleHtml(),
+          defaultOfferHeadDesc: defaultOfferHeadDescHtml(),
+          defaultOfferHeadPrice: defaultOfferHeadPriceHtml(),
+          lignesTotal: total,
+          tndPerEur: tndPerEurRate,
           devis: dv,
           letterContext: ctx,
-          tndPerEur: tndPerEurRate,
-          syncOfferTitleFromDevis: false,
-          preserveLegacyManualOfferTotal: true,
         })
-        const offerTotalStr = offerTotal?.trim() || fmtNum(total)
-        setInitialTopHtml(topHtml.trim() ? topHtml : buildTopHtml(p, dv))
-        setInitialBottomHtml(botHtml.trim() ? botHtml : buildBottomHtml(total, tndPerEurRate))
-        setInitialOfferTitle(offerTitle?.trim() || defaultOffer)
-        setInitialOfferTotal(offerTotalStr)
-        offerTotalTouchedRef.current = split.offerTotalManual || legacyManualTotal
-        if (id && contentToSave !== (dv.customContent ?? '')) {
-          void gestionnaireApi.saveDevisCustomContent(id, contentToSave).catch(() => undefined)
-        }
+        setInitialTopHtml(syncDureeTotaleSejourInHtml(loaded.topHtml, sv.dureeTotale))
+        setInitialBottomHtml(loaded.botHtml)
+        setInitialOfferTitle(
+          looksLikeOfferDescHtml(loaded.offerTitle)
+            ? restoreOfferSejourFluoInHtml(loaded.offerTitle)
+            : buildOfferDescEditorHtml(loaded.offerTitle, sv.sejourLine, sv.typeChambre),
+        )
+        setInitialOfferTotal(loaded.offerTotal)
+        setInitialOfferSubtitle(
+          personalized
+            ? (loaded.offerSubtitle || defaultOfferSubtitleHtml())
+            : prepareDevisHtmlForEditor(loaded.offerSubtitle || defaultOfferSubtitleHtml()),
+        )
+        setInitialOfferHeadDesc(
+          personalized
+            ? (loaded.offerHeadDesc || defaultOfferHeadDescHtml())
+            : prepareDevisHtmlForEditor(loaded.offerHeadDesc || defaultOfferHeadDescHtml()),
+        )
+        setInitialOfferHeadPrice(
+          personalized
+            ? (loaded.offerHeadPrice || defaultOfferHeadPriceHtml())
+            : ensureTarifHintSalmonHtml(
+                prepareDevisHtmlForEditor(loaded.offerHeadPrice || defaultOfferHeadPriceHtml()),
+              ),
+        )
+        offerTotalTouchedRef.current = false
       } else {
         setInitialTopHtml(buildTopHtml(p, undefined))
         setInitialBottomHtml(buildBottomHtml(0, tndPerEurRate))
-        setInitialOfferTitle(defaultOffer)
+        setInitialOfferTitle(defaultDescHtml)
         setInitialOfferTotal(fmtNum(0))
+        setInitialOfferSubtitle(defaultOfferSubtitleHtml())
+        setInitialOfferHeadDesc(defaultOfferHeadDescHtml())
+        setInitialOfferHeadPrice(defaultOfferHeadPriceHtml())
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -470,16 +622,30 @@ export default function DevisEditorPage() {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = undefined
     }
-    const topHtml = editorTopRef.current?.getHTML() ?? ''
-    const botHtml = editorBotRef.current?.getHTML() ?? ''
-    const offerTitle = readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
-    const offerTotal = readOfferTotalDisplay(editorOfferTotalRef.current, '0')
+    const topHtml = markDevisSpacerParagraphs(editorTopRef.current?.getHTML() ?? '')
+    const botHtml = markDevisSpacerParagraphs(editorBotRef.current?.getHTML() ?? '')
+    const offerTitle = editorOfferRef.current?.getHTML()?.trim()
+      || readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
+    const offerTotal = editorOfferTotalRef.current?.getHTML()?.trim()
+      || readOfferTotalDisplay(editorOfferTotalRef.current, '0')
+    const offerChrome = {
+      subtitle: editorOfferSubRef.current?.getHTML()?.trim() || defaultOfferSubtitleHtml(),
+      headDesc: editorOfferHeadDescRef.current?.getHTML()?.trim() || defaultOfferHeadDescHtml(),
+      headPrice: editorOfferHeadPriceRef.current?.getHTML()?.trim() || defaultOfferHeadPriceHtml(),
+    }
     if (!topHtml.trim() && !botHtml.trim()) return false
     setSaving(true)
     try {
       await gestionnaireApi.saveDevisCustomContent(
         id,
-        joinDevisCustomContent(topHtml, botHtml, offerTitle, offerTotal, offerTotalTouchedRef.current),
+        joinDevisCustomContent(
+          topHtml,
+          botHtml,
+          offerTitle,
+          offerTotal,
+          offerTotalTouchedRef.current,
+          offerChrome,
+        ),
       )
       setSaved(true)
       return true
@@ -491,13 +657,26 @@ export default function DevisEditorPage() {
     }
   }, [])
 
-  const syncBottomToAmount = useCallback((amount: number) => {
-    const bot = editorBotRef.current
-    if (!bot || !Number.isFinite(amount)) return
-    const next = replaceDevisAmountPlaceholders(bot.getHTML(), amount, tndPerEurRef.current)
-    if (next !== bot.getHTML()) {
-      bot.commands.setContent(next, { emitUpdate: false })
-    }
+  const snapshotCustomContent = useCallback((): string | null => {
+    const topHtml = markDevisSpacerParagraphs(editorTopRef.current?.getHTML() ?? '')
+    const botHtml = markDevisSpacerParagraphs(editorBotRef.current?.getHTML() ?? '')
+    if (!topHtml.trim() && !botHtml.trim()) return null
+    const offerTitle = editorOfferRef.current?.getHTML()?.trim()
+      || readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
+    const offerTotal = editorOfferTotalRef.current?.getHTML()?.trim()
+      || readOfferTotalDisplay(editorOfferTotalRef.current, '0')
+    return joinDevisCustomContent(
+      topHtml,
+      botHtml,
+      offerTitle,
+      offerTotal,
+      offerTotalTouchedRef.current,
+      {
+        subtitle: editorOfferSubRef.current?.getHTML()?.trim() || defaultOfferSubtitleHtml(),
+        headDesc: editorOfferHeadDescRef.current?.getHTML()?.trim() || defaultOfferHeadDescHtml(),
+        headPrice: editorOfferHeadPriceRef.current?.getHTML()?.trim() || defaultOfferHeadPriceHtml(),
+      },
+    )
   }, [])
 
   const syncOfferTotalFromLignes = useCallback((amount: number) => {
@@ -508,8 +687,7 @@ export default function DevisEditorPage() {
     if (ed.getText().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim() !== display) {
       ed.commands.setContent(next, { emitUpdate: false })
     }
-    syncBottomToAmount(amount)
-  }, [syncBottomToAmount])
+  }, [])
 
   /* Auto-save rapide (dès qu’on tape, sans cliquer Sauvegarder) */
   const triggerSave = useCallback(() => {
@@ -517,16 +695,25 @@ export default function DevisEditorPage() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       void flushSave()
-    }, 600)
+    }, 400)
   }, [flushSave])
 
   // Sauvegarde à la fermeture / changement d’onglet
   useEffect(() => {
     const onLeave = () => {
-      void flushSave()
+      const id = devisIdRef.current
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = undefined
+      }
+      if (id && readyToSaveRef.current) {
+        const content = snapshotCustomContent()
+        if (content) gestionnaireApi.saveDevisCustomContentKeepalive(id, content)
+      }
+      void flushSave({ force: true })
     }
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') void flushSave()
+      if (document.visibilityState === 'hidden') onLeave()
     }
     window.addEventListener('pagehide', onLeave)
     window.addEventListener('beforeunload', onLeave)
@@ -535,9 +722,9 @@ export default function DevisEditorPage() {
       window.removeEventListener('pagehide', onLeave)
       window.removeEventListener('beforeunload', onLeave)
       document.removeEventListener('visibilitychange', onVisibility)
-      void flushSave()
+      onLeave()
     }
-  }, [flushSave])
+  }, [flushSave, snapshotCustomContent])
 
   const editorTop = useEditor({
     immediatelyRender: false,
@@ -551,8 +738,8 @@ export default function DevisEditorPage() {
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       DevisTextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
+      DevisColor,
+      DevisHighlight.configure({ multicolor: true }),
     ],
     content: initialTopHtml || '<p></p>',
     onFocus: () => setActiveZone('top'),
@@ -566,8 +753,8 @@ export default function DevisEditorPage() {
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       DevisTextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
+      DevisColor,
+      DevisHighlight.configure({ multicolor: true }),
     ],
     content: initialBottomHtml || '<p></p>',
     onFocus: () => setActiveZone('bottom'),
@@ -590,10 +777,10 @@ export default function DevisEditorPage() {
       Underline,
       TextAlign.configure({ types: ['paragraph'] }),
       DevisTextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
+      DevisColor,
+      DevisHighlight.configure({ multicolor: true }),
     ],
-    content: offerEditorHtmlFromTitle(initialOfferTitle || 'Séjour médical personnalisé'),
+    content: loadOfferEditorHtml(initialOfferTitle, 'Séjour médical personnalisé'),
     onFocus: () => setActiveZone('offer'),
     onUpdate: triggerSave,
   })
@@ -614,54 +801,118 @@ export default function DevisEditorPage() {
       Underline,
       TextAlign.configure({ types: ['paragraph'] }),
       DevisTextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
+      DevisColor,
+      DevisHighlight.configure({ multicolor: true }),
     ],
-    content: offerTotalEditorHtml(initialOfferTotal || '0'),
+    content: loadOfferTotalEditorHtml(initialOfferTotal, '0'),
     onFocus: () => {
       setActiveZone('offerTotal')
       offerTotalTouchedRef.current = true
     },
-    onUpdate: ({ editor }) => {
+    onUpdate: () => {
       offerTotalTouchedRef.current = true
-      const amount = resolveDevisOfferTotal(editor.getText(), 0).amount
-      if (amount > 0) syncBottomToAmount(amount)
       triggerSave()
     },
+  })
+  const makeOfferChromeExts = () => [
+    StarterKit.configure({
+      heading: false,
+      horizontalRule: false,
+      blockquote: false,
+      codeBlock: false,
+      bulletList: false,
+      orderedList: false,
+      listItem: false,
+      paragraph: false,
+    }),
+    DevisParagraph,
+    Underline,
+    TextAlign.configure({ types: ['paragraph'] }),
+    DevisTextStyle,
+    DevisColor,
+    DevisHighlight.configure({ multicolor: true }),
+  ]
+  const editorOfferSub = useEditor({
+    immediatelyRender: false,
+    extensions: makeOfferChromeExts(),
+    content: initialOfferSubtitle || defaultOfferSubtitleHtml(),
+    onFocus: () => setActiveZone('offerSub'),
+    onUpdate: triggerSave,
+  })
+  const editorOfferHeadDesc = useEditor({
+    immediatelyRender: false,
+    extensions: makeOfferChromeExts(),
+    content: initialOfferHeadDesc || defaultOfferHeadDescHtml(),
+    onFocus: () => setActiveZone('offerHeadDesc'),
+    onUpdate: triggerSave,
+  })
+  const editorOfferHeadPrice = useEditor({
+    immediatelyRender: false,
+    extensions: makeOfferChromeExts(),
+    content: initialOfferHeadPrice || defaultOfferHeadPriceHtml(),
+    onFocus: () => setActiveZone('offerHeadPrice'),
+    onUpdate: triggerSave,
   })
   editorTopRef.current = editorTop
   editorBotRef.current = editorBot
   editorOfferRef.current = editorOffer
   editorOfferTotalRef.current = editorOfferTotal
+  editorOfferSubRef.current = editorOfferSub
+  editorOfferHeadDescRef.current = editorOfferHeadDesc
+  editorOfferHeadPriceRef.current = editorOfferHeadPrice
 
-  /* Appliquer le HTML chargé (examens rafraîchis inclus) dans l’éditeur */
+  /* Appliquer le HTML chargé une seule fois (ne pas écraser les edits en cours). */
   useEffect(() => {
-    if (!editorTop || !initialTopHtml) return
-    if (editorTop.getHTML() !== initialTopHtml) {
-      editorTop.commands.setContent(initialTopHtml, { emitUpdate: false })
-    }
-  }, [editorTop, initialTopHtml])
+    if (!editorTop || !initialTopHtml || loading) return
+    if (hydratedRef.current.top === initialTopHtml) return
+    editorTop.commands.setContent(initialTopHtml, { emitUpdate: false })
+    hydratedRef.current.top = initialTopHtml
+  }, [editorTop, initialTopHtml, loading])
   useEffect(() => {
-    if (!editorBot || !initialBottomHtml) return
-    if (editorBot.getHTML() !== initialBottomHtml) {
-      editorBot.commands.setContent(initialBottomHtml, { emitUpdate: false })
-    }
-  }, [editorBot, initialBottomHtml])
+    if (!editorBot || !initialBottomHtml || loading) return
+    if (hydratedRef.current.bot === initialBottomHtml) return
+    editorBot.commands.setContent(initialBottomHtml, { emitUpdate: false })
+    hydratedRef.current.bot = initialBottomHtml
+  }, [editorBot, initialBottomHtml, loading])
   useEffect(() => {
-    if (!editorOffer || !initialOfferTitle) return
-    const next = offerEditorHtmlFromTitle(initialOfferTitle)
-    if (editorOffer.getHTML() !== next) {
-      editorOffer.commands.setContent(next, { emitUpdate: false })
-    }
-  }, [editorOffer, initialOfferTitle])
+    if (!editorOffer || loading) return
+    const next = loadOfferEditorHtml(initialOfferTitle, 'Séjour médical personnalisé')
+    if (hydratedRef.current.offer === next) return
+    editorOffer.commands.setContent(next, { emitUpdate: false })
+    hydratedRef.current.offer = next
+  }, [editorOffer, initialOfferTitle, loading])
   useEffect(() => {
-    if (loading || !editorOfferTotal || !initialOfferTotal) return
-    editorOfferTotal.commands.setContent(offerTotalEditorHtml(initialOfferTotal), { emitUpdate: false })
-    const amount = resolveDevisOfferTotal(initialOfferTotal, 0).amount
-    if (amount > 0) syncBottomToAmount(amount)
+    if (!editorOfferTotal || loading) return
+    const next = loadOfferTotalEditorHtml(initialOfferTotal, '0')
+    if (hydratedRef.current.total === next) return
+    editorOfferTotal.commands.setContent(next, { emitUpdate: false })
+    hydratedRef.current.total = next
+  }, [editorOfferTotal, initialOfferTotal, loading])
+  useEffect(() => {
+    if (!editorOfferSub || loading) return
+    const next = initialOfferSubtitle || defaultOfferSubtitleHtml()
+    if (hydratedRef.current.sub === next) return
+    editorOfferSub.commands.setContent(next, { emitUpdate: false })
+    hydratedRef.current.sub = next
+  }, [editorOfferSub, initialOfferSubtitle, loading])
+  useEffect(() => {
+    if (!editorOfferHeadDesc || loading) return
+    const next = initialOfferHeadDesc || defaultOfferHeadDescHtml()
+    if (hydratedRef.current.headDesc === next) return
+    editorOfferHeadDesc.commands.setContent(next, { emitUpdate: false })
+    hydratedRef.current.headDesc = next
+  }, [editorOfferHeadDesc, initialOfferHeadDesc, loading])
+  useEffect(() => {
+    if (!editorOfferHeadPrice || loading) return
+    const next = ensureTarifHintSalmonHtml(initialOfferHeadPrice || defaultOfferHeadPriceHtml())
+    if (hydratedRef.current.headPrice === next) return
+    editorOfferHeadPrice.commands.setContent(next, { emitUpdate: false })
+    hydratedRef.current.headPrice = next
+  }, [editorOfferHeadPrice, initialOfferHeadPrice, loading])
+  useEffect(() => {
+    if (loading) return
     readyToSaveRef.current = true
-    void flushSave()
-  }, [loading, editorOfferTotal, initialOfferTotal, syncBottomToAmount, flushSave])
+  }, [loading])
 
   /* Sauvegarde manuelle */
   const handleManualSave = async () => {
@@ -721,12 +972,19 @@ export default function DevisEditorPage() {
       || (dvReset?.lignes ?? []).find((l) => l.description?.trim())?.description.trim()
       || 'Séjour médical personnalisé'
     // Régénère depuis cases + tableau prestations (écrase les edits TipTap — voulu)
+    const svReset = sejourPdfFromContext(letterCtx(patient, dvReset ?? undefined))
     editorTop?.commands.setContent(buildTopHtml(patient, dvReset ?? undefined))
     editorBot?.commands.setContent(buildBottomHtml(totalReset, tndPerEur))
-    editorOffer?.commands.setContent(offerEditorHtmlFromTitle(defaultOffer))
+    editorOffer?.commands.setContent(buildOfferDescEditorHtml(defaultOffer, svReset.sejourLine, svReset.typeChambre))
     editorOfferTotal?.commands.setContent(offerTotalEditorHtml(fmtNum(totalReset)))
-    setInitialOfferTitle(defaultOffer)
+    editorOfferSub?.commands.setContent(defaultOfferSubtitleHtml())
+    editorOfferHeadDesc?.commands.setContent(defaultOfferHeadDescHtml())
+    editorOfferHeadPrice?.commands.setContent(defaultOfferHeadPriceHtml())
+    setInitialOfferTitle(buildOfferDescEditorHtml(defaultOffer, svReset.sejourLine, svReset.typeChambre))
     setInitialOfferTotal(fmtNum(totalReset))
+    setInitialOfferSubtitle(defaultOfferSubtitleHtml())
+    setInitialOfferHeadDesc(defaultOfferHeadDescHtml())
+    setInitialOfferHeadPrice(defaultOfferHeadPriceHtml())
     offerTotalTouchedRef.current = false
     readyToSaveRef.current = true
     setSaved(false)
@@ -746,31 +1004,36 @@ export default function DevisEditorPage() {
     getDevisDisplayNumber(dv, patient?.dossierNumber) || patient?.dossierNumber || ''
 
   const interventionLabel = (rap?.interventionsRecommandees ?? []).filter(Boolean).join(' + ')
-  const sejourLine = patient ? sejourPdfFromPatient(patient, dv ?? undefined).sejourLine : ''
   const firstLigneLabel = lignes.find((l) => l.description?.trim())?.description.trim() ?? ''
   const defaultOperationTitle =
     interventionLabel || firstLigneLabel || 'Séjour médical personnalisé'
   const defaultOfferTotal = fmtNum(total)
 
-  /* Si le total devis change (retour modal), resynchroniser sauf si total modifié à la main */
+  /* Si le total devis change (retour modal), resynchroniser tableau + phrase en lettres */
   useEffect(() => {
     if (loading || !readyToSaveRef.current) return
-    if (offerTotalTouchedRef.current) return
     syncOfferTotalFromLignes(total)
+    const bot = editorBotRef.current
+    if (bot) {
+      const current = bot.getHTML()
+      const next = replaceDevisAmountPlaceholders(current, total, tndPerEurRef.current)
+      if (next !== current) bot.commands.setContent(next, { emitUpdate: false })
+    }
   }, [total, loading, syncOfferTotalFromLignes])
 
   /* Construit le HTML complet — reprend l’écran tel quel (pas de resync qui écrase les corrections). */
   const buildDevisFullHtml = () => {
     if (!patient || !dv) return ''
     const topHtml = editorTopRef.current?.getHTML() ?? ''
-    const offer = readOfferTitle(editorOfferRef.current, defaultOperationTitle)
-    const offerTotalDisp = readOfferTotalDisplay(editorOfferTotalRef.current, defaultOfferTotal)
-    const amount = resolveDevisOfferTotal(offerTotalDisp, total).amount
-    const botHtml = replaceDevisAmountPlaceholders(
-      editorBotRef.current?.getHTML() ?? '',
-      amount,
-      tndPerEur,
-    )
+    const offerHtml = editorOfferRef.current?.getHTML() ?? ''
+    const offer = offerHtml.trim().startsWith('<')
+      ? offerHtml
+      : (htmlToPlainText(offerHtml) || defaultOperationTitle)
+    const offerTotalHtml = editorOfferTotalRef.current?.getHTML() ?? ''
+    const offerTotalDisp = offerTotalHtml.trim().startsWith('<')
+      ? offerTotalHtml
+      : (htmlToPlainText(offerTotalHtml) || defaultOfferTotal)
+    const botHtml = editorBotRef.current?.getHTML() ?? ''
 
     return buildGestionnaireDevisExportHtml({
       devis: dv,
@@ -779,8 +1042,12 @@ export default function DevisEditorPage() {
       botHtml,
       operationTitle: offer,
       operationTotal: offerTotalDisp,
+      subtitleHtml: editorOfferSubRef.current?.getHTML() ?? '',
+      headDescHtml: editorOfferHeadDescRef.current?.getHTML() ?? '',
+      headPriceHtml: editorOfferHeadPriceRef.current?.getHTML() ?? '',
       tndPerEur,
       preserveTopHtml: true,
+      preserveBotHtml: true,
     })
   }
 
@@ -863,11 +1130,17 @@ export default function DevisEditorPage() {
             Zone active : <strong>{
               activeZone === 'top'
                 ? 'Corps du document'
-                : activeZone === 'offer'
-                  ? 'Description offre'
-                  : activeZone === 'offerTotal'
-                    ? 'Total offre'
-                    : 'Bas du document'
+                : activeZone === 'offerSub'
+                  ? 'Titre du tableau'
+                  : activeZone === 'offerHeadDesc'
+                    ? 'En-tête Description'
+                    : activeZone === 'offerHeadPrice'
+                      ? 'En-tête Tarif'
+                      : activeZone === 'offer'
+                        ? 'Contenu du tableau'
+                        : activeZone === 'offerTotal'
+                          ? 'Total offre'
+                          : 'Bas du document'
             }</strong>
           </p>
         </div>
@@ -906,15 +1179,24 @@ export default function DevisEditorPage() {
       </div>
 
       {/* ══ Toolbar ══ */}
-      <RichDocToolbar editor={
+      <RichDocToolbar
+        editor={
         activeZone === 'offerTotal'
           ? editorOfferTotal
           : activeZone === 'offer'
             ? editorOffer
-            : activeZone === 'top'
-              ? editorTop
-              : editorBot
-      } />
+            : activeZone === 'offerSub'
+              ? editorOfferSub
+              : activeZone === 'offerHeadDesc'
+                ? editorOfferHeadDesc
+                : activeZone === 'offerHeadPrice'
+                  ? editorOfferHeadPrice
+                  : activeZone === 'top'
+                    ? editorTop
+                    : editorBot
+      }
+        highlightColors={DEVIS_HIGHLIGHT_COLORS}
+      />
 
       {/* ══ Document A4 — aperçu écran / mobile ══ */}
       <div className="editor-scroll flex-1 overflow-auto py-4 sm:py-8 px-2 sm:px-4">
@@ -925,8 +1207,8 @@ export default function DevisEditorPage() {
             minWidth: 794,
             minHeight: 1123,
             padding: '36px 44px 40px',
-            fontFamily: 'Arial, Helvetica, sans-serif',
-            fontSize: 13,
+            fontFamily: DEVIS_FONT_FAMILY,
+            fontSize: 14,
             lineHeight: 1.7,
             color: DEVIS_CHARTE.charcoal,
             boxSizing: 'border-box',
@@ -950,48 +1232,49 @@ export default function DevisEditorPage() {
             <EditorContent editor={editorTop} />
           </div>
 
-          {/* ── Tableau offre (description éditable) ── */}
+          {/* ── Tableau offre (titre, en-têtes et contenu éditables) ── */}
           {lignes.length > 0 && (
             <div
               className={`avoid-break doc-offer-preview${
-                activeZone === 'offer' || activeZone === 'offerTotal' ? ' is-editing' : ''
+                activeZone === 'offer'
+                || activeZone === 'offerTotal'
+                || activeZone === 'offerSub'
+                || activeZone === 'offerHeadDesc'
+                || activeZone === 'offerHeadPrice'
+                  ? ' is-editing'
+                  : ''
               }`}
               style={{ flexShrink: 0 }}
             >
               <div className="offer-block">
-                <p className="section-title">Notre meilleure offre</p>
+                <div className="offer-subtitle doc-section-offer-sub">
+                  <EditorContent editor={editorOfferSub} />
+                </div>
                 <table className="offer-table">
                   <thead>
                     <tr>
-                      <th className="col-desc">Description</th>
-                      <th className="col-price">Tarif</th>
+                      <th className="col-desc doc-section-offer-head">
+                        <EditorContent editor={editorOfferHeadDesc} />
+                      </th>
+                      <th className="col-price doc-section-offer-head">
+                        <EditorContent editor={editorOfferHeadPrice} />
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td className="desc-cell" colSpan={2}>
+                      <td className="desc-cell">
                         <div className="op-title doc-section-offer">
                           <EditorContent editor={editorOffer} />
                         </div>
-                        {sejourLine ? (
-                          <div className="sejour-badge">{sejourLine}</div>
-                        ) : null}
                       </td>
-                    </tr>
-                  </tbody>
-                  <tfoot>
-                    <tr className="offer-total-row">
-                      <td className="total-label">
-                        Total <span className="total-hint">(ferme et définitif)</span>
-                      </td>
-                      <td className="total-price">
+                      <td className="price-cell">
                         <span className="price-amount doc-section-offer-total">
                           <EditorContent editor={editorOfferTotal} />
                         </span>
-                        <span className="price-currency">dt</span>
                       </td>
                     </tr>
-                  </tfoot>
+                  </tbody>
                 </table>
               </div>
             </div>
@@ -1004,8 +1287,24 @@ export default function DevisEditorPage() {
 
           <div className="avoid-break" style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
             <div style={{ textAlign: 'right' }}>
-              <p style={{ fontWeight: 700, fontSize: 11.5, margin: 0 }}>{DEVIS_SIGNATURE.cabinet}</p>
-              <p style={{ fontSize: 10, color: DEVIS_CHARTE.gray, margin: '1px 0 0' }}>{DEVIS_SIGNATURE.specialty}</p>
+              <p style={{
+                fontWeight: DEVIS_SIGNATURE_BLOCK_STYLE.fontWeight,
+                fontSize: DEVIS_SIGNATURE_BLOCK_STYLE.nameFontSize,
+                color: DEVIS_SIGNATURE_BLOCK_STYLE.color,
+                margin: 0,
+              }}
+              >
+                {DEVIS_SIGNATURE_BLOCK.name}
+              </p>
+              <p style={{
+                fontWeight: DEVIS_SIGNATURE_BLOCK_STYLE.fontWeight,
+                fontSize: DEVIS_SIGNATURE_BLOCK_STYLE.specialtyFontSize,
+                color: DEVIS_SIGNATURE_BLOCK_STYLE.color,
+                margin: '1px 0 0',
+              }}
+              >
+                {DEVIS_SIGNATURE_BLOCK.specialty}
+              </p>
               <img
                 src="/signature.jpg"
                 alt="Signature"
@@ -1016,7 +1315,6 @@ export default function DevisEditorPage() {
                   img.style.display = 'none'
                 }}
               />
-              <div style={{ marginTop: 3, width: 110, height: 1, borderBottom: `1px solid ${DEVIS_CHARTE.rose}`, marginLeft: 'auto' }} />
             </div>
           </div>
 

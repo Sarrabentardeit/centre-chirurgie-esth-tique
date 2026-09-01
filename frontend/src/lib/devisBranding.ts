@@ -6,6 +6,19 @@ export const DEVIS_SIGNATURE = {
   tagline: 'SCULPTURE, SMOOTH & SMILE',
 } as const
 
+/** Bloc signature en bas de lettre (réf. Word). */
+export const DEVIS_SIGNATURE_BLOCK = {
+  name: 'Dr CHENNOUFI Mehdi',
+  specialty: 'Chirurgie Esthétique',
+} as const
+
+export const DEVIS_SIGNATURE_BLOCK_STYLE = {
+  color: '#777777',
+  nameFontSize: '13px',
+  specialtyFontSize: '12px',
+  fontWeight: 700,
+} as const
+
 export const DEVIS_CONTACT = {
   phone: '54 776 796',
   email: 'plastic.surgery.drchennoufi1@gmail.com',
@@ -68,13 +81,13 @@ export function buildDevisContactFooterHtml(): string {
 }
 
 export function buildDevisSignatureHtml(sigImgUrl: string): string {
-  const { cabinet, specialty } = DEVIS_SIGNATURE
+  const { name, specialty } = DEVIS_SIGNATURE_BLOCK
+  const { color, nameFontSize, specialtyFontSize, fontWeight } = DEVIS_SIGNATURE_BLOCK_STYLE
   return `
         <div class="signature-block">
-          <div class="sig-name">${cabinet}</div>
-          <div class="sig-sub">${specialty}</div>
+          <div class="sig-name" style="font-weight:${fontWeight};font-size:${nameFontSize};color:${color}">${name}</div>
+          <div class="sig-sub" style="font-weight:${fontWeight};font-size:${specialtyFontSize};color:${color}">${specialty}</div>
           <img class="sig-img" src="${sigImgUrl}" alt="Signature" onerror="this.style.display='none'"/>
-          <div class="sig-line"></div>
         </div>`
 }
 
@@ -206,7 +219,7 @@ export function layoutDevisForPrint(doc: Document, pageHeight = DEVIS_PAGE_HEIGH
       const tag = el.tagName.toLowerCase()
       if (tag === 'hr' || /^h[1-6]$/.test(tag)) return true
       const cls = String(el.className || '')
-      if (/\b(devis-heading|diagnostic-op-title|section-title|devis-ref-title|section-hr)\b/.test(cls)) {
+      if (/\b(devis-heading|diagnostic-op-title|diag-visage-op-title|section-title|devis-ref-title|section-hr)\b/.test(cls)) {
         return true
       }
       const text = textOf(el)

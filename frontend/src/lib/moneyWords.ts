@@ -1,3 +1,5 @@
+import { normalizeDevisBottomFluoInHtml, offerExchangeDisclaimerFluoHtml } from '@/lib/devisCharte'
+
 /** Taux indicatif TND → EUR (repli si API indisponible). */
 export const DEFAULT_TND_PER_EUR = 3.35
 
@@ -134,6 +136,14 @@ export function buildDevisAmountSentence(
   return `La totalité des frais de votre séjour médical s'élève à ${letters} Dinars Tunisiens (${totalStr} dt ≈ ${euroStr}).`
 }
 
+/** Phrase de total sous le tableau offre (texte + mention cours de change en fluo gris). */
+export function buildDevisAmountSentenceHtml(
+  totalTnd: number,
+  tndPerEur = DEFAULT_TND_PER_EUR,
+): string {
+  return `${buildDevisAmountSentence(totalTnd, tndPerEur)} ${offerExchangeDisclaimerFluoHtml()}`
+}
+
 /** Met à jour la phrase de total (avec € approx.) dans un HTML déjà sauvegardé. */
 export function refreshDevisAmountSentenceInHtml(
   html: string,
@@ -141,28 +151,34 @@ export function refreshDevisAmountSentenceInHtml(
   tndPerEur = DEFAULT_TND_PER_EUR,
 ): string {
   if (!html || !Number.isFinite(totalTnd)) return html
-  const fresh = buildDevisAmountSentence(totalTnd, tndPerEur)
+  const fresh = buildDevisAmountSentenceHtml(totalTnd, tndPerEur)
   const re =
-    /La totalité des frais de votre séjour médical s['’]élève à[\s\S]*?Dinars Tunisiens\s*\([^)]*\)\.?/gi
+    /La totalité des frais de votre séjour médical s['’]élève à[\s\S]*?(?:<mark class="offer-fluo-disclaimer"[\s\S]*?<\/mark>|selon le cours de change du jour[\s\S]*?arrivée\.)/gi
 
   if (re.test(html)) {
-    return html.replace(re, fresh)
+    return normalizeDevisBottomFluoInHtml(html.replace(re, fresh))
   }
 
-  if (typeof window === 'undefined') return html
+  const plainRe =
+    /La totalité des frais de votre séjour médical s['’]élève à[\s\S]*?Dinars Tunisiens\s*\([^)]*\)\.?/gi
+  if (plainRe.test(html)) {
+    return normalizeDevisBottomFluoInHtml(html.replace(plainRe, fresh))
+  }
+
+  if (typeof window === 'undefined') return normalizeDevisBottomFluoInHtml(html)
   try {
     const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
     const root = doc.getElementById('__root')
-    if (!root) return html
+    if (!root) return normalizeDevisBottomFluoInHtml(html)
     for (const p of Array.from(root.querySelectorAll('p'))) {
       const t = (p.textContent ?? '').replace(/\s+/g, ' ').trim()
       if (/totalité des frais de votre séjour médical/i.test(t)) {
-        p.textContent = fresh
-        return root.innerHTML
+        p.innerHTML = fresh
+        return normalizeDevisBottomFluoInHtml(root.innerHTML)
       }
     }
   } catch {
     /* ignore */
   }
-  return html
+  return normalizeDevisBottomFluoInHtml(html)
 }

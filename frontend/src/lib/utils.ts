@@ -118,10 +118,52 @@ export function formatCurrency(amount: number, _currency: CurrencyUnit | string 
   }).format(amount)
 }
 
-const MC_REFERENCE_RE = /^MC-\d{2}-\d{3}-\d{4}$/
+const MC_REFERENCE_BASE_RE = /^MC-(\d{2})-(\d{3})-(\d{4})$/
+const MC_REFERENCE_DISPLAY_RE = /^MC-(\d{2})-(\d{3})([A-Z])?-(\d{4})$/
 
 function isMcReference(value: string | null | undefined): boolean {
-  return !!value?.trim() && MC_REFERENCE_RE.test(value.trim())
+  return !!value?.trim() && MC_REFERENCE_DISPLAY_RE.test(value.trim())
+}
+
+export function parseMcReference(
+  numero: string,
+): { month: number; seq: number; year: number; letter?: string } | null {
+  const trimmed = numero.trim()
+  let m = trimmed.match(MC_REFERENCE_BASE_RE)
+  if (m) {
+    return { month: parseInt(m[1], 10), seq: parseInt(m[2], 10), year: parseInt(m[3], 10) }
+  }
+  m = trimmed.match(MC_REFERENCE_DISPLAY_RE)
+  if (!m) return null
+  return {
+    month: parseInt(m[1], 10),
+    seq: parseInt(m[2], 10),
+    year: parseInt(m[4], 10),
+    letter: m[3] || undefined,
+  }
+}
+
+/** Retire la lettre de version d’une référence MC (stockage base). */
+export function normalizeMcReferenceBase(numero: string): string {
+  const parsed = parseMcReference(numero)
+  if (!parsed) return numero.trim()
+  const mm = String(parsed.month).padStart(2, '0')
+  const nnn = String(parsed.seq).padStart(3, '0')
+  return `MC-${mm}-${nnn}-${parsed.year}`
+}
+
+/**
+ * Référence MC avec lettre de version intégrée :
+ * v1 → MC-07-002-2026 · v2 → MC-07-002B-2026 · v24 → MC-07-002X-2026
+ */
+export function formatMcReferenceWithVersion(baseNumero: string, version: number): string {
+  const base = normalizeMcReferenceBase(baseNumero)
+  const parsed = parseMcReference(base)
+  if (!parsed) return baseNumero.trim()
+  const letter = getDevisVersionLetter(version)
+  const mm = String(parsed.month).padStart(2, '0')
+  const nnn = String(parsed.seq).padStart(3, '0')
+  return letter ? `MC-${mm}-${nnn}${letter}-${parsed.year}` : `MC-${mm}-${nnn}-${parsed.year}`
 }
 
 /** Référence dossier affichée (MC-MM-NNN-AAAA, alignée sur le devis). */
@@ -163,13 +205,12 @@ export function formatDevisTitle(
   dossierNumber?: string | null,
 ): string {
   const num = getDevisDisplayNumber(devis, dossierNumber)
-  const base = num ? `Devis ${num}` : 'Devis'
-  const v = devis?.version
-  const versionNum =
-    v != null && Number.isFinite(v) && v >= 1 ? Math.floor(v) : num ? 1 : null
-  if (versionNum == null) return base
-  const letter = getDevisVersionLetter(versionNum)
-  return letter ? `${base} -${letter}` : base
+  if (!num) return 'Devis'
+  const v =
+    devis?.version != null && Number.isFinite(devis.version) && devis.version >= 1
+      ? Math.floor(devis.version)
+      : 1
+  return `Devis ${formatMcReferenceWithVersion(num, v)}`
 }
 
 /**
@@ -183,17 +224,15 @@ export function getDevisVersionLetter(version: number): string | null {
   return String.fromCharCode(code)
 }
 
-/** Nom affiché d’un devis : `MC-… NOM PRENOM` (+ ` -B`, ` -C`, … dès la 2ᵉ version). */
+/** Nom affiché d’un devis : `MC-07-002B-2026 NOM PRENOM`. */
 export function formatDevisListName(
   dossierNumber: string | null | undefined,
   patientFullName: string | null | undefined,
   version: number,
 ): string {
-  const dossier = dossierNumber?.trim() || 'Dossier'
+  const ref = formatMcReferenceWithVersion(dossierNumber?.trim() || 'Dossier', version)
   const name = patientFullName?.trim() || ''
-  const base = name ? `${dossier} ${name}` : dossier
-  const letter = getDevisVersionLetter(version)
-  return letter ? `${base} -${letter}` : base
+  return name ? `${ref} ${name}` : ref
 }
 
 /** Nom de fichier PDF (export / pièce jointe) selon la même règle. */

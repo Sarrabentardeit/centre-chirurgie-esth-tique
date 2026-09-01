@@ -48,10 +48,15 @@ const SIL_RESULT =
 const SIL_CONV =
   'Convalescence plus facile et confortable car la technique utilisée est moins invasive.'
 const SIL_DRAINAGE = 'Prévoir 6 semaines de drainage lymphatique en post opératoire.'
+const SIL_BBL_DRAINAGE =
+  'Prévoir 6 semaines de drainage lymphatique des zones aspirées et non des zones injectées en post opératoire.'
 const SIL_AVION =
   'Prévoir pour le retour en avion et pendant les 15 premiers jours des bas de contention anti-varices.'
 const SIL_NB =
   'N.B : Pour les Lipo, il est assez fréquent d’avoir recours à des transfusions post opératoires donc prévoir un budget supplémentaire de 250DT par poche de sang en cas de besoin.'
+
+const VIS_AVION =
+  'Prévoir pour le retour en avion et pendant les 15 premiers jours des bas de contention anti-varices.'
 
 function silContention(kind: 'Panty/gaine' | 'Panty' | 'Manchettes'): string {
   return `Nécessité de porter un vêtement compressif (fourni par le chirurgien) pendant 6 semaines après l’intervention. (${kind})`
@@ -190,6 +195,59 @@ export const DIAGNOSTIC_OPERATIONS: DiagnosticOperation[] = [
     isAutre: true,
   },
 
+  // ── Visage (textes du document Devis Type Visage) ─────────────────────────
+  {
+    id: 'vis-dpfl',
+    category: 'visage',
+    label: 'Deep Plane Face Lift (DPFL)',
+    template: lines(
+      'Le vieillissement du visage entraîne progressivement une perte de tonicité et un relâchement des tissus. Il se manifeste notamment par l’apparition de bajoues, de cordes platysmales au niveau du cou, une perte de définition de l’ovale du visage et un relâchement des structures musculaires et des tissus profonds du visage et du cou.',
+      'Le Deep Plane Face Lift est une technique de lifting permettant de repositionner en profondeur et de façon naturelle les tissus du visage et du cou afin de redéfinir l’ovale, atténuer les bajoues et améliorer le contour cervico-facial, tout en conservant une expression naturelle.',
+      'Les cicatrices sont dissimulées dans les tempes chevelues, autour de l’oreille, puis se prolongent discrètement derrière l’oreille plongeant dans le cuir chevelu.',
+      'Leur évolution est progressive et leur visibilité très limitée au début, diminue généralement avec le temps et finit par disparaître au bout de quelques semaines.',
+      'L’évolution est marquée par quelques œdèmes et bleus surtout au bas du cou pendant 10 jours.',
+      'Le résultat définitif sera stabilisé au bout de 12 à 16 semaines.',
+      'Prévoir 6 semaines de drainage lymphatique en post opératoire.',
+    ),
+  },
+  {
+    id: 'vis-bleph-sup',
+    category: 'visage',
+    label: 'Blépharoplastie supérieure',
+    template: lines(
+      'Le vieillissement des paupières entraîne progressivement un excès de peau au niveau des paupières supérieures, donnant au regard un aspect plus lourd et fatigué.',
+      'Cet excès peut parfois s’accompagner d’une petite accumulation graisseuse au coin interne.',
+      'La blépharoplastie supérieure consiste à retirer de manière mesurée l’excès de peau et, si nécessaire, la petite poche graisseuse afin de dégager le regard et lui redonner un aspect plus ouvert et reposé, tout en conservant son expression naturelle.',
+      'La cicatrice est dissimulée dans le pli naturel de la paupière supérieure, ce qui la rend généralement très discrète une fois cicatrisée.',
+      'Les fils seront retirés au bout de 07 jours.',
+      'Les bleus et œdèmes persistent pendant 15 jours.',
+      'Le résultat définitif sera stabilisé au bout de 12 à 16 semaines.',
+      VIS_AVION,
+    ),
+  },
+  {
+    id: 'vis-bleph-inf',
+    category: 'visage',
+    label: 'Blépharoplastie inférieure',
+    template: lines(
+      'Le vieillissement de la paupière inférieure se traduit principalement par l’apparition de poches sous les yeux, associées à un relâchement cutané et musculaire donnant au regard un aspect fatigué.',
+      'La blépharoplastie inférieure permet de traiter les poches graisseuses, de corriger l’excès cutané et le relâchement musculaire.',
+      'Ceci permet de rajeunir et lisser le contour de l’œil, tout en conservant un résultat naturel.',
+      'Des œdèmes et des bleus seront présents pendant 15 jours.',
+      'La cicatrice est située juste sous les cils et se prolonge discrètement dans le pli de la patte d’oie.',
+      'La cicatrice sera rapidement invisible au bout de quelques semaines.',
+      'Le résultat définitif sera stabilisé à partir de 12 à 16 semaines.',
+      VIS_AVION,
+    ),
+  },
+  {
+    id: 'vis-autre',
+    category: 'visage',
+    label: 'Autre (visage à préciser)',
+    template: '',
+    isAutre: true,
+  },
+
   // ── Silhouette (textes du document Devis Type silhouette) ─────────────────
   {
     id: 'sil-lipo-abdominoplastie',
@@ -248,18 +306,20 @@ export const DIAGNOSTIC_OPERATIONS: DiagnosticOperation[] = [
     category: 'silhouette',
     label: 'BBL',
     template: lines(
-      'AU NIVEAU DU CERCLE ABDOMINALE, vous présentez des lipoméries (localisations graisseuses)',
-      'L’intervention indiquée est une Lipoaspiration assistée au Vaser et MICROAIRE HD avec lipofilling fessier.',
+      'AU NIVEAU DE LA SILHOUETTE, vous présentez des lipoméries (localisations graisseuses) au niveau du dos des flancs et de l’abdomen avec un volume fessier que vous jugez insuffisant.',
+      'L’intervention indiquée est une Lipoaspiration assistée au Vaser et MICROAIRE HD 360 degrés (dos, flancs et abdomen) avec Lipofilling fessier (injection de graisse dans les fesses)',
       'Cette intervention permettra dans un premier temps d’aspirer la graisse en excédent pour affiner et redéfinir la silhouette.',
-      'La graisse aspirée sera traitée et réinjectée au niveau des fesses pour affiner leur volume. Au fil du temps, elle peut parfois se résorber entre 30 % à 40 % et la résorption peut être asymétrique.',
+      'La graisse aspirée sera traitée et réinjectée au niveau des fesses pour augmenter et harmoniser leur volume.',
+      'L’injection de graisse se fait dans le issus sous cutanée et jamais dans le muscle fessier. Ceci permet de diminuer le risque d’embolie graisseuse.',
+      'La combinaison de la lipoaspiration des flancs et le lipofilling fessier augmentera le contraste entre ses deux régions et marquera de manière très significative votre taille.',
+      'La graisse injectée peut parfois se résorber jusqu’à 30 % ou 40 % et la résorption peut parfois être asymétrique.',
       'Le risque majeur de cette intervention est l’embolie pulmonaire graisseuse (passage de graisse dans les vaisseaux sanguins) qui peut être parfois fatale.',
       'Le voyage n’est pas recommandé avant dix jours après l’intervention.',
       SIL_OED_DIGITS,
       SIL_RESULT,
-      SIL_CONV,
-      'Un coussin d’assise spécial est recommandé pendant les 6 premières semaines pour diminuer la pression sur la graisse injectée en position assise et allongée.',
+      'Un coussin d’assise spécial est recommandé pendant les 6 premières semaines pour diminuer la pression sur la graisse injectée en position assise et allongée sur le dos.',
       silContention('Panty'),
-      SIL_DRAINAGE,
+      SIL_BBL_DRAINAGE,
       SIL_AVION,
       SIL_NB,
     ),

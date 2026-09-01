@@ -40,11 +40,11 @@ function initials(name: string) {
   return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
 }
 
-function sejourLineFromDevis(d: DevisWithPatient) {
+function sejourPdfFromDevis(d: DevisWithPatient) {
   return sejourPdfFromContext({
     dossierNumber: d.patient.dossierNumber,
     activeDevis: d,
-  }).sejourLine
+  })
 }
 
 function letterParts(dv: DevisWithPatient) {
@@ -218,7 +218,9 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
   const sej = parseSejourMeta(dv.notesSejour)
   const nbAdultesDevis = nbAdultesDevisFromAccompagnants(sej.nbAdultes || '0')
   const hasSej = !!(sej.cliniqueNom || sej.cliniqueNuits || sej.hotelNom || sej.hotelNuits)
-  const sejourLine = sejourLineFromDevis(dv)
+  const sejourPdf = sejourPdfFromDevis(dv)
+  const sejourLine = sejourPdf.sejourLine
+  const typeChambre = sejourPdf.typeChambre
 
   const raw = dv.customContent ?? ''
   const split = splitDevisCustomContent(raw)
@@ -451,9 +453,11 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
                     </button>
                   </div>
                   <div className="p-3 sm:p-4">
-                    <div className="rounded-lg bg-white border border-black/5 px-4 py-5 sm:px-6 sm:py-6 space-y-4 text-[13px] leading-[1.7] text-[#282727]
-                      [&_.devis-heading]:my-2.5 [&_.devis-heading]:border-0 [&_.devis-heading]:bg-transparent
-                      [&_.devis-heading]:px-0 [&_.devis-heading]:py-0 [&_.devis-heading]:text-[#81572d] [&_.devis-heading]:font-bold
+                    <div className="rounded-lg bg-white border border-black/5 px-4 py-5 sm:px-6 sm:py-6 space-y-4 text-[14px] leading-[1.7] text-[#282727]
+                      [&_.devis-ref-title_span]:text-[20px]
+                      [&_.devis-heading]:mt-5 [&_.devis-heading]:mb-2 [&_.devis-heading]:border-0 [&_.devis-heading]:bg-transparent
+                      [&_.devis-heading]:px-0 [&_.devis-heading]:py-0 [&_.devis-heading]:text-[18px] [&_.devis-heading]:text-[#555555] [&_.devis-heading]:font-bold [&_.devis-heading_u]:underline
+                      [&_.devis-field-label--salmon]:text-[15px] [&_.devis-field-label--salmon]:text-[#FF7C80] [&_.devis-field-label--salmon]:font-bold
                       [&_p]:my-0 [&_p]:mb-2
                       [&_ol]:my-2 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:marker:text-[#282727]
                       [&_ul]:my-0 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5
@@ -467,7 +471,11 @@ function DetailModal({ dv, onClose }: { dv: DevisWithPatient; onClose: () => voi
                             __html: buildDevisOfferBlockHtml({
                               operationTitle: offerDescription,
                               sejourLine,
+                              typeChambre,
                               totalFormatted: offerTotalDisplay,
+                              subtitleHtml: split.offerSubtitle,
+                              headDescHtml: split.offerHeadDesc,
+                              headPriceHtml: split.offerHeadPrice,
                             }),
                           }}
                         />

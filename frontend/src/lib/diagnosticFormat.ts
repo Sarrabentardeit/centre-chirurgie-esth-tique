@@ -11,7 +11,6 @@ const TITLE_RE = /^(\d+)\s*[-–.]\s+(.+)$/
 
 const ITALIC_PREFIXES = [
   'le choix de la forme',
-  'nécessité de porter',
   'des auto-massages',
   'des auto massages',
   'des automassages',
@@ -20,6 +19,87 @@ const ITALIC_PREFIXES = [
 const FLUO_RE = /prévoir pour le retour en avion|prévoir 6 semaines de drainage/i
 
 const DARK_HI_RE = /^n\.b\b/i
+
+/** Saumon « AU NIVEAU… » — aligné sur DEVIS_REF_TITLE_STYLE (#FF7C80). */
+export const DIAG_ZONE_SALMON = '#FF7C80'
+
+/** Gris corps diagnostic visage (réf. Word Devis Type Visage — #595959). */
+export const DIAG_VISAGE_GRAY = '#595959'
+
+/** Espacement vertical entre deux diagnostics — exactement 2× Entrée. */
+export const DIAGNOSTIC_BLOCK_GAP_HTML =
+  '<p class="diag-block-gap devis-spacer"></p>\n<p class="diag-block-gap devis-spacer"></p>'
+
+function isEmptySpacerParagraph(attrs: string, text: string): boolean {
+  return !text && (/\bdiag-block-gap\b/.test(attrs) || /\bdevis-spacer\b/.test(attrs))
+}
+
+/** CSS — pas de marge supplémentaire (2 paragraphes vides standard). */
+export function diagnosticBlockGapCss(..._scopes: string[]): string {
+  return ''
+}
+
+/** Insère un espace avant chaque nouveau diagnostic (zone AU NIVEAU / Au niveau). */
+export function normalizeDiagnosticBlockGapsInHtml(html: string): string {
+  if (!html.trim()) return html
+  const gapRun = new RegExp(
+    String.raw`(?:<p\b[^>]*\b(?:diag-block-gap|devis-spacer)\b[^>]*>\s*(?:<br\b[^>]*\/?>)?\s*<\/p>\s*){3,}`,
+    'gi',
+  )
+  let out = html.replace(gapRun, `${DIAGNOSTIC_BLOCK_GAP_HTML}\n`)
+  let zoneIndex = 0
+  let visageTitleIndex = 0
+  let prevWasGap = false
+  return out.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (full, attrs, inner) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (isEmptySpacerParagraph(attrs, text)) {
+      prevWasGap = true
+      return full
+    }
+    if (!isDiagnosticZoneLine(text)) {
+      if (/\bdiag-visage-op-title\b/.test(attrs)) {
+        if (visageTitleIndex > 0 && !prevWasGap) {
+          prevWasGap = false
+          return `${DIAGNOSTIC_BLOCK_GAP_HTML}\n${full}`
+        }
+        visageTitleIndex++
+        prevWasGap = false
+        return full
+      }
+      prevWasGap = false
+      return full
+    }
+    zoneIndex++
+    if (zoneIndex > 1 && !prevWasGap) {
+      prevWasGap = false
+      return `${DIAGNOSTIC_BLOCK_GAP_HTML}\n${full}`
+    }
+    prevWasGap = false
+    return full
+  })
+}
+
+function isDiagnosticZoneLine(text: string): boolean {
+  const t = text.replace(/\s+/g, ' ').trim()
+  return /^(AU NIVEAU|Au niveau)\b/i.test(t) && /vous présentez/i.test(t)
+}
+
+function isVisageOperationTitle(title: string): boolean {
+  const t = title.replace(/\s+/g, ' ').trim()
+  if (!t) return false
+  return DIAGNOSTIC_OPERATIONS.some(
+    (op) => op.category === 'visage' && !op.isAutre && op.label.replace(/\s+/g, ' ').trim() === t,
+  )
+}
+
+function paraVisageOpTitle(title: string): string {
+  const safe = escapeHtml(title.trim().toUpperCase())
+  return `<p class="diag-visage-op-title"><strong><span style="color:${DIAG_VISAGE_GRAY};font-weight:700">${safe}</span></strong></p>`
+}
+
+function paraVisageBody(line: string): string {
+  return `<p class="diag-visage-body"><span style="color:${DIAG_VISAGE_GRAY}">${applyBold(escapeHtml(line))}</span></p>`
+}
 
 /** Expressions en gras dans le document Word (les plus longues d’abord). */
 const BOLD_PHRASES = [
@@ -46,7 +126,11 @@ const BOLD_PHRASES = [
   'hypotrophie mammaire',
   'Réduction Mammaire',
   'écartement des muscles droits de l’abdomen : DIASTASIS',
+  'Lipoaspiration assistée au Vaser et MICROAIRE HD 360 degrés (dos, flancs et abdomen)',
+  'Lipofilling fessier (injection de graisse dans les fesses)',
   'Lipoaspiration assistée au Vaser et MICROAIRE HD avec lipofilling fessier',
+  'aspirer la graisse en excédent',
+  'augmenter et harmoniser leur volume',
   'Lipoaspiration assistée au Vaser et MICROAIRE HD',
   'Lipoaspiration de la graisse du cercle abdominal',
   'Abdominoplastie (lifting du ventre)',
@@ -131,7 +215,9 @@ export function splitDiagnosticBlocks(text: string): DiagnosticBlock[] {
 function isDarkHiLine(line: string): boolean {
   const t = line.trim()
   if (DARK_HI_RE.test(t)) return true
-  return /^nécessité de porter/i.test(t) && /(panty|gaine|manchettes)/i.test(t)
+  if (/^nécessité de porter un vêtement compressif/i.test(t)) return true
+  if (/^n\.b\s*:/i.test(t) && /lipo/i.test(t)) return true
+  return /^nécessité de porter/i.test(t) && /(panty|gaine|manchettes|soutien-gorge)/i.test(t)
 }
 
 function splitZoneLine(line: string): { lead: string; rest: string } | null {
@@ -144,16 +230,183 @@ function splitZoneLine(line: string): { lead: string; rest: string } | null {
 
 function paraDarkHi(text: string): string {
   const bg = PLANNING_DOC.hiDark
-  return `<p><mark data-color="${bg}" style="background-color:${bg};color:#ffffff;-webkit-print-color-adjust:exact;print-color-adjust:exact">${escapeHtml(text)}</mark></p>`
+  const safe = escapeHtml(text)
+  return `<p><mark class="diag-dark-fluo" data-color="${bg}" style="background-color:${bg};color:#ffffff"><span style="color:#ffffff">${safe}</span></mark></p>`
+}
+
+/** CSS partagé — fluo gris foncé diagnostic (texte blanc). */
+export function diagnosticDarkFluoCss(
+  ...args: Array<string | { editable?: boolean }>
+): string {
+  const opts = args.find((a): a is { editable?: boolean } => typeof a === 'object' && a !== null)
+  const scopes = args.filter((a): a is string => typeof a === 'string')
+  const editable = opts?.editable === true
+  const selectors = scopes.flatMap((s) => [
+    `${s} mark.diag-dark-fluo`,
+    `${s} .diag-dark-fluo`,
+    `${s} mark[data-color="${PLANNING_DOC.hiDark}"]`,
+    `${s} mark[data-color="#808080"]`,
+  ]).join(',\n')
+  const spanSelectors = scopes.flatMap((s) => [
+    `${s} mark.diag-dark-fluo span`,
+    `${s} .diag-dark-fluo span`,
+  ]).join(',\n')
+  if (editable) {
+    return `
+${selectors} {
+  background-color: ${PLANNING_DOC.hiDark};
+  color: #ffffff;
+  padding: 1px 4px;
+  border-radius: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+`
+  }
+  return `
+${selectors} {
+  background-color: ${PLANNING_DOC.hiDark} !important;
+  color: #ffffff !important;
+  padding: 1px 4px;
+  border-radius: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+${spanSelectors} {
+  color: #ffffff !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+`
+}
+
+/** Corrige le HTML sauvegardé (fluo gris foncé → texte blanc). */
+export function normalizeDiagnosticDarkFluoInHtml(html: string): string {
+  if (!html.trim()) return html
+  let out = html.replace(
+    /<p>\s*<mark([^>]*class="[^"]*diag-dark-fluo[^"]*"[^>]*)>([\s\S]*?)<\/mark>\s*<\/p>/gi,
+    (_full, _attrs, inner) => {
+      const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      return text ? paraDarkHi(text) : _full
+    },
+  )
+  out = out.replace(
+    /<p>\s*<mark([^>]*(?:background-color:\s*#808080|data-color="#808080")[^>]*)>([\s\S]*?)<\/mark>\s*<\/p>/gi,
+    (full, _attrs, inner) => {
+      const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      if (!text) return full
+      if (!/^(nécessité de porter|n\.b\s*:)/i.test(text)) return full
+      return paraDarkHi(text)
+    },
+  )
+  out = out.replace(
+    /<p>\s*((?:Nécessité de porter|N\.B\s*:)[\s\S]*?)<\/p>/gi,
+    (full, inner) => {
+      const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      if (!isDarkHiLine(text)) return full
+      return paraDarkHi(text)
+    },
+  )
+  return out
+}
+
+/**
+ * Ajoute zone-lead / fluo seulement là où la structure charte manque.
+ * Ne reformate pas le HTML déjà stylé (couleurs / polices modifiées dans l’éditeur).
+ */
+export function upgradeDiagnosticMissingLayoutInHtml(html: string): string {
+  if (!html.trim()) return html
+  return html.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (full, _attrs, inner) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!text) return full
+    if (isDiagnosticZoneLine(text) && !/\bdiag-zone-lead\b/.test(inner)) {
+      const zone = splitZoneLine(text)
+      if (zone) return paraPinkLead(zone.lead, zone.rest)
+    }
+    if (/<mark\b/i.test(inner)) return full
+    if (isDarkHiLine(text)) return paraDarkHi(text)
+    if (FLUO_RE.test(text)) return paraSalmonHi(text)
+    return full
+  })
+}
+
+/** CSS — libellé zone diagnostic (AU NIVEAU…) en saumon, visible en PDF. */
+export function diagnosticZoneLeadCss(
+  ...args: Array<string | { editable?: boolean }>
+): string {
+  const opts = args.find((a): a is { editable?: boolean } => typeof a === 'object' && a !== null)
+  const scopes = args.filter((a): a is string => typeof a === 'string')
+  const editable = opts?.editable === true
+  const imp = editable ? '' : ' !important'
+  const selectors = scopes
+    .flatMap((s) => (
+      editable
+        ? [`${s} .diag-zone-lead`, `${s} span.diag-zone-lead`]
+        : [
+          `${s} .diag-zone-lead`,
+          `${s} span.diag-zone-lead`,
+          `${s} strong.diag-zone-lead`,
+          `${s} strong.diag-zone-lead span`,
+        ]
+    ))
+    .join(',\n')
+  return `
+${selectors} {
+  color: ${DIAG_ZONE_SALMON}${imp};
+  font-weight: ${editable ? '700' : '700 !important'};
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+`
+}
+
+/** CSS — titres opération visage (gras, capitales, gris Word). */
+export function diagnosticVisageCss(...scopes: string[]): string {
+  const titleSelectors = scopes.flatMap((s) => [
+    `${s} .diag-visage-op-title`,
+    `${s} .diag-visage-op-title span`,
+  ]).join(',\n')
+  const bodySelectors = scopes.flatMap((s) => [
+    `${s} .diag-visage-body`,
+    `${s} .diag-visage-body span`,
+  ]).join(',\n')
+  return `
+${titleSelectors} {
+  color: ${DIAG_VISAGE_GRAY} !important;
+  font-weight: 700 !important;
+  font-size: 15px;
+  margin: 0 0 8px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+${bodySelectors} {
+  color: ${DIAG_VISAGE_GRAY} !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+`
+}
+
+/** Corrige le HTML sauvegardé (zone AU NIVEAU → saumon + MAJ). */
+export function normalizeDiagnosticZoneLeadInHtml(html: string): string {
+  if (!html.trim()) return html
+  return html.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (full, _attrs, inner) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!isDiagnosticZoneLine(text)) return full
+    const zone = splitZoneLine(text)
+    if (!zone) return full
+    return paraPinkLead(zone.lead, zone.rest)
+  })
 }
 
 function paraPinkLead(lead: string, rest: string): string {
-  const leadHtml = `<strong style="color:${PLANNING_DOC.pink}">${escapeHtml(lead)}</strong>`
+  const leadUpper = lead.trim().toUpperCase()
+  const leadHtml = `<span class="diag-zone-lead" style="color:${DIAG_ZONE_SALMON};font-weight:700">${escapeHtml(leadUpper)}</span>`
   const restHtml = rest ? ` ${applyBold(escapeHtml(rest))}` : ''
   return `<p>${leadHtml}${restHtml}</p>`
 }
 
-function formatBodyLineHtml(line: string): string {
+function formatBodyLineHtml(line: string, opts?: { visage?: boolean }): string {
   const t = line.trim()
   if (!t) return '<p></p>'
   if (FLUO_RE.test(t)) return paraSalmonHi(t)
@@ -163,6 +416,7 @@ function formatBodyLineHtml(line: string): string {
   if (isItalicLine(t)) {
     return `<p><em class="diag-italic" style="color:#282727">${escapeHtml(t)}</em></p>`
   }
+  if (opts?.visage) return paraVisageBody(t)
   return `<p>${applyBold(escapeHtml(t))}</p>`
 }
 
@@ -180,6 +434,11 @@ function splitBodyIntoOperations(body: string): string[] {
   if (!t) return []
   const byExam = t.split(/\n+(?=À l['’]examen des photos)/i).map((s) => s.trim()).filter(Boolean)
   if (byExam.length > 1) return byExam
+  const byZone = t
+    .split(/\n+(?=(?:AU NIVEAU|Au niveau)\b[^\n]*vous présentez)/i)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (byZone.length > 1) return byZone
   const byFluo = t.split(/(?<=anti-varices\.)\s*\n+(?=\S)/i).map((s) => s.trim()).filter(Boolean)
   if (byFluo.length > 1) return byFluo
   return [t]
@@ -229,21 +488,41 @@ export function titledDiagnosticBlocks(text: string, interventionLabels: string[
 }
 
 function formatBlockHtml(block: DiagnosticBlock): string {
+  const visage = isVisageOperationTitle(block.title)
   const parts: string[] = []
-  if (block.title) {
-    const n = block.index > 0 ? `${block.index} - ` : ''
-    parts.push(
-      `<p class="diagnostic-op-title"><strong>${escapeHtml(`${n}${block.title}`)}</strong></p>`,
-    )
+  if (visage && block.title.trim()) {
+    parts.push(paraVisageOpTitle(block.title))
   }
   const bodyLines = block.body ? block.body.split('\n') : []
-  for (const line of bodyLines) parts.push(formatBodyLineHtml(line))
+  for (const line of bodyLines) parts.push(formatBodyLineHtml(line, { visage }))
   return parts.join('\n')
 }
 
-/** HTML lettre devis / PDF / fiche gestionnaire — titres numérotés, gras et fluo. */
+/** Retire les titres d’intervention (numérotés, visage, etc.) du corps diagnostic devis. */
+export function stripDiagnosticOpTitlesFromHtml(html: string): string {
+  if (!html.trim()) return html
+  let out = html.replace(
+    /<p[^>]*class="[^"]*(?:diagnostic-op-title|diag-visage-op-title)[^"]*"[^>]*>[\s\S]*?<\/p>\s*/gi,
+    '',
+  )
+  out = out.replace(/<p>\s*<strong>\s*\d+\s*[-–.]\s+[\s\S]*?<\/strong>\s*<\/p>\s*/gi, '')
+  return out
+}
+
+/** HTML lettre devis / PDF / fiche gestionnaire — gras et fluo (sans titres d’intervention). */
 export function formatDiagnosticLetterHtml(text: string, interventionLabels: string[] = []): string {
   const raw = text.trim()
   if (!raw) return '<p>—</p>'
-  return titledDiagnosticBlocks(raw, interventionLabels).map(formatBlockHtml).join('\n<p></p>\n')
+  const blocksHtml = titledDiagnosticBlocks(raw, interventionLabels).map(formatBlockHtml)
+  const joined =
+    blocksHtml.length > 1
+      ? blocksHtml.join(`\n${DIAGNOSTIC_BLOCK_GAP_HTML}\n`)
+      : blocksHtml[0] ?? '<p>—</p>'
+  return stripDiagnosticOpTitlesFromHtml(
+    normalizeDiagnosticZoneLeadInHtml(
+      normalizeDiagnosticBlockGapsInHtml(
+        normalizeDiagnosticDarkFluoInHtml(joined),
+      ),
+    ),
+  )
 }

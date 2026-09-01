@@ -1452,6 +1452,26 @@ export const gestionnaireApi = {
       body: JSON.stringify({ content }),
     }),
 
+  /** Sauvegarde fiable à la fermeture d’onglet (fetch keepalive). */
+  saveDevisCustomContentKeepalive: (devisId: string, content: string): boolean => {
+    const { access } = getTokens()
+    if (!access || !content.trim()) return false
+    try {
+      void fetch(`${BASE_URL}/gestionnaire/devis/${devisId}/content`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${access}`,
+        },
+        body: JSON.stringify({ content }),
+        keepalive: true,
+      })
+      return true
+    } catch {
+      return false
+    }
+  },
+
   refuseDevis: (devisId: string, body?: { reason?: string }) =>
     request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/refuser`, {
       method: 'POST',

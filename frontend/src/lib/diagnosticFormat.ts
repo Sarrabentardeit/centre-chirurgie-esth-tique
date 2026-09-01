@@ -334,26 +334,19 @@ export function upgradeDiagnosticMissingLayoutInHtml(html: string): string {
 export function diagnosticZoneLeadCss(
   ...args: Array<string | { editable?: boolean }>
 ): string {
-  const opts = args.find((a): a is { editable?: boolean } => typeof a === 'object' && a !== null)
   const scopes = args.filter((a): a is string => typeof a === 'string')
-  const editable = opts?.editable === true
-  const imp = editable ? '' : ' !important'
   const selectors = scopes
-    .flatMap((s) => (
-      editable
-        ? [`${s} .diag-zone-lead`, `${s} span.diag-zone-lead`]
-        : [
-          `${s} .diag-zone-lead`,
-          `${s} span.diag-zone-lead`,
-          `${s} strong.diag-zone-lead`,
-          `${s} strong.diag-zone-lead span`,
-        ]
-    ))
+    .flatMap((s) => [
+      `${s} .diag-zone-lead`,
+      `${s} span.diag-zone-lead`,
+      `${s} strong.diag-zone-lead`,
+      `${s} strong.diag-zone-lead span`,
+    ])
     .join(',\n')
   return `
 ${selectors} {
-  color: ${DIAG_ZONE_SALMON}${imp};
-  font-weight: ${editable ? '700' : '700 !important'};
+  color: ${DIAG_ZONE_SALMON} !important;
+  font-weight: 700 !important;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -401,7 +394,7 @@ export function normalizeDiagnosticZoneLeadInHtml(html: string): string {
 
 function paraPinkLead(lead: string, rest: string): string {
   const leadUpper = lead.trim().toUpperCase()
-  const leadHtml = `<span class="diag-zone-lead" style="color:${DIAG_ZONE_SALMON};font-weight:700">${escapeHtml(leadUpper)}</span>`
+  const leadHtml = `<span class="diag-zone-lead" style="color:${DIAG_ZONE_SALMON} !important;font-weight:700">${escapeHtml(leadUpper)}</span>`
   const restHtml = rest ? ` ${applyBold(escapeHtml(rest))}` : ''
   return `<p>${leadHtml}${restHtml}</p>`
 }

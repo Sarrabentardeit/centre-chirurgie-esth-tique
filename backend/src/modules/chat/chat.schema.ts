@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 export const sendMessageSchema = z
   .object({
-    contenu: z.string().trim().max(4000, 'Message trop long.').optional().default(''),
+    contenu: z.string().trim().max(8000, 'Message trop long.').optional().default(''),
     /** Requis pour médecin / gestionnaire ; ignoré pour le patient (dossier déduit). */
     patientId: z.string().uuid().optional(),
     pieceJointeUrl: z.string().url().optional(),
@@ -11,6 +11,8 @@ export const sendMessageSchema = z
     staffOnly: z.boolean().optional().default(false),
     /** Message cité (réponse un à un). */
     replyToId: z.string().uuid().optional(),
+    /** Email patient : copie du message de confirmation séjour (contenu intégral). */
+    patientEmailKind: z.enum(['confirmation_reservation']).optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.contenu && !data.pieceJointeUrl) {

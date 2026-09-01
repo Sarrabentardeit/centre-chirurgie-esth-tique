@@ -32,6 +32,9 @@ const TEMPLATE_INFO: Record<
   devisRappel: {
     when: 'Rappel pour un devis déjà envoyé (message + PDF).',
   },
+  confirmationReservation: {
+    when: 'Confirmation de séjour depuis la logistique (dates, devis, intervention).',
+  },
 }
 
 const ORDER: CommunicationTemplateKey[] = [
@@ -40,6 +43,7 @@ const ORDER: CommunicationTemplateKey[] = [
   'refus',
   'abstention',
   'devisRappel',
+  'confirmationReservation',
 ]
 
 function isSystemDate(iso: string) {
@@ -149,6 +153,19 @@ export default function CommunicationPage() {
         Variables : <code className="font-mono">{'{prenom}'}</code>,{' '}
         <code className="font-mono">{'{nom}'}</code>,{' '}
         <code className="font-mono">{'{reason}'}</code>
+        {selectedKey === 'confirmationReservation' && (
+          <>
+            , <code className="font-mono">{'{dateArrivee}'}</code>,{' '}
+            <code className="font-mono">{'{dateIntervention}'}</code>,{' '}
+            <code className="font-mono">{'{dateDepart}'}</code>,{' '}
+            <code className="font-mono">{'{dateDebutPreop}'}</code> (J-15),{' '}
+            <code className="font-mono">{'{dateLimiteExamens}'}</code> (J+10),{' '}
+            <code className="font-mono">{'{intervention}'}</code>,{' '}
+            <code className="font-mono">{'{examensMedicaux}'}</code>,{' '}
+            <code className="font-mono">{'{paysRetour}'}</code>,{' '}
+            <code className="font-mono">{'{numeroDevis}'}</code>
+          </>
+        )}
       </p>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

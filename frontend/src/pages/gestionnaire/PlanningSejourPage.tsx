@@ -67,6 +67,10 @@ export default function PlanningSejourPage() {
     navigate(`/gestionnaire/planning-sejour/${id}/personnaliser`)
   }
 
+  const openDossierPlanning = (id: string) => {
+    navigate(`/gestionnaire/devis/${id}?section=planning`)
+  }
+
   const closeDeleteDialog = () => {
     if (deleteLoading) return
     setDeleteTarget(null)
@@ -97,7 +101,7 @@ export default function PlanningSejourPage() {
           <div>
             <h2 className="text-xl font-semibold text-slate-900">Planning séjour</h2>
             <p className="text-sm text-muted-foreground">
-              Patientes avec devis accepté — éditeur comme les devis (modèle Word)
+              Ouvrez le dossier patient (logistique + planning) ou l’éditeur de planning
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -136,7 +140,8 @@ export default function PlanningSejourPage() {
                 title="À traiter"
                 titleClass="text-amber-700"
                 patients={pageATraiter}
-                onOpen={openEditor}
+                onOpenDossier={openDossierPlanning}
+                onOpenEditor={openEditor}
                 onDelete={setDeleteTarget}
               />
             )}
@@ -145,7 +150,8 @@ export default function PlanningSejourPage() {
                 title="Finalisés"
                 titleClass="text-emerald-700"
                 patients={pageFinalises}
-                onOpen={openEditor}
+                onOpenDossier={openDossierPlanning}
+                onOpenEditor={openEditor}
                 onDelete={setDeleteTarget}
                 done
               />
@@ -194,14 +200,16 @@ function PatientSection({
   title,
   titleClass,
   patients,
-  onOpen,
+  onOpenDossier,
+  onOpenEditor,
   onDelete,
   done,
 }: {
   title: string
   titleClass: string
   patients: GestionnairePlanningSejourPatient[]
-  onOpen: (id: string) => void
+  onOpenDossier: (id: string) => void
+  onOpenEditor: (id: string) => void
   onDelete: (p: GestionnairePlanningSejourPatient) => void
   done?: boolean
 }) {
@@ -215,7 +223,7 @@ function PatientSection({
         >
           <button
             type="button"
-            onClick={() => onOpen(p.id)}
+            onClick={() => onOpenDossier(p.id)}
             className="flex flex-1 items-center gap-3 min-w-0 text-left"
           >
             <Avatar className="h-9 w-9 shrink-0">
@@ -258,7 +266,7 @@ function PatientSection({
               size="icon"
               className="h-8 w-8 text-slate-500 hover:text-brand-700"
               title="Modifier le planning"
-              onClick={() => onOpen(p.id)}
+              onClick={() => onOpenEditor(p.id)}
             >
               <Pencil className="h-4 w-4" />
             </Button>

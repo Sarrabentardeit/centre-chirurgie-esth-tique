@@ -13,8 +13,11 @@ import {
   letterContextFromGestionnairePatient,
   pickRapport,
   refreshDevisLetterTopHtml,
+  restoreDevisCanonicalColorsInTopHtml,
+  refreshOffreInclutExclutInTopHtml,
+  refreshSalmonFieldLabelsInTopHtml,
   sejourPdfFromContext,
-  syncDevisLetterDataOnlyTopHtml,
+  stripOfferMeilleureHeadingFromTopHtml,
   syncOfferSejourInHtml,
   stripDiagnosticOpTitlesInTopHtml,
   upgradeDevisMissingLayoutInTopHtml,
@@ -190,9 +193,13 @@ export function loadDevisCustomContentForEditor(input: {
 
   if (letterCtx) {
     if (hasSavedLetter) {
-      // Lettre déjà personnalisée : conserver styles utilisateur, sync données + charte manquante seulement
+      // Resync données + ordre des sections (examens → offre → inclut), sans écraser la mise en forme manuelle
       topRaw = upgradeDevisMissingLayoutInTopHtml(
-        syncDevisLetterDataOnlyTopHtml(topRaw, letterCtx, { syncInclutExclut: true }),
+        refreshDevisLetterTopHtml(topRaw, letterCtx, {
+          syncInclutExclut: true,
+          preserveManualLayout: true,
+          preserveManualDiagnostic: true,
+        }),
       )
     } else {
       const refreshed = refreshDevisCustomContentParts({
@@ -226,9 +233,11 @@ export function loadDevisCustomContentForEditor(input: {
             )
       )
     : offerRaw
-  const botPrepared = replaceDevisAmountPlaceholders(botRaw, input.lignesTotal, tndPerEur)
+  const botPrepared = refreshSalmonFieldLabelsInTopHtml(
+    replaceDevisAmountPlaceholders(botRaw, input.lignesTotal, tndPerEur),
+  )
   return {
-    topHtml: italicizeDevisLetterIntroHtml(topRaw),
+    topHtml: restoreDevisCanonicalColorsInTopHtml(italicizeDevisLetterIntroHtml(topRaw)),
     botHtml: hasSavedBot
       ? botPrepared
       : prepareDevisHtmlForEditor(botPrepared),
@@ -546,6 +555,17 @@ export function buildDevisExportHtml(input: {
     })
   } else {
     topHtml = stripDiagnosticOpTitlesInTopHtml(topHtml)
+  }
+  topHtml = stripOfferMeilleureHeadingFromTopHtml(topHtml)
+  if (/Offre de prix\s*:/i.test(topHtml)) {
+    const inclutIdx = topHtml.search(/Votre devis inclut\s*:/i)
+    const exclutIdx = topHtml.search(/Notre forfait exclut\s*:/i)
+    const hasInclutList = inclutIdx >= 0 && /<ul\b/i.test(topHtml.slice(inclutIdx))
+    const hasExclutList =
+      exclutIdx >= 0 && (/<ul\b/i.test(topHtml.slice(exclutIdx)) || /<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—/i.test(topHtml.slice(exclutIdx)))
+    if (inclutIdx < 0 || exclutIdx < 0 || !hasInclutList || !hasExclutList) {
+      topHtml = refreshOffreInclutExclutInTopHtml(topHtml, ctxForRefresh)
+    }
   }
   topHtml = markDevisSpacerParagraphs(topHtml)
   if (input.preserveBotHtml === true) {

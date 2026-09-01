@@ -31,17 +31,22 @@ export const refuseDevisSchema = z.preprocess(
 
 export type RefuseDevisInput = z.infer<typeof refuseDevisSchema>
 
+const logistiqueDocumentSchema = z
+  .object({
+    url: z.string().min(1).max(2048),
+    name: z.string().min(1).max(255),
+  })
+  .nullable()
+
 export const logistiqueSchema = z.object({
-  passport: z.boolean(),
-  billet: z.boolean(),
-  hebergementConfirme: z.boolean(),
-  transfertAeroport: z.boolean(),
-  notes: z.string().optional().default(''),
+  documents: z.object({
+    passport: logistiqueDocumentSchema,
+    billet: logistiqueDocumentSchema,
+    devisAccepte: logistiqueDocumentSchema,
+  }),
   dateArrivee: z.string().optional().nullable(),
   dateDepart: z.string().optional().nullable(),
-  hebergement: z.string().optional().nullable(),
-  transport: z.string().optional().nullable(),
-  accompagnateur: z.string().optional().nullable(),
+  dateIntervention: z.string().optional().nullable(),
 })
 
 export type LogistiqueInput = z.infer<typeof logistiqueSchema>
@@ -54,7 +59,14 @@ export const planningSejourSchema = z.object({
 
 export type PlanningSejourInput = z.infer<typeof planningSejourSchema>
 
-const templateKeySchema = z.enum(['formulaireAck', 'devisSent', 'refus', 'abstention', 'devisRappel'])
+const templateKeySchema = z.enum([
+  'formulaireAck',
+  'devisSent',
+  'refus',
+  'abstention',
+  'devisRappel',
+  'confirmationReservation',
+])
 
 export const updateTemplateSchema = z.object({
   key: templateKeySchema.optional(),

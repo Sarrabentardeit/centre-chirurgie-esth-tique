@@ -285,6 +285,22 @@ export async function sendPatientEmail(input: {
   })
 }
 
+/** Email patient — notification simple : un message de confirmation est à consulter. */
+export async function sendConfirmationReservationEmail(input: {
+  to: string
+  patientFullName: string
+}): Promise<void> {
+  await sendPatientEmail({
+    to: input.to,
+    patientName: input.patientFullName,
+    titre: 'Vous avez reçu un message de confirmation',
+    message:
+      'Vous avez reçu un message de confirmation de votre séjour médical. Merci de l’ouvrir dans votre espace patient pour en prendre connaissance.',
+    lienAction: '/patient/chat',
+    ctaLabel: 'Ouvrir le message →',
+  })
+}
+
 /** Email « devis prêt » — simple + lien prod vers /patient/devis. */
 export async function sendDevisReadyEmail(input: {
   to: string

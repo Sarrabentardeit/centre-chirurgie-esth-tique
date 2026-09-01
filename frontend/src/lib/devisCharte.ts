@@ -114,9 +114,88 @@ export const DEVIS_SECTION_GAP = {
   listItem: '6px',
 } as const
 
+/** Sous-titres saumon — espacement compact (éviter cumul avec marges de listes / blocs). */
+export const DEVIS_SALMON_HEADING_GAP = {
+  beforeBlock: '4px',
+  after: '2px',
+} as const
+
+function devisSalmonHeadingRhythmRules(p: string): string {
+  const G = DEVIS_SALMON_HEADING_GAP
+  return `
+${p}.devis-salmon-heading {
+  margin: 0 0 ${G.after};
+  line-height: 1.55;
+}
+${p}ul + .devis-salmon-heading,
+${p}ol + .devis-salmon-heading,
+${p}ul:last-of-type + .devis-salmon-heading,
+${p}ol:last-of-type + .devis-salmon-heading,
+${p}ul + p.devis-spacer + .devis-salmon-heading,
+${p}ol + p.devis-spacer + .devis-salmon-heading,
+${p}ul + p:empty + .devis-salmon-heading,
+${p}ol + p:empty + .devis-salmon-heading,
+${p}p.devis-spacer + .devis-salmon-heading,
+${p}p:empty + .devis-salmon-heading {
+  margin-top: 0;
+}
+${p}ul:has(+ .devis-salmon-heading),
+${p}ol:has(+ .devis-salmon-heading),
+${p}ul:has(+ p.devis-spacer + .devis-salmon-heading),
+${p}ol:has(+ p.devis-spacer + .devis-salmon-heading) {
+  margin-bottom: 0;
+}
+${p}ul:has(+ .devis-salmon-heading) > li:last-child,
+${p}ol:has(+ .devis-salmon-heading) > li:last-child,
+${p}ul:has(+ p.devis-spacer + .devis-salmon-heading) > li:last-child,
+${p}ol:has(+ p.devis-spacer + .devis-salmon-heading) > li:last-child {
+  margin-bottom: 0;
+}
+${p}ul + p.devis-spacer:has(+ .devis-salmon-heading),
+${p}ol + p.devis-spacer:has(+ .devis-salmon-heading),
+${p}ul + p:empty:has(+ .devis-salmon-heading),
+${p}ol + p:empty:has(+ .devis-salmon-heading) {
+  display: none;
+  margin: 0 !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+}
+${p}table + .devis-salmon-heading,
+${p}p:not(.devis-salmon-heading):not(.devis-spacer):not(:empty) + .devis-salmon-heading {
+  margin-top: ${G.beforeBlock};
+}
+${p}.offer-subtitle {
+  margin: 0 0 ${G.after};
+}
+${p}.devis-top > ul:last-child,
+${p}.devis-top > ol:last-child,
+${p}.devis-top > ul:last-of-type,
+${p}.devis-top > ol:last-of-type,
+${p}.doc-section-top .ProseMirror > ul:last-child,
+${p}.doc-section-top .ProseMirror > ol:last-child,
+${p}.doc-section-top .ProseMirror > ul:last-of-type,
+${p}.doc-section-top .ProseMirror > ol:last-of-type {
+  margin-bottom: 0;
+}
+${p}.doc-offer-zone > .offer-subtitle,
+${p}.doc-offer-zone > .doc-section-offer-sub {
+  margin: 0 0 ${G.after};
+}
+${p}.devis-closing > .offer-block,
+${p}.devis-top + .devis-closing .offer-block,
+${p}.doc-section-top + .doc-offer-preview,
+${p}.doc-offer-zone .doc-offer-preview {
+  margin-top: 0;
+}
+`
+}
+
 function devisSectionRhythmRules(p: string): string {
   const G = DEVIS_SECTION_GAP
   return `
+${devisSalmonHeadingRhythmRules(p)}
 ${p}.devis-heading {
   margin: ${G.beforeTitle} 0 ${G.afterTitle};
 }
@@ -125,8 +204,12 @@ ${p}.devis-heading-tight-top {
 }
 ${p}.devis-heading + p,
 ${p}.devis-heading + ul,
-${p}.devis-heading + ol {
+${p}.devis-heading + ol,
+${p}.devis-heading + .devis-salmon-heading {
   margin-top: 0;
+}
+${p}.devis-heading:has(+ .devis-salmon-heading) {
+  margin-bottom: ${DEVIS_SALMON_HEADING_GAP.after};
 }
 ${p}p + .devis-heading,
 ${p}ul + .devis-heading,
@@ -199,6 +282,14 @@ ${p}.devis-examen-item {
   color: ${DEVIS_CHARTE.charcoal};
   font-weight: 400;
 }
+${p}.devis-examen-salmon-hi mark,
+${p}.devis-examen-salmon-hi mark span {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+${p}.devis-examen-salmon-hi mark span {
+  color: #FF7C80 !important;
+}
 `
   }
   return `
@@ -267,6 +358,12 @@ function unwrapElement(el: Element): void {
   parent.removeChild(el)
 }
 
+const PRESERVE_COLOR_SPAN_RE =
+  /\b(?:diag-zone-lead|devis-field-label|devis-examen-salmon-hi|tarif-hint|diag-italic|diag-visage-op-title|diag-visage-body|devis-ref-title|devis-heading|devis-salmon-heading|offer-fluo-)\b/i
+
+const PRESERVE_COLOR_CLOSEST =
+  '.devis-ref-title, .devis-heading, .devis-salmon-heading, .devis-examen-salmon-hi, .diag-zone-lead, .diag-visage-op-title, .diag-visage-body, .diag-italic, mark, [class*="offer-fluo-"]'
+
 export function prepareDevisHtmlForEditor(html: string): string {
   if (!html?.trim()) return html
   if (typeof DOMParser === 'undefined') return html
@@ -277,19 +374,12 @@ export function prepareDevisHtmlForEditor(html: string): string {
   for (const span of spans) {
     const style = span.getAttribute('style') ?? ''
     const cls = span.getAttribute('class') ?? ''
-    // Ne jamais toucher au titre « Devis MC-… » ni aux titres de section personnalisables
-    if (span.closest('.devis-ref-title, .devis-heading')) continue
+    if (span.closest(PRESERVE_COLOR_CLOSEST)) continue
+    if (PRESERVE_COLOR_SPAN_RE.test(cls)) continue
+    if (DEVIS_SALMON_COLOR_RE.test(style)) continue
+    if (span.querySelector('mark')) continue
     if (!style) continue
     if (/!important/i.test(style)) continue
-    if (/\bdevis-field-label\b/.test(cls) || /\bdiag-zone-lead\b/.test(cls) || /\btarif-hint\b/.test(cls)) {
-      // Conserver couleur / surlignage personnalisé sur les libellés
-      if (/\bdevis-field-label\b/.test(cls)) {
-        if (span.querySelector('mark')) continue
-        if (/!important/i.test(style) && !DEVIS_SALMON_COLOR_RE.test(style)) continue
-      }
-      span.removeAttribute('style')
-      continue
-    }
     if (
       /(?:^|;)\s*color\s*:/i.test(style)
       || /font-size\s*:/i.test(style)
@@ -341,6 +431,11 @@ export function devisSalmonLabelStyleAttr(): string {
 /** Libellé coloré — saumon par défaut (sous-titres devis). */
 export function devisLabel(text: string, tone: DevisLabelTone = 'salmon'): string {
   return `<span class="devis-field-label devis-field-label--${tone}" style="${devisFieldLabelStyleAttr(tone)}">${text}</span>`
+}
+
+/** Sous-titre saumon seul (Votre devis inclut, Modalités de paiement…). */
+export function devisSalmonHeading(text: string): string {
+  return `<p class="devis-salmon-heading">${devisLabel(text)}</p>`
 }
 
 /** @deprecated Préférer devisLabel(..., 'salmon') */
@@ -433,13 +528,22 @@ export function offerSejourFluoHtml(text: string): string {
   return `<mark class="offer-fluo-sejour" data-color="${sejourBg}" style="background-color:${sejourBg};color:${sejourText}"><span style="color:${sejourText}">${safe}</span></mark>`
 }
 
+/** Durée TOTALE du séjour — même rendu visuel, classe distincte (évite sync badge offre). */
+export function offerDureeTotaleFluoHtml(text: string): string {
+  const safe = escapeDevisHtml(text)
+  const { sejourBg, sejourText } = DEVIS_OFFER_FLUO
+  return `<mark class="offer-fluo-duree-totale" data-color="${sejourBg}" style="background-color:${sejourBg};color:${sejourText}"><span style="color:${sejourText}">${safe}</span></mark>`
+}
+
 /** CSS fluo séjour — texte jaune sur gris -50 % (TipTap retire sinon la couleur du mark). */
 export function devisOfferSejourFluoCss(scope = ''): string {
   const p = scope ? `${scope} ` : ''
   const { sejourBg, sejourText } = DEVIS_OFFER_FLUO
   return `
 ${p}.offer-fluo-sejour,
-${p}mark.offer-fluo-sejour {
+${p}mark.offer-fluo-sejour,
+${p}.offer-fluo-duree-totale,
+${p}mark.offer-fluo-duree-totale {
   background-color: ${sejourBg} !important;
   color: ${sejourText} !important;
   padding: 1px 4px;
@@ -450,7 +554,11 @@ ${p}mark.offer-fluo-sejour {
 ${p}.offer-fluo-sejour span,
 ${p}mark.offer-fluo-sejour span,
 ${p}.offer-fluo-sejour strong,
-${p}mark.offer-fluo-sejour strong {
+${p}mark.offer-fluo-sejour strong,
+${p}.offer-fluo-duree-totale span,
+${p}mark.offer-fluo-duree-totale span,
+${p}.offer-fluo-duree-totale strong,
+${p}mark.offer-fluo-duree-totale strong {
   color: ${sejourText} !important;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
@@ -465,9 +573,14 @@ export function restoreOfferSejourFluoInHtml(html: string): string {
   const bgRe = sejourBg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return html.replace(/<mark\b([^>]*)>([\s\S]*?)<\/mark>/gi, (full, attrs, inner) => {
     const isSejourClass = /\boffer-fluo-sejour\b/i.test(attrs)
+    const isDureeTotaleClass = /\boffer-fluo-duree-totale\b/i.test(attrs)
     const isGray50 = new RegExp(bgRe, 'i').test(attrs)
     const text = String(inner).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
     const looksSejour = /^S[ée]jour\s+\d+\s+nuits/i.test(text)
+    const looksDureeTotale = /Durée\s+TOTALE\s+du\s+s[ée]jour/i.test(text)
+    if (isDureeTotaleClass || looksDureeTotale) {
+      return offerDureeTotaleFluoHtml(text)
+    }
     if (!isSejourClass && !(isGray50 && looksSejour)) return full
     return offerSejourFluoHtml(text)
   })
@@ -574,7 +687,7 @@ export function looksLikeOfferDescHtml(html: string): boolean {
 }
 
 export function defaultOfferSubtitleHtml(): string {
-  return `<p>${devisLabel('Notre meilleure offre :')}</p>`
+  return devisLabel('Notre meilleure offre :')
 }
 
 export function defaultOfferHeadDescHtml(): string {
@@ -673,7 +786,7 @@ export function buildDevisOfferBlockHtml(opts: {
   )
   return `
 <div class="offer-block">
-  <p class="offer-subtitle">${subtitle}</p>
+  <p class="offer-subtitle devis-salmon-heading">${subtitle}</p>
   <table class="offer-table">
     <thead>
       <tr>
@@ -696,8 +809,12 @@ export const DEVIS_OFFER_PREVIEW_CSS = `
 .doc-offer-preview {
   font-family: ${DEVIS_FONT_FAMILY};
 }
+.doc-offer-zone > .offer-subtitle,
+.doc-offer-zone > .doc-section-offer-sub {
+  margin: 0 0 ${DEVIS_SALMON_HEADING_GAP.after};
+}
 .doc-offer-preview .offer-subtitle {
-  margin: 0 0 10px;
+  margin: 0 0 ${DEVIS_SALMON_HEADING_GAP.after};
 }
 .doc-offer-preview .offer-subtitle .devis-field-label {
   font-size: ${DEVIS_FIELD_LABEL_STYLE.fontSize};
@@ -1048,8 +1165,8 @@ export function buildDevisPrintStyles(): string {
     ${diagnosticZoneLeadCss('.devis-top', '.doc-body')}
     ${diagnosticVisageCss('.devis-top', '.doc-body')}
     .devis-closing { display: block; }
-    .devis-bot { margin-top: 14px; }
-    .devis-bot p { margin: 0 0 9px; }
+    .devis-bot { margin-top: ${DEVIS_SALMON_HEADING_GAP.beforeBlock}; }
+    .devis-bot p:not(.devis-salmon-heading) { margin: 0 0 ${DEVIS_SECTION_GAP.block}; }
 
     strong { font-weight: 700; }
     em { font-style: italic; color: ${C.charcoal}; }
@@ -1102,7 +1219,7 @@ export function buildDevisPrintStyles(): string {
     .doc-header .header-ref  { font-weight: 700; font-size: 13px; color: ${C.bronze}; letter-spacing: 0.02em; }
     .doc-header .header-sub  { margin-top: 3px; color: ${C.gray}; font-size: 10px; }
 
-    .doc-body p { margin: 0 0 8px; }
+    .doc-body p:not(.devis-salmon-heading) { margin: 0 0 8px; }
     .doc-body ul, .doc-body ol { padding-left: 22px; margin: 0 0 8px; }
     .doc-body ol { list-style-type: decimal; }
     .doc-body ol > li, .doc-body ul > li { margin: 0 0 6px; }
@@ -1121,7 +1238,7 @@ export function buildDevisPrintStyles(): string {
 
     /* Page offre */
     .offer-subtitle {
-      margin: 0 0 10px;
+      margin: 0 0 ${DEVIS_SALMON_HEADING_GAP.after};
     }
     .offer-subtitle .devis-field-label {
       font-size: ${DEVIS_FIELD_LABEL_STYLE.fontSize};
@@ -1130,7 +1247,10 @@ export function buildDevisPrintStyles(): string {
     .offer-block {
       break-inside: avoid;
       page-break-inside: avoid;
-      margin-top: 4px;
+    }
+    .devis-closing > .offer-block,
+    .devis-top + .devis-closing .offer-block {
+      margin-top: 0;
     }
     .offer-table {
       width: 100%;

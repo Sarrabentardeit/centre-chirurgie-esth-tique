@@ -155,7 +155,7 @@ export default function PlanningSejourEditorPage() {
     const html = buildPlanningSejourHtml(patient, logistique, { tndPerEur })
     editor?.commands.setContent(html)
     const ml = moisLabelFromDate(
-      logistique?.dateArrivee ? new Date(`${logistique.dateArrivee}T12:00:00`) : null,
+      logistique?.dateArrivee ? new Date(logistique.dateArrivee) : null,
     )
     setMoisLabel(ml)
     moisLabelRef.current = ml

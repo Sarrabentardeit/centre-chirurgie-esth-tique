@@ -446,8 +446,9 @@ model RapportVersion {
 model Logistique {
   id               String   @id @default(uuid())
   patientId        String   @unique @map("patient_id")
-  dateArrivee      DateTime? @map("date_arrivee") @db.Date
-  dateDepart       DateTime? @map("date_depart") @db.Date
+  dateArrivee      DateTime? @map("date_arrivee")
+  dateDepart       DateTime? @map("date_depart")
+  dateIntervention DateTime? @map("date_intervention")
   hebergement      String?
   transport        String?
   accompagnateur   String?

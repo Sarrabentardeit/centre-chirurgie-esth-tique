@@ -51,7 +51,7 @@ const LAYOUT_PAGES_BODY = `
     sheet.setAttribute(
       'style',
       'display:block;width:210mm;height:297mm;min-height:297mm;max-height:297mm;' +
-        'position:relative;overflow:hidden;box-sizing:border-box;background:#ffffff;' +
+        'position:relative;overflow:visible;box-sizing:border-box;background:#ffffff;' +
         'page-break-after:' + (isLast ? 'auto' : 'always') + ';' +
         'break-after:' + (isLast ? 'auto' : 'page') + ';' +
         'page-break-inside:avoid;break-inside:avoid;',
@@ -61,7 +61,7 @@ const LAYOUT_PAGES_BODY = `
     header.innerHTML = headerHtml;
     var body = document.createElement('div');
     body.className = 'devis-sheet-body';
-    body.style.overflow = 'hidden';
+    body.style.overflow = 'visible';
     sheet.appendChild(header);
     sheet.appendChild(body);
     return { sheet: sheet, header: header, body: body };
@@ -146,45 +146,159 @@ const LAYOUT_PAGES_BODY = `
       if (el.classList && el.classList.contains('devis-spacer')) return true;
       return textOf(el) === '';
     }
-    function isTitleLike(el) {
+    function isSalmonSubheading(el) {
+      if (!el) return false;
+      return el.classList && el.classList.contains('devis-salmon-heading');
+    }
+    function isSectionHeading(el) {
       if (!el) return false;
       if (isSpacerParagraph(el)) return false;
       var tag = (el.tagName || '').toLowerCase();
       if (tag === 'hr' || /^h[1-6]$/.test(tag)) return true;
       var cls = String(el.className || '');
       if (/\b(devis-heading|diagnostic-op-title|section-title|devis-ref-title|section-hr)\b/.test(cls)) return true;
+      return false;
+    }
+    function isTitleLike(el) {
+      if (!el) return false;
+      if (isSpacerParagraph(el)) return false;
+      if (isSalmonSubheading(el)) return false;
+      if (isSectionHeading(el)) return true;
       var text = textOf(el);
       if (!text) return false;
       if (text.length <= 96 && /:\s*$/.test(text)) return true;
       return false;
     }
+    function isOffrePrixHeading(el) {
+      return isSectionHeading(el) && /Offre de prix/i.test(textOf(el));
+    }
     function gatherGroup(start) {
-      var group = [nodes[start]];
-      var j = start + 1;
-      while (j < nodes.length && isTitleLike(nodes[j])) {
-        group.push(nodes[j]);
-        j += 1;
+      var node = nodes[start];
+      if (isOffrePrixHeading(node)) {
+        var block = [node];
+        for (var k = start + 1; k < nodes.length; k++) {
+          var n = nodes[k];
+          if (isSalmonSubheading(n)) {
+            block.push(n);
+            if (k + 1 < nodes.length) {
+              var nxtTag = (nodes[k + 1].tagName || '').toLowerCase();
+              if (nxtTag === 'ul' || nxtTag === 'ol') {
+                block.push(nodes[k + 1]);
+                k += 1;
+              }
+            }
+            continue;
+          }
+          if (isSpacerParagraph(n)) {
+            block.push(n);
+            continue;
+          }
+          break;
+        }
+        return block;
       }
-      if (j < nodes.length && !isTitleLike(nodes[j])) group.push(nodes[j]);
-      return group;
+      if (isSalmonSubheading(node)) {
+        var pair = [node];
+        if (start + 1 < nodes.length) {
+          var nxt = nodes[start + 1];
+          var nxtTag = (nxt.tagName || '').toLowerCase();
+          if (nxtTag === 'ul' || nxtTag === 'ol') pair.push(nxt);
+          else if (nxtTag === 'p' && !isSectionHeading(nxt) && !isSalmonSubheading(nxt) && !isTitleLike(nxt)) {
+            pair.push(nxt);
+          }
+        }
+        return pair;
+      }
+      if (isTitleLike(node)) {
+        var group = [node];
+        var j = start + 1;
+        while (j < nodes.length && isTitleLike(nodes[j])) {
+          group.push(nodes[j]);
+          j += 1;
+        }
+        if (j < nodes.length && !isTitleLike(nodes[j])) group.push(nodes[j]);
+        return group;
+      }
+      return [node];
+    }
+    function appendGroupToPages(group, pageAvail) {
+      if (!group.length) return;
+      if (measureHeight(group) <= pageAvail) {
+        if (cur.length && measureHeight(cur.concat(group)) > pageAvail) {
+          var moved = peelTrailingTitles(cur);
+          if (cur.length) pages.push(cur);
+          cur = moved.concat(group);
+        } else {
+          cur = cur.concat(group);
+        }
+        return;
+      }
+      for (var gi = 0; gi < group.length; gi++) {
+        var el = group[gi];
+        if (cur.length && measureHeight(cur.concat([el])) > pageAvail) {
+          var moved2 = peelTrailingTitles(cur);
+          if (cur.length) pages.push(cur);
+          cur = moved2.concat([el]);
+        } else {
+          cur = cur.concat([el]);
+        }
+      }
     }
     function peelTrailingTitles(page) {
       var moved = [];
       while (page.length && isTitleLike(page[page.length - 1])) {
+        var last = page[page.length - 1];
+        if (isOffrePrixHeading(last) || isSalmonSubheading(last)) break;
         moved.unshift(page.pop());
       }
       return moved;
     }
+    function appendOffreBlock(block, pageAvail) {
+      if (!block.length) return;
+      var subgroups = [];
+      var si = 1;
+      var headGroup = [block[0]];
+      while (si < block.length) {
+        if (isSalmonSubheading(block[si])) {
+          var pair = [block[si]];
+          if (si + 1 < block.length) {
+            var pairTag = (block[si + 1].tagName || '').toLowerCase();
+            if (pairTag === 'ul' || pairTag === 'ol') {
+              pair.push(block[si + 1]);
+              si += 2;
+              subgroups.push(pair);
+              continue;
+            }
+          }
+          si += 1;
+          subgroups.push(pair);
+          continue;
+        }
+        if (isSpacerParagraph(block[si])) {
+          headGroup.push(block[si]);
+          si += 1;
+          continue;
+        }
+        subgroups.push([block[si]]);
+        si += 1;
+      }
+      if (subgroups.length) {
+        subgroups[0] = headGroup.concat(subgroups[0]);
+      } else {
+        subgroups.push(headGroup);
+      }
+      for (var sg = 0; sg < subgroups.length; sg++) appendGroupToPages(subgroups[sg], pageAvail);
+    }
 
     var i = 0;
     while (i < nodes.length) {
-      var group = isTitleLike(nodes[i]) ? gatherGroup(i) : [nodes[i]];
-      if (cur.length && measureHeight(cur.concat(group)) > pageAvail) {
-        var moved = peelTrailingTitles(cur);
-        if (cur.length) pages.push(cur);
-        cur = moved.concat(group);
+      var group = isTitleLike(nodes[i]) || isSalmonSubheading(nodes[i])
+        ? gatherGroup(i)
+        : [nodes[i]];
+      if (group.length && isOffrePrixHeading(group[0])) {
+        appendOffreBlock(group, pageAvail);
       } else {
-        cur = cur.concat(group);
+        appendGroupToPages(group, pageAvail);
       }
       i += group.length;
     }
@@ -239,7 +353,7 @@ const LAYOUT_PAGES_BODY = `
   var style = document.createElement('style');
   style.textContent =
     '@media print{' +
-    '.devis-sheet{page-break-after:always;break-after:page;page-break-inside:avoid;height:297mm;min-height:297mm;overflow:hidden;}' +
+    '.devis-sheet{page-break-after:always;break-after:page;page-break-inside:avoid;height:297mm;min-height:297mm;overflow:visible;}' +
     '.devis-sheet:last-child{page-break-after:auto;break-after:auto;}' +
     '.devis-sheet-last .devis-footer-group{position:absolute;left:14mm;right:14mm;bottom:8mm;margin-top:0!important;}' +
     '}';

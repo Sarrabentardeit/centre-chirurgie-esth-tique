@@ -528,6 +528,7 @@ export const chatApi = {
     /** Canal interne équipe (invisible patiente). */
     staffOnly?: boolean
     replyToId?: string
+    patientEmailKind?: 'confirmation_reservation'
   }) =>
     request<{ ok: true; message: ChatMessage }>('/chat/messages', {
       method: 'POST',
@@ -1152,6 +1153,8 @@ export interface GestionnairePatientDetail extends Omit<PatientListItem, 'formul
   formulaires: GestionnaireFormulaireRow[]
   rapports: GestionnaireRapportRow[]
   devis: Devis[]
+  logistique?: GestionnaireLogistiqueRow | null
+  planningSejour?: GestionnairePlanningSejourSummary | null
 }
 
 export interface GestionnaireNotificationRow {
@@ -1180,6 +1183,18 @@ export interface GestionnaireAuditLog {
   }
 }
 
+export interface GestionnaireLogistiqueDocument {
+  url: string
+  name: string
+}
+
+export type GestionnaireLogistiqueDocuments = {
+  passport: GestionnaireLogistiqueDocument | null
+  billet: GestionnaireLogistiqueDocument | null
+  devisAccepte: GestionnaireLogistiqueDocument | null
+}
+
+/** @deprecated Ancienne checklist — conservé pour compatibilité types */
 export interface GestionnaireLogistiqueChecklist {
   passport: boolean
   billet: boolean
@@ -1190,10 +1205,8 @@ export interface GestionnaireLogistiqueChecklist {
 export interface GestionnaireLogistiqueRow {
   dateArrivee: string | null
   dateDepart: string | null
-  hebergement: string | null
-  transport: string | null
-  accompagnateur: string | null
-  checklist: GestionnaireLogistiqueChecklist
+  dateIntervention: string | null
+  documents: GestionnaireLogistiqueDocuments
   notes: string
 }
 
@@ -1233,7 +1246,13 @@ export interface GestionnairePlanningSejourDetail {
   updatedAt: string
 }
 
-export type CommunicationTemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention' | 'devisRappel'
+export type CommunicationTemplateKey =
+  | 'formulaireAck'
+  | 'devisSent'
+  | 'refus'
+  | 'abstention'
+  | 'devisRappel'
+  | 'confirmationReservation'
 
 export interface GestionnaireTemplate {
   key: CommunicationTemplateKey
@@ -1525,17 +1544,11 @@ export const gestionnaireApi = {
   updateLogistique: (
     patientId: string,
     body: {
-      passport: boolean
-      billet: boolean
-      hebergementConfirme: boolean
-      transfertAeroport: boolean
-      notes?: string
+      documents: GestionnaireLogistiqueDocuments
       dateArrivee?: string | null
       dateDepart?: string | null
-      hebergement?: string | null
-      transport?: string | null
-      accompagnateur?: string | null
-    }
+      dateIntervention?: string | null
+    },
   ) =>
     request<{ ok: true }>(`/gestionnaire/logistique/${patientId}`, {
       method: 'PUT',

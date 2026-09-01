@@ -4,6 +4,7 @@ import {
   RefreshCw, Search, ChevronDown, ChevronRight,
   Stethoscope, ClipboardList, Scissors, Heart, ArrowLeft, X, FilePenLine,
   User, Mail, Phone, MapPin, Calendar, MessageSquare, Ban, Bell, Pencil, RotateCcw,
+  Package, CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -16,7 +17,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
 import { feedbackSuccess, toast } from '@/store/toastStore'
 import { cn, formatCurrency, formatDate, formatDateTime, formatDevisListName, formatDevisTitle, formatMcReferenceWithVersion, getDevisDisplayNumber, STATUS_COLORS, dossierStatusLabel, type CurrencyUnit } from '@/lib/utils'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { formatEuroApprox, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import { DEVIS_CHARTE } from '@/lib/devisCharte'
 import {
@@ -34,6 +35,19 @@ import { DiagnosticFormattedView } from '@/components/dossier/DiagnosticFormatte
 import { FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 import { FormulairePayloadEditor } from '@/components/dossier/FormulairePayloadEditor'
 import { IdentityFicheEditor } from '@/components/dossier/IdentityFicheEditor'
+import { DossierParcoursNav, type DossierAnchor, type DossierParcoursStep } from '@/components/dossier/DossierParcoursNav'
+import {
+  buildAcceptedDevisConfirmationFields,
+} from '@/lib/confirmationReservationMessage'
+import { LogistiqueDossierSection } from '@/components/dossier/LogistiqueDossierSection'
+import { PlanningSejourDossierSection } from '@/components/dossier/PlanningSejourDossierSection'
+import {
+  LOGISTIQUE_ESSENTIAL_TOTAL,
+  logistiqueDocumentsDoneCount,
+  logistiqueEssentialsDoneCount,
+  logistiqueIsComplete,
+  patientHasPostDevisAccepte,
+} from '@/lib/logistiqueChecklist'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import {
   buildSejourNotes,
@@ -320,16 +334,44 @@ function initials(name: string) {
    COMPOSANT : Section repliable (Dossier)
 ══════════════════════════════════════════════════ */
 function Section({
-  icon, title, count, children, defaultOpen = false,
+  id,
+  icon,
+  title,
+  count,
+  children,
+  defaultOpen = false,
+  open: controlledOpen,
+  onOpenChange,
+  highlight = false,
 }: {
-  icon: ReactNode; title: string; count?: number; children: ReactNode; defaultOpen?: boolean
+  id?: string
+  icon: ReactNode
+  title: string
+  count?: number
+  children: ReactNode
+  defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  highlight?: boolean
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [internalOpen, setInternalOpen] = useState(defaultOpen)
+  const isControlled = controlledOpen !== undefined
+  const open = isControlled ? controlledOpen : internalOpen
+  const setOpen = (next: boolean) => {
+    onOpenChange?.(next)
+    if (!isControlled) setInternalOpen(next)
+  }
   return (
-    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+    <section
+      id={id}
+      className={cn(
+        'rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden scroll-mt-24',
+        highlight && 'ring-2 ring-brand-400 ring-offset-2',
+      )}
+    >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-slate-50/90 transition-colors"
       >
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700 shrink-0">
@@ -1166,7 +1208,25 @@ export default function DevisGestionnairePage() {
   const { id: patientIdFromUrl } = useParams<{ id?: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const currency: CurrencyUnit = 'TND'
+  const [sectionOpens, setSectionOpens] = useState<Record<string, boolean>>({})
+  const [highlightSectionId, setHighlightSectionId] = useState<string | null>(null)
+  const scrollSectionRef = useRef<string | null>(null)
+
+  const setSectionOpen = useCallback((key: string, open: boolean) => {
+    setSectionOpens((prev) => ({ ...prev, [key]: open }))
+  }, [])
+
+  const scrollToDossierSection = useCallback((sectionId: string, openKey?: string) => {
+    if (openKey) setSectionOpen(openKey, true)
+    scrollSectionRef.current = sectionId
+  }, [setSectionOpen])
+
+  const sectionOpen = useCallback(
+    (key: string, defaultOpen = false) => sectionOpens[key] ?? defaultOpen,
+    [sectionOpens],
+  )
 
   /* State global */
   const [patients, setPatients]           = useState<PatientListItem[]>([])
@@ -1447,6 +1507,47 @@ export default function DevisGestionnairePage() {
     if (view === 'detail' && selectedPatient) void loadPatientDetail(selectedPatient)
   }, [view, selectedPatient, loadPatientDetail])
 
+  useEffect(() => {
+    setSectionOpens({})
+    setHighlightSectionId(null)
+    scrollSectionRef.current = null
+  }, [selectedPatient])
+
+  useEffect(() => {
+    const sectionId = scrollSectionRef.current
+    if (!sectionId || detailLoading || view !== 'detail') return
+    const timer = window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      scrollSectionRef.current = null
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [detailLoading, view, sectionOpens, patientDetail])
+
+  useEffect(() => {
+    const section = searchParams.get('section')
+    if (!section || view !== 'detail' || !selectedPatient || detailLoading) return
+    if (section === 'logistique') {
+      setSectionOpen('logistique', true)
+      scrollToDossierSection('dossier-logistique')
+      setHighlightSectionId('dossier-logistique')
+      window.setTimeout(() => setHighlightSectionId(null), 3500)
+    } else if (section === 'planning') {
+      setSectionOpen('planning', true)
+      scrollToDossierSection('dossier-planning')
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('section')
+    setSearchParams(next, { replace: true })
+  }, [
+    detailLoading,
+    scrollToDossierSection,
+    searchParams,
+    selectedPatient,
+    setSearchParams,
+    setSectionOpen,
+    view,
+  ])
+
   const existingDevis: Devis | null = useMemo(() => {
     const list = [...(patientDetail?.devis ?? [])]
     const editable = list.filter(
@@ -1613,7 +1714,7 @@ export default function DevisGestionnairePage() {
     }
     const freshExisting = pickEditableDevis(detail?.devis)
     const status = patientRow?.status ?? patientDetail?.status
-    if (!status || !canPatientHaveDevis(status)) {
+    if (intent !== 'view' && (!status || !canPatientHaveDevis(status))) {
       setPageError(
         'Impossible de créer un devis : le rapport médical du médecin doit d’abord être généré (statut « rapport généré » ou suivant).',
       )
@@ -2167,9 +2268,13 @@ export default function DevisGestionnairePage() {
       await invalidateCache(queryKeys.logistique())
       await loadPatientDetail(selectedPatient)
       await loadPatients()
+      setSectionOpen('logistique', true)
+      scrollToDossierSection('dossier-logistique')
+      setHighlightSectionId('dossier-logistique')
+      window.setTimeout(() => setHighlightSectionId(null), 4500)
       feedbackSuccess(
         'Devis accepté',
-        'Le planning séjour et la logistique sont maintenant disponibles pour cette patiente.',
+        'Prochaine étape : complétez la logistique du séjour ci-dessous.',
       )
     } catch (e) {
       setPageError(e instanceof Error ? e.message : 'Impossible de marquer le devis comme accepté.')
@@ -2967,9 +3072,97 @@ export default function DevisGestionnairePage() {
     const devisAllowed = canPatientHaveDevis(patientRow.status)
     const isAbstention = patientRow.status === 'abstention'
 
+    const showSuiviSejour = patientHasPostDevisAccepte(patientRow.status, devisVersions)
+    const logDocsDone = logistiqueDocumentsDoneCount(patientDetail?.logistique?.documents)
+    const logEssentialsDone = logistiqueEssentialsDoneCount(patientDetail?.logistique)
+    const logComplete = logistiqueIsComplete(patientDetail?.logistique)
+    const planningFinalise = patientDetail?.planningSejour?.statut === 'finalise'
+    const hasSubmittedForm = Boolean(patientDetail?.formulaires?.some((f) => f.status === 'submitted'))
+    const hasRapport = rapportsList.length > 0
+    const hasDevisEnvoye = devisVersions.some((d) => d.statut === 'envoye' || d.statut === 'accepte')
+
+    const acceptedDevis = devisVersions.find((d) => d.statut === 'accepte') ?? null
+    const rapportForConfirmation = acceptedDevis?.rapportId
+      ? rapportsList.find((r) => r.id === acceptedDevis.rapportId) ?? null
+      : null
+    const acceptedDevisConfirmation = buildAcceptedDevisConfirmationFields(
+      acceptedDevis
+        ? {
+            numeroDevis: acceptedDevis.numeroDevis,
+            version: acceptedDevis.version,
+            dossierNumber: patientRow.dossierNumber,
+            rapport: rapportForConfirmation,
+          }
+        : null,
+    )
+
+    const parcoursSteps: DossierParcoursStep[] = (() => {
+      const steps = [
+        { key: 'form', label: 'Formulaire', done: hasSubmittedForm },
+        { key: 'rapport', label: 'Rapport', done: hasRapport },
+        { key: 'devis', label: 'Devis', done: hasDevisEnvoye },
+        { key: 'accepte', label: 'Accepté', done: showSuiviSejour },
+      ]
+      if (showSuiviSejour) {
+        steps.push(
+          { key: 'logistique', label: 'Logistique', done: logComplete },
+          { key: 'planning', label: 'Planning', done: planningFinalise },
+        )
+      }
+      const pendingIdx = steps.findIndex((s) => !s.done)
+      const currentIdx = pendingIdx === -1 ? steps.length - 1 : pendingIdx
+      return steps.map((s, i) => ({ ...s, current: i === currentIdx }))
+    })()
+
+    const dossierAnchors: DossierAnchor[] = [
+      { id: 'dossier-identite', label: 'Identité' },
+      { id: 'dossier-formulaire', label: 'Formulaire' },
+      { id: 'dossier-rapports', label: 'Rapports' },
+      {
+        id: 'dossier-devis',
+        label: 'Historique',
+        badge:
+          existingDevis?.statut === 'accepte'
+            ? 'Accepté'
+            : existingDevis?.statut === 'envoye'
+              ? 'Envoyé'
+              : undefined,
+      },
+      {
+        id: 'dossier-logistique',
+        label: 'Logistique',
+        badge: showSuiviSejour ? `${logEssentialsDone}/${LOGISTIQUE_ESSENTIAL_TOTAL}` : undefined,
+        hidden: !showSuiviSejour,
+        highlight: highlightSectionId === 'dossier-logistique',
+      },
+      {
+        id: 'dossier-planning',
+        label: 'Planning séjour',
+        hidden: !showSuiviSejour,
+        badge: planningFinalise ? 'OK' : undefined,
+      },
+    ]
+
+    const handleDossierAnchorClick = (sectionId: string) => {
+      const openKey =
+        sectionId === 'dossier-formulaire'
+          ? 'formulaire'
+          : sectionId === 'dossier-rapports'
+            ? 'rapports'
+            : sectionId === 'dossier-devis'
+              ? 'devis'
+              : sectionId === 'dossier-logistique'
+                ? 'logistique'
+                : sectionId === 'dossier-planning'
+                  ? 'planning'
+                  : undefined
+      if (openKey) setSectionOpen(openKey, true)
+      scrollToDossierSection(sectionId, openKey)
+    }
+
     const primaryDevisAction: {
       label: string
-      intent: 'create' | 'edit-draft' | 'new-version'
+      intent: 'create' | 'edit-draft' | 'new-version' | 'view'
       target?: Devis | null
     } = needsNewDevisFromRapport
       ? {
@@ -2979,6 +3172,8 @@ export default function DevisGestionnairePage() {
       : existingDevis && existingDevis.statut !== 'refuse'
         ? existingDevis.statut === 'brouillon'
           ? { label: 'Modifier', intent: 'edit-draft', target: existingDevis }
+          : existingDevis.statut === 'accepte'
+            ? { label: 'Consulter', intent: 'view' as const, target: existingDevis }
           : (() => {
               const nextVer = Math.max(existingDevis.version, ...devisVersions.map((d) => d.version)) + 1
               const mcRef = getDevisDisplayNumber(existingDevis, patientRow?.dossierNumber)
@@ -3103,13 +3298,25 @@ export default function DevisGestionnairePage() {
                           variant="brand"
                           className="gap-2 h-10 text-sm font-semibold"
                           onClick={() => void openDevisTable(primaryDevisAction.intent, primaryDevisAction.target)}
-                          disabled={detailLoading || !devisAllowed}
+                          disabled={detailLoading || (primaryDevisAction.intent !== 'view' && !devisAllowed)}
                         >
-                          {primaryDevisAction.intent === 'create'
+                          {primaryDevisAction.intent === 'create' || primaryDevisAction.intent === 'view'
                             ? <FileText className="h-4 w-4" />
                             : <Pencil className="h-4 w-4" />}
                           {primaryDevisAction.label}
                         </Button>
+                        {existingDevis && existingDevis.statut === 'accepte' && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-1.5 h-10 text-sm border-brand-200 text-brand-800 hover:bg-brand-50 bg-white"
+                            disabled={detailLoading || !devisAllowed}
+                            onClick={() => void openDevisTable('new-version', existingDevis)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Nouvelle version
+                          </Button>
+                        )}
                         {existingDevis && existingDevis.statut === 'envoye' && (
                           <Button
                             type="button"
@@ -3150,7 +3357,7 @@ export default function DevisGestionnairePage() {
                           <Stethoscope className="h-4 w-4" />
                           Écrire au Dr Chennoufi
                         </Button>
-                        {existingDevis && (
+                        {existingDevis && existingDevis.statut !== 'accepte' && (
                           <Button
                             type="button"
                             variant="outline"
@@ -3275,6 +3482,12 @@ export default function DevisGestionnairePage() {
               </div>
             )}
 
+            <DossierParcoursNav
+              steps={parcoursSteps}
+              anchors={dossierAnchors}
+              onAnchorClick={handleDossierAnchorClick}
+            />
+
             {detailLoading && (
               <div className="space-y-3">
                 <Skeleton className="h-36 w-full rounded-2xl" />
@@ -3286,7 +3499,10 @@ export default function DevisGestionnairePage() {
             {!detailLoading && (
               <>
                 {/* Aperçu identité — panneau toujours ouvert */}
-                <section className="rounded-2xl border border-slate-200/80 bg-white shadow-sm px-4 sm:px-5 py-5">
+                <section
+                  id="dossier-identite"
+                  className="rounded-2xl border border-slate-200/80 bg-white shadow-sm px-4 sm:px-5 py-5 scroll-mt-24"
+                >
                   <div className="flex items-center gap-3 mb-4">
                     <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
                       <User className="h-4 w-4" />
@@ -3346,6 +3562,7 @@ export default function DevisGestionnairePage() {
                 </section>
 
                 <Section
+                  id="dossier-formulaire"
                   icon={<ClipboardList className="h-4 w-4" />}
                   title="Formulaires médicaux"
                   count={
@@ -3353,7 +3570,8 @@ export default function DevisGestionnairePage() {
                       ? 1
                       : 0
                   }
-                  defaultOpen
+                  open={sectionOpen('formulaire', true)}
+                  onOpenChange={(o) => setSectionOpen('formulaire', o)}
                 >
                   {editingFormulaire ? (
                     <FormulairePayloadEditor
@@ -3440,10 +3658,12 @@ export default function DevisGestionnairePage() {
                 </Section>
 
                 <Section
+                  id="dossier-rapports"
                   icon={<Stethoscope className="h-4 w-4" />}
                   title="Rapports médicaux"
                   count={isAbstention ? Math.max(rapportsList.length, 1) : rapportsList.length}
-                  defaultOpen
+                  open={sectionOpen('rapports', true)}
+                  onOpenChange={(o) => setSectionOpen('rapports', o)}
                 >
                   {isAbstention && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 mb-4">
@@ -3493,12 +3713,13 @@ export default function DevisGestionnairePage() {
                   ) : null}
                 </Section>
 
-                
                 <Section
+                  id="dossier-devis"
                   icon={<FileText className="h-4 w-4" />}
                   title="Historique des devis"
                   count={patientDetail?.devis.length ?? 0}
-                  defaultOpen
+                  open={sectionOpen('devis', true)}
+                  onOpenChange={(o) => setSectionOpen('devis', o)}
                 >
                   {!devisVersions.length ? (
                     <p className="text-sm text-slate-400 text-center py-4">Aucun devis créé.</p>
@@ -3537,11 +3758,11 @@ export default function DevisGestionnairePage() {
                                 d.statut === 'brouillon' ? 'edit-draft' : 'view',
                                 d,
                               )}
-                              disabled={!devisAllowed}
+                              disabled={d.statut === 'brouillon' && !devisAllowed}
                             >
                               Consulter
                             </Button>
-                            {d.statut !== 'brouillon' && d.statut !== 'refuse' && (
+                            {d.statut !== 'brouillon' && d.statut !== 'refuse' && d.statut !== 'accepte' && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -3553,6 +3774,7 @@ export default function DevisGestionnairePage() {
                                 Nouvelle version
                               </Button>
                             )}
+                            {d.statut !== 'accepte' && (
                             <Button
                               type="button"
                               variant="ghost"
@@ -3564,6 +3786,7 @@ export default function DevisGestionnairePage() {
                               <Trash2 className="h-3.5 w-3.5" />
                               Supprimer
                             </Button>
+                            )}
                             {d.statut === 'envoye' && (
                               <>
                               <Button
@@ -3593,6 +3816,47 @@ export default function DevisGestionnairePage() {
                     </div>
                   )}
                 </Section>
+
+                {showSuiviSejour && (
+                  <>
+                    <Section
+                      id="dossier-logistique"
+                      icon={<Package className="h-4 w-4" />}
+                      title="Logistique du séjour"
+                      count={logDocsDone}
+                      open={sectionOpen('logistique', false)}
+                      onOpenChange={(o) => setSectionOpen('logistique', o)}
+                      highlight={highlightSectionId === 'dossier-logistique'}
+                    >
+                      <LogistiqueDossierSection
+                        patientId={patientRow.id}
+                        initialData={patientDetail?.logistique}
+                        onSaved={() => void loadPatientDetail(patientRow.id)}
+                        patientName={patientRow.user.fullName}
+                        dossierNumber={patientRow.dossierNumber}
+                        paysRetour={patientDetail?.pays}
+                        numeroDevis={acceptedDevisConfirmation.numeroDevis}
+                        interventionLabel={acceptedDevisConfirmation.intervention}
+                        examensMedicaux={acceptedDevisConfirmation.examensMedicaux}
+                      />
+                    </Section>
+
+                    <Section
+                      id="dossier-planning"
+                      icon={<CalendarDays className="h-4 w-4" />}
+                      title="Planning séjour"
+                      open={sectionOpen('planning', false)}
+                      onOpenChange={(o) => setSectionOpen('planning', o)}
+                    >
+                      <PlanningSejourDossierSection
+                        patientId={patientRow.id}
+                        planning={patientDetail?.planningSejour}
+                        logistiqueComplete={logComplete}
+                        onOpenEditor={(id) => navigate(`/gestionnaire/planning-sejour/${id}/personnaliser`)}
+                      />
+                    </Section>
+                  </>
+                )}
               </>
 
             )}
@@ -3753,8 +4017,8 @@ export default function DevisGestionnairePage() {
           pendingDelete?.kind === 'dossier'
             ? `${pendingDelete.patientName} sera retiré(e) de la liste des devis (classé en abstention). L’historique reste consultable dans Patients.`
             : (pendingDelete?.kind === 'devis' && pendingDelete.devisIds.length > 1)
-              ? 'Ces versions iront dans « Supprimés », disparaîtront de l’espace patient et les PDF associés passeront en « Message supprimé » dans le chat.'
-              : 'Cette version ira dans « Supprimés », disparaîtra de l’espace patient et le PDF associé passera en « Message supprimé » dans le chat. Les autres versions restent intactes.'
+              ? 'Ces versions iront dans « Supprimés », disparaîtront de l’espace patient et leurs PDF seront retirés du chat (les autres versions restent visibles).'
+              : 'Cette version ira dans « Supprimés », disparaîtra de l’espace patient et son PDF sera retiré du chat. Les autres versions restent intactes.'
         }
         confirmLabel={
           pendingDelete?.kind === 'dossier'

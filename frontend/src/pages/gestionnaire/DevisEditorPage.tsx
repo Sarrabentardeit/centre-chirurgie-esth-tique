@@ -123,6 +123,7 @@ import {
   DEVIS_OFFER_PRICE_FONT_SIZE,
   DEVIS_HIGHLIGHT_COLORS,
   DEVIS_OFFER_PREVIEW_CSS,
+  DEVIS_SALMON_HEADING_GAP,
   devisEmptyParagraphCss,
   devisOfferSejourFluoCss,
   devisRefTitleCss,
@@ -140,9 +141,13 @@ import {
 import {
   buildDevisLetterBottomHtml,
   buildDevisLetterTopHtml,
+  ensureOfferMeilleureHeadingInTopHtml,
   letterContextFromGestionnairePatient,
   pickRapport,
+  restoreDevisCanonicalColorsInTopHtml,
   sejourPdfFromContext,
+  stripOfferMeilleureHeadingForExport,
+  stripOfferMeilleureHeadingFromTopHtml,
   syncDureeTotaleSejourInHtml,
   type DevisLetterContext,
 } from '@/lib/devisLetterHtml'
@@ -195,6 +200,15 @@ function readOfferTotalDisplay(editor: Editor | null, fallback: string): string 
   return text || fallback
 }
 
+function applyTopWithOfferHeading(
+  html: string,
+  subtitle: string | null | undefined,
+  hasLignes: boolean,
+): string {
+  if (!hasLignes) return stripOfferMeilleureHeadingFromTopHtml(html)
+  return ensureOfferMeilleureHeadingInTopHtml(html, subtitle)
+}
+
 /* ─────────────────────────────────────────────────────────
    CSS GLOBAL (éditeur + impression)
 ───────────────────────────────────────────────────────── */
@@ -211,11 +225,19 @@ const GLOBAL_CSS = `
   outline: none;
   min-height: 420px;
 }
-.ProseMirror p { margin: 0 0 8px; }
+.ProseMirror p:not(.devis-salmon-heading) { margin: 0 0 8px; }
 /* Espacements manuels (Entrée) — aligné sur le PDF */
 ${devisEmptyParagraphCss('.ProseMirror')}
 .ProseMirror ul,
 .ProseMirror ol { padding-left: 22px; margin: 0 0 8px; }
+.ProseMirror ul:has(+ .devis-salmon-heading),
+.ProseMirror ol:has(+ .devis-salmon-heading) {
+  margin-bottom: 0;
+}
+.ProseMirror ul + .devis-salmon-heading,
+.ProseMirror ol + .devis-salmon-heading {
+  margin-top: 0;
+}
 .ProseMirror ol { list-style-type: decimal; }
 .ProseMirror ol > li,
 .ProseMirror ul > li { margin: 0 0 6px; break-inside: avoid; page-break-inside: avoid; }
@@ -232,6 +254,18 @@ ${devisEmptyParagraphCss('.ProseMirror')}
 .ProseMirror u { text-decoration: none; border-bottom: 1px solid ${DEVIS_CHARTE.rose}; }
 .ProseMirror mark {
   padding: 0 1px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.ProseMirror .devis-examen-salmon-hi mark,
+.doc-shell .devis-examen-salmon-hi mark {
+  background-color: #D9D9D9;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.ProseMirror .devis-examen-salmon-hi mark span,
+.doc-shell .devis-examen-salmon-hi mark span {
+  color: #FF7C80 !important;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -272,6 +306,8 @@ ${diagnosticVisageCss('.doc-section-top .ProseMirror', '.doc-shell .doc-section-
 }
 .doc-section-offer .ProseMirror p { margin: 0 0 6px; display: block; }
 .doc-section-offer .ProseMirror p:last-child { margin-bottom: 0; }
+${devisOfferSejourFluoCss('.doc-section-top .ProseMirror')}
+${devisOfferSejourFluoCss('.doc-shell .doc-section-top')}
 ${devisOfferSejourFluoCss('.doc-section-offer')}
 ${devisOfferSejourFluoCss('.doc-offer-preview')}
 .doc-section-offer-sub,
@@ -303,15 +339,79 @@ ${devisOfferSejourFluoCss('.doc-offer-preview')}
   letter-spacing: 0.02em;
 }
 .doc-section-offer-total .ProseMirror p { margin: 0; text-align: center; }
-.doc-offer-preview.is-editing {
-  outline: 2px solid ${DEVIS_ACCENT}55;
-  outline-offset: 4px;
-  border-radius: 4px;
+/* Hauteur auto : évite le vide entre exclut et « Notre meilleure offre » (min-height global 420px). */
+.doc-section-top .ProseMirror,
+.doc-section-top .tiptap {
+  min-height: 0;
+}
+.doc-section-top .ProseMirror > ul:last-child,
+.doc-section-top .ProseMirror > ol:last-child,
+.doc-section-top .ProseMirror > ul:last-of-type,
+.doc-section-top .ProseMirror > ol:last-of-type {
+  margin-bottom: 0;
+}
+.doc-section-top .ProseMirror > ul:last-child > li:last-child,
+.doc-section-top .ProseMirror > ol:last-child > li:last-child,
+.doc-section-top .ProseMirror > ul:last-of-type > li:last-child,
+.doc-section-top .ProseMirror > ol:last-of-type > li:last-child {
+  margin-bottom: 0;
+}
+/* Paragraphes vides TipTap après la dernière liste — masqués (min-height 1.65em sinon). */
+.doc-section-top .ProseMirror > ul:last-of-type ~ p:empty,
+.doc-section-top .ProseMirror > ul:last-of-type ~ p.devis-spacer,
+.doc-section-top .ProseMirror > ul:last-of-type ~ p:has(> br:only-child),
+.doc-section-top .ProseMirror > ol:last-of-type ~ p:empty,
+.doc-section-top .ProseMirror > ol:last-of-type ~ p.devis-spacer,
+.doc-section-top .ProseMirror > ol:last-of-type ~ p:has(> br:only-child) {
+  display: none !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  line-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+/* Lignes vides TipTap après « Notre meilleure offre » (dans le corps du document). */
+.doc-section-top .ProseMirror > p.devis-salmon-heading:last-of-type ~ p:empty,
+.doc-section-top .ProseMirror > p.devis-salmon-heading:last-of-type ~ p.devis-spacer,
+.doc-section-top .ProseMirror > p.devis-salmon-heading:last-of-type ~ p:has(> br:only-child) {
+  display: none !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  line-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+.doc-offer-zone .doc-section-top + .doc-offer-preview {
+  margin-top: 0;
+  padding-top: 0;
+}
+.doc-offer-zone .doc-section-top .ProseMirror,
+.doc-offer-zone .doc-section-top .tiptap {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.doc-offer-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+}
+.doc-offer-zone .doc-offer-preview {
+  margin-top: 0;
+}
+.doc-section-bottom {
+  margin-top: ${DEVIS_SALMON_HEADING_GAP.beforeBlock};
 }
 
 /* Titres de section + libellés saumon — mode éditable (palette couleur) */
 ${devisSectionHeadingCss('.ProseMirror', { editable: true })}
 ${devisSectionHeadingCss('.doc-shell', { editable: true })}
+.doc-offer-zone .doc-offer-preview,
+.doc-shell .doc-section-top + .doc-offer-preview {
+  margin-top: 0;
+}
 /* Couleur / surlignage manuel TipTap — y compris titres de section */
 .ProseMirror span[style*="color"],
 .ProseMirror mark[style*="background"],
@@ -409,6 +509,9 @@ ${DEVIS_OFFER_PREVIEW_CSS}
   }
   .ProseMirror,
   .doc-shell .tiptap { min-height: 280px; }
+  .doc-section-top .ProseMirror,
+  .doc-section-top .tiptap { min-height: 0 !important; }
+  .doc-offer-zone .doc-offer-preview { margin-top: 0; }
   .doc-section-offer .ProseMirror,
   .doc-section-offer .tiptap,
   .doc-section-offer-sub .ProseMirror,
@@ -483,11 +586,10 @@ export default function DevisEditorPage() {
   const [initialBottomHtml, setInitialBottomHtml] = useState<string>('')
   const [initialOfferTitle, setInitialOfferTitle] = useState<string>('')
   const [initialOfferTotal, setInitialOfferTotal] = useState<string>('')
-  const [initialOfferSubtitle, setInitialOfferSubtitle] = useState<string>('')
   const [initialOfferHeadDesc, setInitialOfferHeadDesc] = useState<string>('')
   const [initialOfferHeadPrice, setInitialOfferHeadPrice] = useState<string>('')
   const [activeZone, setActiveZone] = useState<
-    'top' | 'bottom' | 'offer' | 'offerTotal' | 'offerSub' | 'offerHeadDesc' | 'offerHeadPrice'
+    'top' | 'bottom' | 'offer' | 'offerTotal' | 'offerHeadDesc' | 'offerHeadPrice'
   >('top')
   const [tndPerEur, setTndPerEur] = useState(DEFAULT_TND_PER_EUR)
 
@@ -497,7 +599,6 @@ export default function DevisEditorPage() {
   const editorBotRef = useRef<Editor | null>(null)
   const editorOfferRef = useRef<Editor | null>(null)
   const editorOfferTotalRef = useRef<Editor | null>(null)
-  const editorOfferSubRef = useRef<Editor | null>(null)
   const editorOfferHeadDescRef = useRef<Editor | null>(null)
   const editorOfferHeadPriceRef = useRef<Editor | null>(null)
   const tndPerEurRef = useRef(DEFAULT_TND_PER_EUR)
@@ -505,7 +606,7 @@ export default function DevisEditorPage() {
   const readyToSaveRef = useRef(false)
   const offerTotalTouchedRef = useRef(false)
   const hydratedRef = useRef({
-    top: '', bot: '', offer: '', total: '', sub: '', headDesc: '', headPrice: '',
+    top: '', bot: '', offer: '', total: '', headDesc: '', headPrice: '',
   })
 
   /* CSS global */
@@ -522,7 +623,7 @@ export default function DevisEditorPage() {
     if (!patientId) return
     readyToSaveRef.current = false
     offerTotalTouchedRef.current = false
-    hydratedRef.current = { top: '', bot: '', offer: '', total: '', sub: '', headDesc: '', headPrice: '' }
+    hydratedRef.current = { top: '', bot: '', offer: '', total: '', headDesc: '', headPrice: '' }
     setLoading(true); setError(null)
     try {
       const [{ patient: p }, taux] = await Promise.all([
@@ -570,7 +671,13 @@ export default function DevisEditorPage() {
           devis: dv,
           letterContext: ctx,
         })
-        setInitialTopHtml(syncDureeTotaleSejourInHtml(loaded.topHtml, sv.dureeTotale))
+        setInitialTopHtml(restoreDevisCanonicalColorsInTopHtml(prepareDevisHtmlForEditor(
+          applyTopWithOfferHeading(
+            syncDureeTotaleSejourInHtml(loaded.topHtml, sv.dureeTotale),
+            loaded.offerSubtitle,
+            lignes.length > 0,
+          ),
+        )))
         setInitialBottomHtml(loaded.botHtml)
         setInitialOfferTitle(
           looksLikeOfferDescHtml(loaded.offerTitle)
@@ -578,11 +685,6 @@ export default function DevisEditorPage() {
             : buildOfferDescEditorHtml(loaded.offerTitle, sv.sejourLine, sv.typeChambre),
         )
         setInitialOfferTotal(loaded.offerTotal)
-        setInitialOfferSubtitle(
-          personalized
-            ? (loaded.offerSubtitle || defaultOfferSubtitleHtml())
-            : prepareDevisHtmlForEditor(loaded.offerSubtitle || defaultOfferSubtitleHtml()),
-        )
         setInitialOfferHeadDesc(
           personalized
             ? (loaded.offerHeadDesc || defaultOfferHeadDescHtml())
@@ -601,7 +703,6 @@ export default function DevisEditorPage() {
         setInitialBottomHtml(buildBottomHtml(0, tndPerEurRate))
         setInitialOfferTitle(defaultDescHtml)
         setInitialOfferTotal(fmtNum(0))
-        setInitialOfferSubtitle(defaultOfferSubtitleHtml())
         setInitialOfferHeadDesc(defaultOfferHeadDescHtml())
         setInitialOfferHeadPrice(defaultOfferHeadPriceHtml())
       }
@@ -622,14 +723,15 @@ export default function DevisEditorPage() {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = undefined
     }
-    const topHtml = markDevisSpacerParagraphs(editorTopRef.current?.getHTML() ?? '')
+    const rawTop = markDevisSpacerParagraphs(editorTopRef.current?.getHTML() ?? '')
+    const { topHtml, subtitleHtml } = stripOfferMeilleureHeadingForExport(rawTop)
     const botHtml = markDevisSpacerParagraphs(editorBotRef.current?.getHTML() ?? '')
     const offerTitle = editorOfferRef.current?.getHTML()?.trim()
       || readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
     const offerTotal = editorOfferTotalRef.current?.getHTML()?.trim()
       || readOfferTotalDisplay(editorOfferTotalRef.current, '0')
     const offerChrome = {
-      subtitle: editorOfferSubRef.current?.getHTML()?.trim() || defaultOfferSubtitleHtml(),
+      subtitle: subtitleHtml?.trim() || defaultOfferSubtitleHtml(),
       headDesc: editorOfferHeadDescRef.current?.getHTML()?.trim() || defaultOfferHeadDescHtml(),
       headPrice: editorOfferHeadPriceRef.current?.getHTML()?.trim() || defaultOfferHeadPriceHtml(),
     }
@@ -658,7 +760,8 @@ export default function DevisEditorPage() {
   }, [])
 
   const snapshotCustomContent = useCallback((): string | null => {
-    const topHtml = markDevisSpacerParagraphs(editorTopRef.current?.getHTML() ?? '')
+    const rawTop = markDevisSpacerParagraphs(editorTopRef.current?.getHTML() ?? '')
+    const { topHtml, subtitleHtml } = stripOfferMeilleureHeadingForExport(rawTop)
     const botHtml = markDevisSpacerParagraphs(editorBotRef.current?.getHTML() ?? '')
     if (!topHtml.trim() && !botHtml.trim()) return null
     const offerTitle = editorOfferRef.current?.getHTML()?.trim()
@@ -672,7 +775,7 @@ export default function DevisEditorPage() {
       offerTotal,
       offerTotalTouchedRef.current,
       {
-        subtitle: editorOfferSubRef.current?.getHTML()?.trim() || defaultOfferSubtitleHtml(),
+        subtitle: subtitleHtml?.trim() || defaultOfferSubtitleHtml(),
         headDesc: editorOfferHeadDescRef.current?.getHTML()?.trim() || defaultOfferHeadDescHtml(),
         headPrice: editorOfferHeadPriceRef.current?.getHTML()?.trim() || defaultOfferHeadPriceHtml(),
       },
@@ -832,13 +935,6 @@ export default function DevisEditorPage() {
     DevisColor,
     DevisHighlight.configure({ multicolor: true }),
   ]
-  const editorOfferSub = useEditor({
-    immediatelyRender: false,
-    extensions: makeOfferChromeExts(),
-    content: initialOfferSubtitle || defaultOfferSubtitleHtml(),
-    onFocus: () => setActiveZone('offerSub'),
-    onUpdate: triggerSave,
-  })
   const editorOfferHeadDesc = useEditor({
     immediatelyRender: false,
     extensions: makeOfferChromeExts(),
@@ -857,7 +953,6 @@ export default function DevisEditorPage() {
   editorBotRef.current = editorBot
   editorOfferRef.current = editorOffer
   editorOfferTotalRef.current = editorOfferTotal
-  editorOfferSubRef.current = editorOfferSub
   editorOfferHeadDescRef.current = editorOfferHeadDesc
   editorOfferHeadPriceRef.current = editorOfferHeadPrice
 
@@ -865,7 +960,7 @@ export default function DevisEditorPage() {
   useEffect(() => {
     if (!editorTop || !initialTopHtml || loading) return
     if (hydratedRef.current.top === initialTopHtml) return
-    editorTop.commands.setContent(initialTopHtml, { emitUpdate: false })
+    editorTop.commands.setContent(restoreDevisCanonicalColorsInTopHtml(initialTopHtml), { emitUpdate: false })
     hydratedRef.current.top = initialTopHtml
   }, [editorTop, initialTopHtml, loading])
   useEffect(() => {
@@ -888,13 +983,6 @@ export default function DevisEditorPage() {
     editorOfferTotal.commands.setContent(next, { emitUpdate: false })
     hydratedRef.current.total = next
   }, [editorOfferTotal, initialOfferTotal, loading])
-  useEffect(() => {
-    if (!editorOfferSub || loading) return
-    const next = initialOfferSubtitle || defaultOfferSubtitleHtml()
-    if (hydratedRef.current.sub === next) return
-    editorOfferSub.commands.setContent(next, { emitUpdate: false })
-    hydratedRef.current.sub = next
-  }, [editorOfferSub, initialOfferSubtitle, loading])
   useEffect(() => {
     if (!editorOfferHeadDesc || loading) return
     const next = initialOfferHeadDesc || defaultOfferHeadDescHtml()
@@ -973,16 +1061,20 @@ export default function DevisEditorPage() {
       || 'Séjour médical personnalisé'
     // Régénère depuis cases + tableau prestations (écrase les edits TipTap — voulu)
     const svReset = sejourPdfFromContext(letterCtx(patient, dvReset ?? undefined))
-    editorTop?.commands.setContent(buildTopHtml(patient, dvReset ?? undefined))
+    const lignesReset = dvReset?.lignes ?? []
+    const topReset = applyTopWithOfferHeading(
+      buildTopHtml(patient, dvReset ?? undefined),
+      defaultOfferSubtitleHtml(),
+      lignesReset.length > 0,
+    )
+    editorTop?.commands.setContent(topReset)
     editorBot?.commands.setContent(buildBottomHtml(totalReset, tndPerEur))
     editorOffer?.commands.setContent(buildOfferDescEditorHtml(defaultOffer, svReset.sejourLine, svReset.typeChambre))
     editorOfferTotal?.commands.setContent(offerTotalEditorHtml(fmtNum(totalReset)))
-    editorOfferSub?.commands.setContent(defaultOfferSubtitleHtml())
     editorOfferHeadDesc?.commands.setContent(defaultOfferHeadDescHtml())
     editorOfferHeadPrice?.commands.setContent(defaultOfferHeadPriceHtml())
     setInitialOfferTitle(buildOfferDescEditorHtml(defaultOffer, svReset.sejourLine, svReset.typeChambre))
     setInitialOfferTotal(fmtNum(totalReset))
-    setInitialOfferSubtitle(defaultOfferSubtitleHtml())
     setInitialOfferHeadDesc(defaultOfferHeadDescHtml())
     setInitialOfferHeadPrice(defaultOfferHeadPriceHtml())
     offerTotalTouchedRef.current = false
@@ -1024,7 +1116,8 @@ export default function DevisEditorPage() {
   /* Construit le HTML complet — reprend l’écran tel quel (pas de resync qui écrase les corrections). */
   const buildDevisFullHtml = () => {
     if (!patient || !dv) return ''
-    const topHtml = editorTopRef.current?.getHTML() ?? ''
+    const rawTop = editorTopRef.current?.getHTML() ?? ''
+    const { topHtml, subtitleHtml } = stripOfferMeilleureHeadingForExport(rawTop)
     const offerHtml = editorOfferRef.current?.getHTML() ?? ''
     const offer = offerHtml.trim().startsWith('<')
       ? offerHtml
@@ -1042,7 +1135,7 @@ export default function DevisEditorPage() {
       botHtml,
       operationTitle: offer,
       operationTotal: offerTotalDisp,
-      subtitleHtml: editorOfferSubRef.current?.getHTML() ?? '',
+      subtitleHtml: subtitleHtml ?? defaultOfferSubtitleHtml(),
       headDescHtml: editorOfferHeadDescRef.current?.getHTML() ?? '',
       headPriceHtml: editorOfferHeadPriceRef.current?.getHTML() ?? '',
       tndPerEur,
@@ -1130,17 +1223,15 @@ export default function DevisEditorPage() {
             Zone active : <strong>{
               activeZone === 'top'
                 ? 'Corps du document'
-                : activeZone === 'offerSub'
-                  ? 'Titre du tableau'
-                  : activeZone === 'offerHeadDesc'
-                    ? 'En-tête Description'
-                    : activeZone === 'offerHeadPrice'
-                      ? 'En-tête Tarif'
-                      : activeZone === 'offer'
-                        ? 'Contenu du tableau'
-                        : activeZone === 'offerTotal'
-                          ? 'Total offre'
-                          : 'Bas du document'
+                : activeZone === 'offerHeadDesc'
+                  ? 'En-tête Description'
+                  : activeZone === 'offerHeadPrice'
+                    ? 'En-tête Tarif'
+                    : activeZone === 'offer'
+                      ? 'Contenu du tableau'
+                      : activeZone === 'offerTotal'
+                        ? 'Total offre'
+                        : 'Bas du document'
             }</strong>
           </p>
         </div>
@@ -1185,15 +1276,13 @@ export default function DevisEditorPage() {
           ? editorOfferTotal
           : activeZone === 'offer'
             ? editorOffer
-            : activeZone === 'offerSub'
-              ? editorOfferSub
-              : activeZone === 'offerHeadDesc'
-                ? editorOfferHeadDesc
-                : activeZone === 'offerHeadPrice'
-                  ? editorOfferHeadPrice
-                  : activeZone === 'top'
-                    ? editorTop
-                    : editorBot
+            : activeZone === 'offerHeadDesc'
+              ? editorOfferHeadDesc
+              : activeZone === 'offerHeadPrice'
+                ? editorOfferHeadPrice
+                : activeZone === 'top'
+                  ? editorTop
+                  : editorBot
       }
         highlightColors={DEVIS_HIGHLIGHT_COLORS}
       />
@@ -1227,58 +1316,45 @@ export default function DevisEditorPage() {
             />
           </div>
 
-          {/* ── Zone éditable HAUTE ── */}
-          <div className="doc-section-top" style={{ flexShrink: 0 }}>
-            <EditorContent editor={editorTop} />
-          </div>
-
-          {/* ── Tableau offre (titre, en-têtes et contenu éditables) ── */}
-          {lignes.length > 0 && (
-            <div
-              className={`avoid-break doc-offer-preview${
-                activeZone === 'offer'
-                || activeZone === 'offerTotal'
-                || activeZone === 'offerSub'
-                || activeZone === 'offerHeadDesc'
-                || activeZone === 'offerHeadPrice'
-                  ? ' is-editing'
-                  : ''
-              }`}
-              style={{ flexShrink: 0 }}
-            >
-              <div className="offer-block">
-                <div className="offer-subtitle doc-section-offer-sub">
-                  <EditorContent editor={editorOfferSub} />
-                </div>
-                <table className="offer-table">
-                  <thead>
-                    <tr>
-                      <th className="col-desc doc-section-offer-head">
-                        <EditorContent editor={editorOfferHeadDesc} />
-                      </th>
-                      <th className="col-price doc-section-offer-head">
-                        <EditorContent editor={editorOfferHeadPrice} />
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td className="desc-cell">
-                        <div className="op-title doc-section-offer">
-                          <EditorContent editor={editorOffer} />
-                        </div>
-                      </td>
-                      <td className="price-cell">
-                        <span className="price-amount doc-section-offer-total">
-                          <EditorContent editor={editorOfferTotal} />
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+          {/* ── Inclut / exclut + tableau offre (sans gap flex entre les deux) ── */}
+          <div className="doc-offer-zone">
+            <div className="doc-section-top">
+              <EditorContent editor={editorTop} />
             </div>
-          )}
+
+            {lignes.length > 0 && (
+              <div className="avoid-break doc-offer-preview">
+                <div className="offer-block">
+                  <table className="offer-table">
+                      <thead>
+                        <tr>
+                          <th className="col-desc doc-section-offer-head">
+                            <EditorContent editor={editorOfferHeadDesc} />
+                          </th>
+                          <th className="col-price doc-section-offer-head">
+                            <EditorContent editor={editorOfferHeadPrice} />
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="desc-cell">
+                            <div className="op-title doc-section-offer">
+                              <EditorContent editor={editorOffer} />
+                            </div>
+                          </td>
+                          <td className="price-cell">
+                            <span className="price-amount doc-section-offer-total">
+                              <EditorContent editor={editorOfferTotal} />
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+            )}
+          </div>
 
           {/* ── Bas de document (modalités + validité) ── */}
           <div className="doc-section-bottom">

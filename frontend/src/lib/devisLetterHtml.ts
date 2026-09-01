@@ -10,11 +10,13 @@ import {
   buildDevisRefTitleHtml,
   devisFieldRow,
   devisLabel,
+  devisSalmonHeading,
   devisSalmonLabelStyleAttr,
   devisSectionHeading,
   buildPaymentModalitiesBodyHtml,
   buildOfferValidityBlockHtml,
   buildOfferSejourBadgeLine,
+  offerDureeTotaleFluoHtml,
   offerSejourFluoHtml,
 } from '@/lib/devisCharte'
 import {
@@ -46,6 +48,7 @@ export type DevisLetterRapportVersion = {
   createdAt: string
   diagnostic?: string | null
   interventionsRecommandees?: string[]
+  examensDemandes?: string[]
 }
 
 export type DevisLetterRapport = {
@@ -135,6 +138,9 @@ function applyRapportSnapshot(
     interventionsRecommandees: snap.interventionsRecommandees?.length
       ? snap.interventionsRecommandees
       : rap.interventionsRecommandees,
+    examensDemandes: Array.isArray(snap.examensDemandes) && snap.examensDemandes.length
+      ? snap.examensDemandes.map(String)
+      : rap.examensDemandes,
   }
 }
 
@@ -363,13 +369,23 @@ function refreshDevisFieldByLabel(html: string, label: string, value: string): s
   return html
 }
 
+const DUREE_TOTALE_SEJOUR_LABEL = 'Durée TOTALE du séjour :'
+
+/** Ligne « Durée TOTALE du séjour » — texte jaune + fluo gris foncé (identique badge séjour). */
+function paraDureeTotaleSejourFluo(dureeTotale: string): string {
+  return `<p>${offerDureeTotaleFluoHtml(`${DUREE_TOTALE_SEJOUR_LABEL} ${dureeTotale}`)}</p>`
+}
+
 function refreshHighlightByLabel(html: string, label: string, value: string): string {
   if (value == null) return html
+  const fresh =
+    label === DUREE_TOTALE_SEJOUR_LABEL
+      ? `${paraDureeTotaleSejourFluo(value)}\n<p></p>`
+      : `${paraSalmonHi(`${label} ${value}`)}\n<p></p>`
   // Uniquement via DOM : un seul <p> (jamais de regex multi-paragraphes —
   // sinon on écrase tout le début de la lettre jusqu’à « Durée TOTALE »).
   if (typeof window === 'undefined') {
     // Fallback Node / SSR : paragraphe isolé seulement
-    const fresh = `${paraSalmonHi(`${label} ${value}`)}\n<p></p>`
     const re =
       /<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour\s*:(?:(?!<\/p>)[\s\S])*<\/p>(?:\s*<p(?:\s[^>]*)?>\s*<\/p>)?/i
     return re.test(html) ? html.replace(re, fresh) : html
@@ -380,7 +396,6 @@ function refreshHighlightByLabel(html: string, label: string, value: string): st
   if (!root) return html
   const normalize = (s: string) => s.replace(/\s+/g, ' ').trim()
   const target = normalize(label)
-  const fresh = `${paraSalmonHi(`${label} ${value}`)}\n<p></p>`
 
   for (const p of Array.from(root.querySelectorAll('p'))) {
     if (!normalize(p.textContent ?? '').startsWith(target)) continue
@@ -400,7 +415,30 @@ function refreshHighlightByLabel(html: string, label: string, value: string): st
 
 /** Met à jour la ligne « Durée TOTALE du séjour » (nuits + jours). */
 export function syncDureeTotaleSejourInHtml(html: string, dureeTotale: string): string {
-  return refreshHighlightByLabel(html, 'Durée TOTALE du séjour :', dureeTotale)
+  let out = refreshHighlightByLabel(html, DUREE_TOTALE_SEJOUR_LABEL, dureeTotale)
+  if (/Durée\s+TOTALE\s+du\s+s[ée]jour/i.test(out)) {
+    return out.replace(
+      /<mark\b([^>]*)\boffer-fluo-sejour\b([^>]*)>([\s\S]*?Durée\s+TOTALE\s+du\s+s[ée]jour[\s\S]*?)<\/mark>/gi,
+      (_full, _a, _b, inner: string) => {
+        const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+        return offerDureeTotaleFluoHtml(text)
+      },
+    )
+  }
+  // Répare badge tableau « Séjour X nuits Chambre… » injecté par erreur avant « Détails de l'intervention »
+  const detailsHeadingRe =
+    /(<p\b[^>]*class="[^"]*\bdevis-heading\b[^"]*"[^>]*>[\s\S]*?D[ée]tails de l['']intervention[\s\S]*?<\/p>)/i
+  const wrongLineRe =
+    /<p\b[^>]*>\s*<mark\b[^>]*\boffer-fluo-sejour\b[^>]*>[\s\S]*?<\/mark>\s*<\/p>\s*(?=<p\b[^>]*class="[^"]*\bdevis-heading\b)/i
+  if (wrongLineRe.test(out)) {
+    out = out.replace(wrongLineRe, `${paraDureeTotaleSejourFluo(dureeTotale)}\n`)
+    return out
+  }
+  const m = out.match(detailsHeadingRe)
+  if (m && m.index != null && !/Durée\s+TOTALE\s+du\s+s[ée]jour/i.test(out.slice(0, m.index))) {
+    out = `${out.slice(0, m.index)}${paraDureeTotaleSejourFluo(dureeTotale)}\n${out.slice(m.index)}`
+  }
+  return out
 }
 
 function refreshSejourBadgeInHtml(html: string, sejourLine: string, typeChambre = ''): string {
@@ -414,7 +452,7 @@ export function syncOfferSejourInHtml(html: string, sejourLine: string, typeCham
   const badgeHtml = offerSejourFluoHtml(badgeLine)
   let out = html.replace(
     /<mark\b[^>]*\boffer-fluo-sejour\b[^>]*>[\s\S]*?<\/mark>/gi,
-    badgeHtml,
+    (mark) => (/Durée\s+TOTALE\s+du\s+s[ée]jour/i.test(mark) ? mark : badgeHtml),
   )
   out = out.replace(
     /(<div class="sejour-badge">)[\s\S]*?(<\/div>)/gi,
@@ -442,6 +480,11 @@ function normalizeSejourJoursToNuits(html: string): string {
   return out
 }
 
+/** Phrases saumon + surlignage gris (bloc examens médicaux). */
+function paraExamensSalmonHi(text: string): string {
+  return paraSalmonHi(text).replace(/^<p>/, '<p class="devis-examen-salmon-hi">')
+}
+
 export function buildExamensMedicauxHtml(ctx: DevisLetterContext): string {
   const examens = pickRapport(ctx)?.examensDemandes ?? []
   const hasBilan = examens.some((e) => e.toLowerCase().includes('bilan sanguin'))
@@ -452,7 +495,7 @@ export function buildExamensMedicauxHtml(ctx: DevisLetterContext): string {
   const examSubItem = (label: string) =>
     `<li class="devis-examen-item"><span style="color:${ink}">${label}</span></li>`
 
-  let body = paraSalmonHi(
+  let body = paraExamensSalmonHi(
     "Les examens doivent avoir une validité maximum de 3 mois — À envoyer à J-10 de la date d'intervention",
   )
   const examItems: string[] = []
@@ -477,7 +520,7 @@ ${examSubItem('URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT')}
   body += `<ol class="devis-examens-list" style="padding-left:22px;list-style-type:decimal">
 ${examItems.map((item) => `<li class="devis-examen-item" style="color:${ink}">${item}</li>`).join('\n')}
 </ol>`
-  body += paraSalmonHi(
+  body += paraExamensSalmonHi(
     "Prévoir une copie papier des rapports médicaux pour la constitution de votre dossier médical à l'entrée de la clinique.",
   )
 
@@ -491,6 +534,53 @@ const EXAMEN_PHRASE_1 =
   "Les examens doivent avoir une validité maximum de 3 mois — À envoyer à J-10 de la date d'intervention"
 const EXAMEN_PHRASE_2 =
   "Prévoir une copie papier des rapports médicaux pour la constitution de votre dossier médical à l'entrée de la clinique."
+
+const EXAMEN_SALMON_PHRASES = [EXAMEN_PHRASE_1, EXAMEN_PHRASE_2] as const
+
+function paragraphMatchesExamenSalmonPhrase(text: string, phrase: string): boolean {
+  const norm = text.replace(/\s+/g, ' ').trim()
+  const target = phrase.replace(/\s+/g, ' ').trim()
+  return norm === target || norm.includes(target)
+}
+
+/** Rétablit le fluo saumon/gris des 2 phrases du bloc examens (HTML éditeur ou sauvegardé). */
+export function refreshExamensSalmonPhrasesInTopHtml(html: string): string {
+  if (!html?.trim()) return html
+
+  if (typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+    const root = doc.getElementById('__root')
+    if (!root) return html
+    for (const p of Array.from(root.querySelectorAll('p'))) {
+      const text = (p.textContent ?? '').replace(/\s+/g, ' ').trim()
+      for (const phrase of EXAMEN_SALMON_PHRASES) {
+        if (!paragraphMatchesExamenSalmonPhrase(text, phrase)) continue
+        if (
+          p.classList.contains('devis-examen-salmon-hi')
+          && p.querySelector('mark span[style*="color"]')
+        ) {
+          break
+        }
+        const wrapper = doc.createElement('div')
+        wrapper.innerHTML = paraExamensSalmonHi(phrase)
+        const fresh = wrapper.firstElementChild
+        if (fresh) p.replaceWith(fresh)
+        break
+      }
+    }
+    return root.innerHTML
+  }
+
+  let out = html
+  for (const phrase of EXAMEN_SALMON_PHRASES) {
+    const esc = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    out = out.replace(
+      new RegExp(`<p\\b[^>]*>(?:(?!</p>)[\\s\\S])*?${esc}(?:(?!</p>)[\\s\\S])*?</p>`, 'gi'),
+      paraExamensSalmonHi(phrase),
+    )
+  }
+  return out
+}
 
 function stripTags(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -544,6 +634,20 @@ function extractExamensLabelsFromHtml(html: string): string[] {
   }
 
   return labels
+}
+
+const PREVENTIF_HEADING_RE = /traitement préventif,\s*prenez 2 semaines avant/i
+
+/** Insère le bloc examens juste après la liste du traitement préventif. */
+function insertExamensAfterPreventiveBlock(html: string, fresh: string): string | null {
+  const idx = html.search(PREVENTIF_HEADING_RE)
+  if (idx < 0) return null
+  const tail = html.slice(idx)
+  const ulMatch = tail.match(/<ul\b[^>]*>[\s\S]*?<\/ul>/i)
+  if (!ulMatch || ulMatch.index == null) return null
+  const insertPos = idx + ulMatch.index + ulMatch[0].length
+  const head = stripTrailingEmptyParagraphs(html.slice(0, insertPos))
+  return `${head}\n${fresh}\n${html.slice(insertPos)}`
 }
 
 /**
@@ -602,9 +706,19 @@ function replaceExamensSection(html: string, fresh: string): string {
     const offrePStart = out.lastIndexOf('<p', offreTextIdx)
     if (offrePStart >= 0) {
       const head = stripTrailingEmptyParagraphs(out.slice(0, offrePStart))
-      return `${head}${fresh}\n<p></p>\n${out.slice(offrePStart)}`
+      return `${head}${fresh}\n${out.slice(offrePStart)}`
     }
   }
+  const inclutIdx = out.search(/Votre devis inclut\s*:/i)
+  if (inclutIdx >= 0) {
+    const inclutPStart = out.lastIndexOf('<p', inclutIdx)
+    if (inclutPStart >= 0) {
+      const head = stripTrailingEmptyParagraphs(out.slice(0, inclutPStart))
+      return `${head}${fresh}\n${out.slice(inclutPStart)}`
+    }
+  }
+  const afterPreventive = insertExamensAfterPreventiveBlock(out, fresh)
+  if (afterPreventive) return afterPreventive
   return `${stripTrailingEmptyParagraphs(out)}\n${fresh}`
 }
 
@@ -640,8 +754,10 @@ function normalizeGapBeforeDetailsIntervention(html: string): string {
   return out
 }
 
+const TRAILING_EMPTY_P_RE = String.raw`<p\b[^>]*>\s*(?:(?:<br\b[^>]*/?>|&nbsp;|\u00a0|\s)*)\s*</p>`
+
 function stripTrailingEmptyParagraphs(html: string): string {
-  return html.replace(new RegExp(`(?:\\s*${EMPTY_P_RE})+$`, 'gi'), '\n')
+  return html.replace(new RegExp(`(?:\\s*${TRAILING_EMPTY_P_RE})+$`, 'gi'), '\n')
 }
 
 /** Réduit les trous verticaux autour des titres de section. */
@@ -656,19 +772,20 @@ function refreshExamensInTopHtml(html: string, ctx: DevisLetterContext): string 
   const fromRapport = (rap?.examensDemandes ?? [])
     .map((e) => e.trim())
     .filter(Boolean)
-
-  const labels = fromRapport.length > 0 ? fromRapport : extractExamensLabelsFromHtml(html)
-  const hasSection =
-    /Examens médicaux nécessaires/i.test(html) || html.includes(EXAMENS_START)
-
-  if (labels.length === 0 && !hasSection) return html
+  const fromHtml = extractExamensLabelsFromHtml(html)
+  const examensLabels = fromRapport.length > 0 ? fromRapport : fromHtml
 
   const fresh = buildExamensMedicauxHtml({
     ...ctx,
     activeDevis: rap?.id
       ? { ...(pickDevis(ctx) ?? {}), rapportId: rap.id }
       : { rapportId: null, dateCreation: undefined, envoyeAt: undefined },
-    rapports: [{ ...(rap ?? {}), examensDemandes: labels }],
+    rapports: [
+      {
+        ...(rap ?? { interventionsRecommandees: [], diagnostic: null }),
+        examensDemandes: examensLabels,
+      },
+    ],
   })
   return replaceExamensSection(html, fresh)
 }
@@ -946,8 +1063,14 @@ function isDevisFieldLabelText(text: string): boolean {
   return /:\s*$/.test(text.replace(/\s+/g, ' ').trim())
 }
 
+function paragraphIsSalmonHeadingOnly(text: string): boolean {
+  const t = text.replace(/\s+/g, ' ').trim()
+  return isDevisFieldLabelText(t) && /^[^:]+:\s*$/.test(t)
+}
+
 function paragraphLooksLikeFieldRow(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim()
+  if (paragraphIsSalmonHeadingOnly(t)) return true
   return /^[^:]+:\s/.test(t) && t.length < 600
 }
 
@@ -983,7 +1106,13 @@ function upgradeParagraphFieldLabel(p: Element, doc: Document): void {
   if (p.classList.contains('devis-heading') || p.classList.contains('devis-ref-title')) return
   const normalized = (p.textContent ?? '').replace(/\s+/g, ' ').trim()
   if (!paragraphLooksLikeFieldRow(normalized)) return
-  p.classList.add('devis-field-row')
+  if (paragraphIsSalmonHeadingOnly(normalized)) {
+    p.classList.remove('devis-field-row')
+    p.classList.add('devis-salmon-heading')
+  } else {
+    p.classList.add('devis-field-row')
+    p.classList.remove('devis-salmon-heading')
+  }
 
   const directStrong = p.querySelector(':scope > strong')
   if (directStrong && isDevisFieldLabelText(directStrong.textContent ?? '')) {
@@ -1036,6 +1165,7 @@ function refreshSalmonFieldLabelsDom(html: string): string {
   for (const p of Array.from(root.querySelectorAll('p'))) {
     upgradeParagraphFieldLabel(p, doc)
   }
+  compactSpacingBeforeSalmonHeadingsDom(root)
   return root.innerHTML
 }
 
@@ -1060,8 +1190,8 @@ function refreshSalmonFieldLabelsSsr(html: string): string {
     `<span class="devis-field-label devis-field-label--salmon" style="${salmonStyle}">$2</span>`,
   )
   out = out.replace(
-    /<p(?![^>]*class="[^"]*devis-field-row)([^>]*)>\s*(<span class="devis-field-label)/gi,
-    '<p class="devis-field-row"$1>$2',
+    /<p(?![^>]*class="[^"]*(?:devis-field-row|devis-salmon-heading))([^>]*)>\s*(<span class="devis-field-label[^>]*>[\s\S]*?<\/span>)\s*<\/p>/gi,
+    '<p class="devis-salmon-heading"$1>$2</p>',
   )
   out = out.replace(
     /(<span class="devis-field-label[^"]*"[^>]*style="[^"]*)font-weight:\s*600/gi,
@@ -1074,12 +1204,67 @@ function refreshSalmonFieldLabelsSsr(html: string): string {
   return out
 }
 
-/** Libellés « Intervention souhaitée : » etc. — bronze → saumon (lettres enregistrées). */
-function refreshSalmonFieldLabelsInTopHtml(html: string): string {
-  if (typeof window !== 'undefined') {
-    return refreshSalmonFieldLabelsDom(html)
+function isEmptyParagraphEl(el: Element): boolean {
+  if (el.tagName !== 'P') return false
+  if (el.classList.contains('devis-spacer') || el.classList.contains('diag-block-gap')) return true
+  const text = (el.textContent ?? '').replace(/\u00a0/g, ' ').trim()
+  return text === '' && !el.querySelector('img')
+}
+
+function nextMeaningfulElement(el: Element | null): Element | null {
+  let node = el?.nextElementSibling ?? null
+  while (node) {
+    if (isEmptyParagraphEl(node)) {
+      node = node.nextElementSibling
+      continue
+    }
+    return node
   }
-  return refreshSalmonFieldLabelsSsr(html)
+  return null
+}
+
+function compactSpacingBeforeSalmonHeadingsDom(root: ParentNode): void {
+  for (const list of Array.from(root.querySelectorAll('ul, ol'))) {
+    const next = nextMeaningfulElement(list)
+    if (!next?.classList.contains('devis-salmon-heading')) continue
+    let cursor = list.nextElementSibling
+    while (cursor && cursor !== next) {
+      const remove = cursor
+      cursor = cursor.nextElementSibling
+      if (isEmptyParagraphEl(remove)) remove.remove()
+    }
+  }
+  for (const heading of Array.from(root.querySelectorAll('p.devis-salmon-heading'))) {
+    let prev = heading.previousElementSibling
+    while (prev && isEmptyParagraphEl(prev)) {
+      const remove = prev
+      prev = prev.previousElementSibling
+      remove.remove()
+    }
+  }
+}
+
+/** Retire paragraphes vides / commentaires entre une liste et le sous-titre saumon suivant. */
+function compactSpacingBeforeSalmonHeadings(html: string): string {
+  const emptyP = String.raw`<p\b[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\u00a0|\s)*<\/p>`
+  let out = html.replace(
+    new RegExp(`<\\/ul>\\s*(?:<!--[\\s\\S]*?-->\\s*)*(?:${emptyP}\\s*)*(?:<!--[\\s\\S]*?-->\\s*)*(?=<p\\b[^>]*\\bdevis-salmon-heading\\b)`, 'gi'),
+    '</ul>\n',
+  )
+  out = out.replace(
+    new RegExp(`<\\/ol>\\s*(?:<!--[\\s\\S]*?-->\\s*)*(?:${emptyP}\\s*)*(?:<!--[\\s\\S]*?-->\\s*)*(?=<p\\b[^>]*\\bdevis-salmon-heading\\b)`, 'gi'),
+    '</ol>\n',
+  )
+  out = out.replace(new RegExp(`(?:\\s*${emptyP})+\\s*(?=<p\\b[^>]*\\bdevis-salmon-heading\\b)`, 'gi'), '')
+  return out
+}
+
+/** Libellés saumon — classe + styles (HTML haut ou bas de lettre). */
+export function refreshSalmonFieldLabelsInTopHtml(html: string): string {
+  const refreshed = typeof window !== 'undefined'
+    ? refreshSalmonFieldLabelsDom(html)
+    : refreshSalmonFieldLabelsSsr(html)
+  return compactSpacingBeforeSalmonHeadings(refreshed)
 }
 
 /** True si le titre de section a déjà une mise en page personnalisée (couleur, surlignage…). */
@@ -1198,10 +1383,12 @@ export function syncDevisLetterDataOnlyTopHtml(
   const devisTitle = formatDevisTitle(active, ctx.dossierNumber)
   let out = refreshConvalescenceInTopHtml(html, ctx)
   out = stripDureeInterventionLine(out)
+  out = ensureOffrePrixSectionHeading(out)
   out = refreshExamensInTopHtml(out, ctx)
+  out = refreshExamensSalmonPhrasesInTopHtml(out)
   if (syncInclutExclut) out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
-  out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
+  out = refreshHighlightByLabel(out, DUREE_TOTALE_SEJOUR_LABEL, sv.dureeTotale)
   {
     const recap = recapAndDetailsFromContext(ctx)
     out = refreshDevisFieldByLabel(out, 'Intervention souhaitée :', recap.inter)
@@ -1223,8 +1410,8 @@ export function syncDevisLetterDataOnlyTopHtml(
   out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
   out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
   out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
-  out = refreshSejourBadgeInHtml(out, sv.sejourLine, sv.typeChambre)
   out = normalizeSejourJoursToNuits(out)
+  out = ensureOffrePrixSectionHeading(out)
   return out
 }
 
@@ -1232,6 +1419,7 @@ export function syncDevisLetterDataOnlyTopHtml(
 export function upgradeDevisMissingLayoutInTopHtml(html: string): string {
   let out = migrateBronzeSectionHeadingsOnly(html)
   out = refreshSalmonFieldLabelsInTopHtml(out)
+  out = ensureOffrePrixSectionHeading(out)
   if (/diagnostic du chirurgien/i.test(out)) {
     const re =
       /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
@@ -1242,6 +1430,26 @@ export function upgradeDevisMissingLayoutInTopHtml(html: string): string {
     }
   }
   return stripDiagnosticOpTitlesInTopHtml(out)
+}
+
+/** Réapplique les couleurs charte (AU NIVEAU saumon, phrases examens fluo) après chargement. */
+export function restoreDevisCanonicalColorsInTopHtml(html: string): string {
+  if (!html?.trim()) return html
+  let out = normalizeDiagnosticBlockGapsInTopHtml(html)
+  out = normalizeDiagnosticDarkFluoInTopHtml(out)
+  out = refreshExamensSalmonPhrasesInTopHtml(out)
+  if (/diagnostic du chirurgien/i.test(out)) {
+    const re =
+      /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
+    if (re.test(out)) {
+      out = out.replace(re, (_full, head, body) =>
+        `${head}${upgradeDiagnosticMissingLayoutInHtml(body)}`,
+      )
+    }
+  } else {
+    out = upgradeDiagnosticMissingLayoutInHtml(out)
+  }
+  return out
 }
 
 /**
@@ -1262,7 +1470,9 @@ export function refreshDevisLetterTopHtml(
   const devisTitle = formatDevisTitle(active, ctx.dossierNumber)
   let out = refreshConvalescenceInTopHtml(html, ctx)
   out = stripDureeInterventionLine(out)
+  out = ensureOffrePrixSectionHeading(out)
   out = refreshExamensInTopHtml(out, ctx)
+  out = refreshExamensSalmonPhrasesInTopHtml(out)
   out = normalizeInclutExclutLabels(out)
   if (syncInclutExclut) out = refreshOffreInclutExclutInTopHtml(out, ctx)
   out = refreshDevisTitleInTopHtml(out, devisTitle)
@@ -1279,7 +1489,7 @@ export function refreshDevisLetterTopHtml(
   out = stripDiagnosticOpTitlesInTopHtml(out)
   out = normalizeDiagnosticDarkFluoInTopHtml(out)
   out = normalizeDiagnosticBlockGapsInTopHtml(out)
-  out = refreshHighlightByLabel(out, 'Durée TOTALE du séjour :', sv.dureeTotale)
+  out = refreshHighlightByLabel(out, DUREE_TOTALE_SEJOUR_LABEL, sv.dureeTotale)
   {
     const recap = recapAndDetailsFromContext(ctx)
     out = refreshDevisFieldByLabel(out, 'Intervention souhaitée :', recap.inter)
@@ -1301,13 +1511,19 @@ export function refreshDevisLetterTopHtml(
   out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
   out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
   out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
-  out = refreshSejourBadgeInHtml(out, sv.sejourLine, sv.typeChambre)
   out = normalizeSejourJoursToNuits(out)
   out = normalizeGapBeforeDetailsIntervention(out)
   out = normalizeHeadingRhythmInHtml(out)
   if (!preserveManualLayout) {
     out = collapseExcessEmptyParagraphs(out)
   }
+  if (!/Examens médicaux nécessaires/i.test(out) && !out.includes(EXAMENS_START)) {
+    out = refreshExamensInTopHtml(out, ctx)
+  }
+  out = refreshExamensSalmonPhrasesInTopHtml(out)
+  out = restoreDevisCanonicalColorsInTopHtml(out)
+  out = ensureOffrePrixSectionHeading(out)
+  out = stripTrailingEmptyParagraphs(out)
   return italicizeDevisLetterIntroHtml(out)
 }
 
@@ -1416,7 +1632,7 @@ ${devisFieldRow('Tél. Mobile :', recap.tel)}
 
 ${devisSectionHeading('Diagnostic du chirurgien : Dr CHENNOUFI Mehdi')}
 ${diagnosticHtml}
-${paraSalmonHi(`Durée TOTALE du séjour : ${sv.dureeTotale}`)}
+${paraDureeTotaleSejourFluo(sv.dureeTotale)}
 
 ${devisSectionHeading("Détails de l'intervention :")}
 ${devisFieldRow('Intervention proposée :', recap.interRec)}
@@ -1443,8 +1659,6 @@ ${buildOffreInclutExclutHtml(ctx)}
 }
 
 const OFFRE_INCLUT_START = '<!-- DEVIS_OFFRE_INCLUT -->'
-const OFFRE_INCLUT_END = '<!-- /DEVIS_OFFRE_INCLUT -->'
-const OFFRE_EXCLUT_START = '<!-- DEVIS_OFFRE_EXCLUT -->'
 const OFFRE_EXCLUT_END = '<!-- /DEVIS_OFFRE_EXCLUT -->'
 
 function ulFromLabels(labels: string[]): string {
@@ -1462,13 +1676,22 @@ export function buildOffreInclutExclutHtml(ctx: DevisLetterContext): string {
   const inclut = labelsForInclut(resolveInclutIds(notes), drainageNb, contentionDetail)
   const exclut = labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes))
   return `${OFFRE_INCLUT_START}
-<p>${devisLabel('Votre devis inclut :')}</p>
+${devisSalmonHeading('Votre devis inclut :')}
 ${ulFromLabels(inclut)}
-${OFFRE_INCLUT_END}
-${OFFRE_EXCLUT_START}
-<p>${devisLabel('Notre forfait exclut :')}</p>
+${devisSalmonHeading('Notre forfait exclut :')}
 ${ulFromLabels(exclut)}
 ${OFFRE_EXCLUT_END}`
+}
+
+/** Grand titre gris « Offre de prix : » — inséré si absent avant « Votre devis inclut ». */
+export function ensureOffrePrixSectionHeading(html: string): string {
+  if (/<p\b[^>]*\bdevis-heading\b[^>]*>[\s\S]*?Offre de prix\s*:/i.test(html)) return html
+  if (!/Votre devis inclut\s*:/i.test(html)) return html
+  const inclutIdx = html.search(/Votre devis inclut\s*:/i)
+  const insertAt = inclutIdx >= 0 ? html.lastIndexOf('<p', inclutIdx) : -1
+  const heading = devisSectionHeading('Offre de prix :')
+  if (insertAt < 0) return `${heading}\n${html}`
+  return `${html.slice(0, insertAt)}${heading}\n${html.slice(insertAt)}`
 }
 
 /**
@@ -1477,55 +1700,151 @@ ${OFFRE_EXCLUT_END}`
  */
 export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetterContext): string {
   const fresh = buildOffreInclutExclutHtml(ctx)
+  const heading = devisSectionHeading('Offre de prix :')
+  let out = html
   const marked = new RegExp(`${OFFRE_INCLUT_START}[\\s\\S]*?${OFFRE_EXCLUT_END}`)
-  if (marked.test(html)) return html.replace(marked, fresh)
-
-  const inclutIdx = html.search(/Votre devis inclut\s*:/i)
-  const exclutIdx = html.search(/Notre forfait exclut\s*:/i)
-  if (inclutIdx >= 0 && exclutIdx > inclutIdx) {
-    const start = html.lastIndexOf('<p', inclutIdx)
-    if (start >= 0) {
-      const afterExclutTitle = html.indexOf('</p>', exclutIdx)
-      if (afterExclutTitle > exclutIdx) {
-        let pos = afterExclutTitle + 4
-        // TipTap : éventuels <p></p> vides entre le titre et la <ul>
-        while (true) {
-          const empty = html.slice(pos).match(/^\s*<p\b[^>]*>\s*<\/p>/i)
-          if (!empty) break
-          pos += empty[0].length
+  if (marked.test(out)) {
+    out = out.replace(marked, fresh)
+  } else {
+    const inclutIdx = out.search(/Votre devis inclut\s*:/i)
+    const exclutIdx = out.search(/Notre forfait exclut\s*:/i)
+    if (inclutIdx >= 0 && exclutIdx > inclutIdx) {
+      const start = out.lastIndexOf('<p', inclutIdx)
+      if (start >= 0) {
+        const afterExclutTitle = out.indexOf('</p>', exclutIdx)
+        if (afterExclutTitle > exclutIdx) {
+          let pos = afterExclutTitle + 4
+          while (true) {
+            const empty = out.slice(pos).match(/^\s*<p\b[^>]*>\s*<\/p>/i)
+            if (!empty) break
+            pos += empty[0].length
+          }
+          const ulMatch = out.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)
+          if (ulMatch) {
+            pos += ulMatch[0].length
+          } else {
+            const dash = out.slice(pos).match(/^\s*<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—\s*(?:<\/em>)?\s*<\/p>/i)
+            if (dash) pos += dash[0].length
+          }
+          out = `${out.slice(0, start)}${fresh}${out.slice(pos)}`
         }
-        const ulMatch = html.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)
-        if (ulMatch) {
-          pos += ulMatch[0].length
+      }
+    } else {
+      const offreIdx = out.search(/Offre de prix\s*:/i)
+      if (offreIdx < 0) {
+        if (/Votre devis inclut/i.test(out)) {
+          out = ensureOffrePrixSectionHeading(out)
         } else {
-          const dash = html.slice(pos).match(/^\s*<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—\s*(?:<\/em>)?\s*<\/p>/i)
-          if (dash) pos += dash[0].length
+          out = `${out}\n${heading}\n${fresh}`
         }
-        return `${html.slice(0, start)}${fresh}${html.slice(pos)}`
+      } else {
+        const close = out.indexOf('</p>', offreIdx)
+        if (close >= 0) out = `${out.slice(0, close + 4)}\n${fresh}`
       }
     }
   }
+  return ensureOffrePrixSectionHeading(out)
+}
 
-  // Dernier recours : remplacer tout après « Offre de prix » (fin du HTML haut)
-  const offreIdx = html.search(/Offre de prix\s*:/i)
-  if (offreIdx < 0) {
-    if (/Votre devis inclut/i.test(html)) return html
-    return `${html}\n${fresh}`
+const OFFRE_MEILLEURE_RE = /Notre meilleure offre\s*:/i
+
+function normalizeOfferSubtitleHeadingHtml(subtitleHtml?: string | null): string {
+  const raw = subtitleHtml?.trim()
+  if (!raw) return devisSalmonHeading('Notre meilleure offre :')
+  if (/^<p\b[^>]*\bdevis-salmon-heading\b/i.test(raw)) return raw
+  if (/^<p\b/i.test(raw)) {
+    if (/\bclass="/i.test(raw)) {
+      return raw.replace(/\bclass="([^"]*)"/i, (_, cls: string) =>
+        cls.includes('devis-salmon-heading') ? `class="${cls}"` : `class="devis-salmon-heading ${cls}"`,
+      )
+    }
+    return raw.replace(/<p\b/i, '<p class="devis-salmon-heading"')
   }
-  const close = html.indexOf('</p>', offreIdx)
-  if (close < 0) return html
-  return `${html.slice(0, close + 4)}\n${fresh}`
+  return `<p class="devis-salmon-heading">${raw}</p>`
+}
+
+/** Retire le sous-titre « Notre meilleure offre » du HTML haut (stockage / export PDF). */
+export function stripOfferMeilleureHeadingFromTopHtml(html: string): string {
+  let out = html.replace(
+    /<p\b[^>]*\bdevis-salmon-heading\b[^>]*>[\s\S]*?Notre meilleure offre\s*:[\s\S]*?<\/p>\s*/gi,
+    '',
+  )
+  const exclutIdx = out.search(/Notre forfait exclut\s*:/i)
+  if (exclutIdx >= 0 && OFFRE_MEILLEURE_RE.test(out)) {
+    const meilleureIdx = out.search(OFFRE_MEILLEURE_RE)
+    if (meilleureIdx > exclutIdx) {
+      const start = out.lastIndexOf('<p', meilleureIdx)
+      const end = out.indexOf('</p>', meilleureIdx)
+      if (start >= 0 && end > start) {
+        out = `${out.slice(0, start)}${out.slice(end + 4)}`
+      }
+    }
+  }
+  return stripTrailingEmptyParagraphs(out)
+}
+
+/** Contenu éditable du sous-titre offre (sans balise <p>). */
+export function extractOfferSubtitleFromTopHtml(html: string): string | null {
+  const withClass = html.match(
+    /<p\b[^>]*\bdevis-salmon-heading\b[^>]*>([\s\S]*?)<\/p>/i,
+  )
+  if (withClass && OFFRE_MEILLEURE_RE.test(withClass[0])) return withClass[1].trim()
+  const idx = html.search(OFFRE_MEILLEURE_RE)
+  if (idx < 0) return null
+  const start = html.lastIndexOf('<p', idx)
+  const end = html.indexOf('</p>', idx)
+  if (start < 0 || end < 0) return null
+  const block = html.slice(start, end + 4)
+  const inner = block.match(/<p\b[^>]*>([\s\S]*?)<\/p>/i)
+  return inner ? inner[1].trim() : null
+}
+
+/** Sépare HTML haut / sous-titre pour sauvegarde et export. */
+export function stripOfferMeilleureHeadingForExport(topHtml: string): {
+  topHtml: string
+  subtitleHtml: string | null
+} {
+  return {
+    topHtml: stripOfferMeilleureHeadingFromTopHtml(topHtml),
+    subtitleHtml: extractOfferSubtitleFromTopHtml(topHtml),
+  }
+}
+
+/**
+ * Insère « Notre meilleure offre : » juste après inclut/exclut — même flux que les autres sous-titres saumon.
+ */
+export function ensureOfferMeilleureHeadingInTopHtml(html: string, subtitleHtml?: string | null): string {
+  if (!/Notre forfait exclut\s*:/i.test(html) && !html.includes(OFFRE_EXCLUT_END)) return html
+  let out = stripOfferMeilleureHeadingFromTopHtml(html)
+  out = stripTrailingEmptyParagraphs(out)
+  const heading = normalizeOfferSubtitleHeadingHtml(subtitleHtml)
+  const markerIdx = out.indexOf(OFFRE_EXCLUT_END)
+  if (markerIdx >= 0) {
+    const pos = markerIdx + OFFRE_EXCLUT_END.length
+    return `${out.slice(0, pos)}\n${heading}${out.slice(pos)}`
+  }
+  const exclutIdx = out.search(/Notre forfait exclut\s*:/i)
+  if (exclutIdx < 0) return `${out}\n${heading}`
+  let pos = out.indexOf('</p>', exclutIdx)
+  if (pos < 0) pos = exclutIdx
+  else pos += 4
+  while (true) {
+    const empty = out.slice(pos).match(/^\s*<p\b[^>]*>\s*<\/p>/i)
+    if (!empty) break
+    pos += empty[0].length
+  }
+  const ulMatch = out.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)
+  if (ulMatch) pos += ulMatch[0].length
+  return `${out.slice(0, pos)}\n${heading}${out.slice(pos)}`
 }
 
 export function buildDevisLetterBottomHtml(total: number, tndPerEur = DEFAULT_TND_PER_EUR): string {
   const amountLine = buildDevisAmountSentenceHtml(total, tndPerEur)
   return `
 <p>${amountLine}</p>
-<p></p>
-<p>${devisLabel('Modalités de paiement :')}</p>
+${devisSalmonHeading('Modalités de paiement :')}
 <p>${buildPaymentModalitiesBodyHtml()}</p>
-<p></p>
-<p>${devisLabel("Validité de l'offre :")}</p>
+${devisSalmonHeading("Validité de l'offre :")}
 <p>${buildOfferValidityBlockHtml()}</p>
 `
 }

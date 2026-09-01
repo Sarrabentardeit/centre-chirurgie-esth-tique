@@ -49,7 +49,13 @@ const patientListInclude = {
 /** Devis visibles (non soft-supprimés). */
 const devisActiveWhere = { deletedAt: null } as const
 
-type TemplateKey = 'formulaireAck' | 'devisSent' | 'refus' | 'abstention' | 'devisRappel'
+type TemplateKey =
+  | 'formulaireAck'
+  | 'devisSent'
+  | 'refus'
+  | 'abstention'
+  | 'devisRappel'
+  | 'confirmationReservation'
 type TemplateChannel = 'chat' | 'notification' | 'both'
 
 type TemplateRecord = {
@@ -62,7 +68,14 @@ type TemplateRecord = {
   updatedBy: string
 }
 
-export const TEMPLATE_KEYS: TemplateKey[] = ['formulaireAck', 'devisSent', 'refus', 'abstention', 'devisRappel']
+export const TEMPLATE_KEYS: TemplateKey[] = [
+  'formulaireAck',
+  'devisSent',
+  'refus',
+  'abstention',
+  'devisRappel',
+  'confirmationReservation',
+]
 
 const DEFAULT_TEMPLATES: Record<TemplateKey, Omit<TemplateRecord, 'updatedAt' | 'updatedBy'>> = {
   formulaireAck: {
@@ -123,44 +136,97 @@ SCULPTURE, SMOOTH & SMILE`,
     channel: 'chat',
     active: true,
   },
+  confirmationReservation: {
+    key: 'confirmationReservation',
+    title: 'Confirmation réservation séjour',
+    content: `Chère Madame {prenom},
+
+Au nom du Dr CHENNOUFI, je vous remercie encore de la confiance accordée et vous confirme la disponibilité du chirurgien pour votre séjour médical en Tunisie selon les dates suivantes :
+
+•	Arrivée à l'aéroport Tunis Carthage : {dateArrivee}
+•	Intervention chirurgicale ({intervention}) : {dateIntervention}
+•	Retour en {paysRetour} : {dateDepart}
+
+Je vous invite par ailleurs à réexaminer et mettre en place dès le {dateDebutPreop} le traitement préventif préopératoire indiqué par votre chirurgien dans votre devis N° {numeroDevis} validé ci-dessus et à nous envoyer vos résultats d'examens médicaux ({examensMedicaux}) d'ici le {dateLimiteExamens} comme mentionné dans ce même devis.
+
+D'ici là, je vous rappelle qu'il vous faudra prévoir des bas de contention pour votre retour en avion et commencer à réserver vos séances de drainage lymphatique au retour.
+
+Pour ma part, je vous rappelle que je reste à votre disposition pour de plus amples renseignements et prépare minutieusement votre arrivée. Votre planning de séjour détaillé vous sera envoyé à J-4 de votre arrivée.
+
+Bien cordialement,
+Houda Chennoufi
+Conciergerie & coordination patients
+Cabinet du Dr Mehdi Chennoufi
+Chirurgie Esthétique, Plastique et Réparatrice
+SCULPTURE, SMOOTH & SMILE`,
+    channel: 'chat',
+    active: true,
+  },
 }
 
 function parseLogistiqueMeta(raw?: string | null) {
+  const emptyDocs = () => ({
+    passport: null as { url: string; name: string } | null,
+    billet: null as { url: string; name: string } | null,
+    devisAccepte: null as { url: string; name: string } | null,
+  })
   if (!raw) {
-    return {
-      checklist: {
-        passport: false,
-        billet: false,
-        hebergementConfirme: false,
-        transfertAeroport: false,
-      },
-      notes: '',
-    }
+    return { documents: emptyDocs(), notes: '', dateIntervention: null as string | null }
   }
   try {
     const parsed = JSON.parse(raw) as {
-      checklist?: Partial<Record<'passport' | 'billet' | 'hebergementConfirme' | 'transfertAeroport', boolean>>
+      documents?: Partial<
+        Record<'passport' | 'billet' | 'devisAccepte', { url?: string; name?: string } | null>
+      >
+      dateIntervention?: string | null
       notes?: string
     }
-    return {
-      checklist: {
-        passport: !!parsed.checklist?.passport,
-        billet: !!parsed.checklist?.billet,
-        hebergementConfirme: !!parsed.checklist?.hebergementConfirme,
-        transfertAeroport: !!parsed.checklist?.transfertAeroport,
-      },
-      notes: parsed.notes ?? '',
+    const documents = emptyDocs()
+    for (const key of ['passport', 'billet', 'devisAccepte'] as const) {
+      const d = parsed.documents?.[key]
+      if (d?.url?.trim() && d?.name?.trim()) {
+        documents[key] = { url: d.url.trim(), name: d.name.trim() }
+      }
     }
+    const dateIntervention =
+      typeof parsed.dateIntervention === 'string' && parsed.dateIntervention.trim()
+        ? parsed.dateIntervention.trim()
+        : null
+    return { documents, notes: parsed.notes ?? '', dateIntervention }
   } catch {
-    return {
-      checklist: {
-        passport: false,
-        billet: false,
-        hebergementConfirme: false,
-        transfertAeroport: false,
-      },
-      notes: raw,
-    }
+    return { documents: emptyDocs(), notes: raw, dateIntervention: null as string | null }
+  }
+}
+
+type LogistiqueDbRow = {
+  dateArrivee: Date | null
+  dateDepart: Date | null
+  dateIntervention: Date | null
+  hebergement: string | null
+  transport: string | null
+  accompagnateur: string | null
+  notesLogistiques: string | null
+}
+
+function formatLogistiqueDateTimeForApi(d: Date | null | undefined): string | null {
+  if (!d) return null
+  return d.toISOString()
+}
+
+function mapLogistiqueForApi(log: LogistiqueDbRow) {
+  const parsed = parseLogistiqueMeta(log.notesLogistiques)
+  const dateIntervention =
+    formatLogistiqueDateTimeForApi(log.dateIntervention)
+    ?? (parsed.dateIntervention?.trim() ? parsed.dateIntervention.trim() : null)
+  return {
+    dateArrivee: formatLogistiqueDateTimeForApi(log.dateArrivee),
+    dateDepart: formatLogistiqueDateTimeForApi(log.dateDepart),
+    dateIntervention,
+    hebergement: log.hebergement ?? null,
+    transport: log.transport ?? null,
+    accompagnateur: log.accompagnateur ?? null,
+    documents: parsed.documents,
+    notes: parsed.notes,
   }
 }
 
@@ -377,7 +443,7 @@ export async function getPatients(search?: string, status?: string) {
 }
 
 export async function getPatientById(patientId: string) {
-  const [patient, rapportSnapshots] = await Promise.all([
+  const [patient, rapportSnapshots, logistiqueRow, planningRow] = await Promise.all([
     prisma.patient.findUnique({
       where: { id: patientId },
       include: {
@@ -392,6 +458,8 @@ export async function getPatientById(patientId: string) {
       orderBy: { createdAt: 'asc' },
       select: { rapportId: true, createdAt: true, snapshot: true },
     }),
+    prisma.logistique.findUnique({ where: { patientId } }),
+    prisma.planningSejour.findUnique({ where: { patientId } }),
   ])
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
   const numeroDevis = patient.devis[0]?.numeroDevis
@@ -410,15 +478,33 @@ export async function getPatientById(patientId: string) {
           interventionsRecommandees: Array.isArray(snap.interventionsRecommandees)
             ? snap.interventionsRecommandees.map(String)
             : [],
+          examensDemandes: Array.isArray(snap.examensDemandes)
+            ? snap.examensDemandes.map(String)
+            : [],
         }
       }),
   }))
+  const logistique = logistiqueRow ? mapLogistiqueForApi(logistiqueRow) : null
+  const planningSejour = planningRow
+    ? {
+        id: planningRow.id,
+        moisLabel: planningRow.moisLabel,
+        statut: planningRow.statut === 'finalise' ? 'finalise' as const : 'brouillon' as const,
+        updatedAt: planningRow.updatedAt.toISOString(),
+        hasContent: Boolean(planningRow.content?.trim()),
+      }
+    : null
+
   return {
-    patient: mapPatientListRow({
-      ...patient,
-      rapports,
-      dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
-    }),
+    patient: {
+      ...mapPatientListRow({
+        ...patient,
+        rapports,
+        dossierNumber: resolvePatientReference(patient.dossierNumber, numeroDevis),
+      }),
+      logistique,
+      planningSejour,
+    },
   }
 }
 
@@ -731,33 +817,13 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
   })
 
   const templates = await getTemplateMap()
-  await dispatchTemplateMessage({
-    template: templates.devisSent,
-    patientId: patient.id,
-    patientUserId: patient.userId,
-    patientFullName: patient.user.fullName,
-    gestionnaireId,
-    notifTitle: 'Votre devis est disponible',
-    notifLink: '/patient/devis',
-  })
 
-  // Email patient personnalisé (charte Centre Est) + lien espace
-  if (patient.user.email?.trim()) {
-    await sendDevisReadyEmail({
-      to: patient.user.email,
-      patientFullName: patient.user.fullName,
-    })
-  } else {
-    console.warn('[sendDevis] Pas d’email patient — notification email ignorée', {
-      patientId: patient.id,
-    })
-  }
-
-  // PDF personnalisé (même HTML que « Exporter PDF ») → pièce jointe chat
+  let pieceJointeUrl: string | null = null
+  let pieceJointeNom: string | null = null
   if (html?.trim()) {
     try {
       const pdfBuffer = await renderHtmlToPdf(html)
-      const pieceJointeNom = formatDevisPdfFileName(
+      pieceJointeNom = formatDevisPdfFileName(
         devis.numeroDevis ?? patient.dossierNumber,
         patient.user.fullName,
         devis.version,
@@ -771,22 +837,46 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
       await writeFile(path.join(UPLOADS_DIR, filename), pdfBuffer)
 
       const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
-      const pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
-
-      await prisma.message.create({
-        data: {
-          patientId: patient.id,
-          expediteurId: gestionnaireId,
-          expediteurRole: 'gestionnaire',
-          contenu: `Pièce jointe : ${pieceJointeNom}`,
-          pieceJointeUrl,
-          pieceJointeNom,
-          lu: false,
-        },
-      })
+      pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
     } catch (err) {
       console.error('[sendDevis] Échec génération PDF personnalisé:', err)
     }
+  }
+
+  await dispatchTemplateMessage({
+    template: templates.devisSent,
+    patientId: patient.id,
+    patientUserId: patient.userId,
+    patientFullName: patient.user.fullName,
+    gestionnaireId,
+    notifTitle: 'Votre devis est disponible',
+    notifLink: '/patient/devis',
+  })
+
+  if (pieceJointeUrl && pieceJointeNom) {
+    await prisma.message.create({
+      data: {
+        patientId: patient.id,
+        expediteurId: gestionnaireId,
+        expediteurRole: 'gestionnaire',
+        contenu: `Pièce jointe : ${pieceJointeNom}`,
+        pieceJointeUrl,
+        pieceJointeNom,
+        lu: false,
+      },
+    })
+  }
+
+  // Email patient personnalisé (charte Centre Est) + lien espace
+  if (patient.user.email?.trim()) {
+    await sendDevisReadyEmail({
+      to: patient.user.email,
+      patientFullName: patient.user.fullName,
+    })
+  } else {
+    console.warn('[sendDevis] Pas d’email patient — notification email ignorée', {
+      patientId: patient.id,
+    })
   }
 
   await prisma.auditLog.create({
@@ -887,22 +977,13 @@ async function deliverDevisRappel(input: {
 }): Promise<boolean> {
   const { gestionnaireId, patient, devis, contenu } = input
 
-  await prisma.message.create({
-    data: {
-      patientId: patient.id,
-      expediteurId: gestionnaireId,
-      expediteurRole: 'gestionnaire',
-      contenu,
-      lu: false,
-    },
-  })
-
   const pieceJointeNom = formatDevisPdfFileName(
     devis.numeroDevis ?? patient.dossierNumber,
     patient.fullName,
     devis.version,
   )
 
+  let pieceJointeUrl: string | null = null
   let pdfAttached = false
   if (input.html?.trim()) {
     try {
@@ -916,19 +997,7 @@ async function deliverDevisRappel(input: {
       await writeFile(path.join(UPLOADS_DIR, filename), pdfBuffer)
 
       const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
-      const pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
-
-      await prisma.message.create({
-        data: {
-          patientId: patient.id,
-          expediteurId: gestionnaireId,
-          expediteurRole: 'gestionnaire',
-          contenu: `Pièce jointe : ${pieceJointeNom}`,
-          pieceJointeUrl,
-          pieceJointeNom,
-          lu: false,
-        },
-      })
+      pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
       pdfAttached = true
     } catch (err) {
       console.error('[deliverDevisRappel] Échec génération PDF:', err)
@@ -940,32 +1009,41 @@ async function deliverDevisRappel(input: {
       where: {
         patientId: patient.id,
         staffOnly: false,
+        deletedForAll: false,
         pieceJointeUrl: { not: null },
-        OR: [
-          { pieceJointeNom },
-          {
-            pieceJointeNom: { endsWith: '.pdf' },
-            contenu: { startsWith: 'Pièce jointe' },
-          },
-        ],
+        pieceJointeNom,
       },
       orderBy: { dateEnvoi: 'desc' },
-      select: { pieceJointeUrl: true, pieceJointeNom: true },
+      select: { pieceJointeUrl: true },
     })
     if (existing?.pieceJointeUrl) {
-      await prisma.message.create({
-        data: {
-          patientId: patient.id,
-          expediteurId: gestionnaireId,
-          expediteurRole: 'gestionnaire',
-          contenu: `Pièce jointe : ${existing.pieceJointeNom ?? pieceJointeNom}`,
-          pieceJointeUrl: existing.pieceJointeUrl,
-          pieceJointeNom: existing.pieceJointeNom ?? pieceJointeNom,
-          lu: false,
-        },
-      })
+      pieceJointeUrl = existing.pieceJointeUrl
       pdfAttached = true
     }
+  }
+
+  await prisma.message.create({
+    data: {
+      patientId: patient.id,
+      expediteurId: gestionnaireId,
+      expediteurRole: 'gestionnaire',
+      contenu,
+      lu: false,
+    },
+  })
+
+  if (pdfAttached && pieceJointeUrl) {
+    await prisma.message.create({
+      data: {
+        patientId: patient.id,
+        expediteurId: gestionnaireId,
+        expediteurRole: 'gestionnaire',
+        contenu: `Pièce jointe : ${pieceJointeNom}`,
+        pieceJointeUrl,
+        pieceJointeNom,
+        lu: false,
+      },
+    })
   }
 
   await createUserNotification({
@@ -1364,7 +1442,7 @@ export async function deleteDevis(gestionnaireId: string, devisId: string) {
     }
   })
 
-  // Chat : uniquement le PDF de CETTE version → « Message supprimé »
+  // Chat : retirer du fil uniquement le PDF de CETTE version (pas les autres envois)
   await softDeleteDevisPdfMessages(devis.patientId, {
     numeroDevis: devis.numeroDevis,
     dossierNumber: devis.patient.dossierNumber,
@@ -1661,7 +1739,6 @@ export async function getLogistiquePatients() {
   return {
     patients: patients.map((p) => {
       const log = map.get(p.id)
-      const parsed = parseLogistiqueMeta(log?.notesLogistiques)
       return {
         id: p.id,
         dossierNumber: p.dossierNumber,
@@ -1669,17 +1746,7 @@ export async function getLogistiquePatients() {
         ville: p.ville,
         pays: p.pays,
         user: p.user,
-        logistique: log
-          ? {
-              dateArrivee: log.dateArrivee?.toISOString().slice(0, 10) ?? null,
-              dateDepart: log.dateDepart?.toISOString().slice(0, 10) ?? null,
-              hebergement: log.hebergement ?? null,
-              transport: log.transport ?? null,
-              accompagnateur: log.accompagnateur ?? null,
-              checklist: parsed.checklist,
-              notes: parsed.notes,
-            }
-          : null,
+        logistique: log ? mapLogistiqueForApi(log) : null,
       }
     }),
   }
@@ -1693,13 +1760,8 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
   const notesLogistiques = JSON.stringify({
-    checklist: {
-      passport: input.passport,
-      billet: input.billet,
-      hebergementConfirme: input.hebergementConfirme,
-      transfertAeroport: input.transfertAeroport,
-    },
-    notes: input.notes ?? '',
+    documents: input.documents,
+    notes: '',
   })
 
   const row = await prisma.logistique.upsert({
@@ -1707,23 +1769,25 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
     update: {
       dateArrivee: input.dateArrivee ? new Date(input.dateArrivee) : null,
       dateDepart: input.dateDepart ? new Date(input.dateDepart) : null,
-      hebergement: input.hebergement ?? null,
-      transport: input.transport ?? null,
-      accompagnateur: input.accompagnateur ?? null,
+      dateIntervention: input.dateIntervention ? new Date(input.dateIntervention) : null,
       notesLogistiques,
     },
     create: {
       patientId,
       dateArrivee: input.dateArrivee ? new Date(input.dateArrivee) : null,
       dateDepart: input.dateDepart ? new Date(input.dateDepart) : null,
-      hebergement: input.hebergement ?? null,
-      transport: input.transport ?? null,
-      accompagnateur: input.accompagnateur ?? null,
+      dateIntervention: input.dateIntervention ? new Date(input.dateIntervention) : null,
       notesLogistiques,
     },
   })
 
-  const complete = input.passport && input.billet && input.hebergementConfirme && input.transfertAeroport
+  const complete =
+    Boolean(input.documents.passport?.url)
+    && Boolean(input.documents.billet?.url)
+    && Boolean(input.documents.devisAccepte?.url)
+    && Boolean(input.dateArrivee)
+    && Boolean(input.dateDepart)
+    && Boolean(input.dateIntervention)
 
   if (complete) {
     // Quand la checklist est complète, le dossier passe à l'étape intervention.
@@ -1762,12 +1826,10 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
       entityId: row.id,
       after: {
         patientId,
-        checklist: {
-          passport: input.passport,
-          billet: input.billet,
-          hebergementConfirme: input.hebergementConfirme,
-          transfertAeroport: input.transfertAeroport,
-        },
+        documents: input.documents,
+        dateArrivee: input.dateArrivee ?? null,
+        dateDepart: input.dateDepart ?? null,
+        dateIntervention: input.dateIntervention ?? null,
       } as never,
     },
   })
@@ -1896,8 +1958,8 @@ export async function getPlanningSejourDetail(patientId: string) {
     moisLabelDefault: moisDefault,
     logistique: ctx.log
       ? {
-          dateArrivee: ctx.log.dateArrivee?.toISOString().slice(0, 10) ?? null,
-          dateDepart: ctx.log.dateDepart?.toISOString().slice(0, 10) ?? null,
+          dateArrivee: formatLogistiqueDateTimeForApi(ctx.log.dateArrivee),
+          dateDepart: formatLogistiqueDateTimeForApi(ctx.log.dateDepart),
           hebergement: ctx.log.hebergement ?? null,
           transport: ctx.log.transport ?? null,
           accompagnateur: ctx.log.accompagnateur ?? null,

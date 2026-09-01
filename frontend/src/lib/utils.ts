@@ -24,6 +24,38 @@ export function formatIsoDateFrLong(iso: string | null | undefined): string {
   return format(new Date(y, mo - 1, d), 'd MMMM yyyy', { locale: fr })
 }
 
+/** Affichage français date + heure (logistique, confirmation séjour). */
+export function formatIsoDateTimeFrLong(iso: string | null | undefined): string {
+  if (!iso?.trim()) return '—'
+  const raw = iso.trim()
+  const d = new Date(raw.includes('T') ? raw : `${raw.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return raw
+  return format(d, "d MMMM yyyy 'à' HH:mm", { locale: fr })
+}
+
+/** Valeur pour `<input type="datetime-local">` depuis ISO ou date seule. */
+export function toDatetimeLocalInput(iso: string | null | undefined): string {
+  if (!iso?.trim()) return ''
+  const raw = iso.trim()
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw)) return raw
+  const d = new Date(raw.includes('T') ? raw : `${raw.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return raw.slice(0, 16)
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const h = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${y}-${mo}-${day}T${h}:${min}`
+}
+
+/** Convertit `datetime-local` → ISO pour l’API. */
+export function datetimeLocalToIso(local: string | null | undefined): string | null {
+  if (!local?.trim()) return null
+  const d = new Date(local.trim())
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
+}
+
 export function formatDateTime(date: string | Date): string {
   return format(new Date(date), "dd/MM/yyyy 'à' HH:mm", { locale: fr })
 }

@@ -62,6 +62,17 @@ function fmtDate(d: Date | null | undefined): string {
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
+function fmtDateTime(d: Date | null | undefined): string {
+  if (!d) return '—'
+  return d.toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function row(label: string, value: string): string {
   if (!value || value === '—') return ''
   return `<tr><td style="padding:6px 12px 6px 0;color:#81572d;font-weight:700;vertical-align:top;width:38%">${label}</td><td style="padding:6px 0;color:#282727;vertical-align:top">${value}</td></tr>`
@@ -96,8 +107,8 @@ export function buildPlanningSejourHtml(src: PlanningSejourSource): string {
   ].join('')
 
   const sejourRows = [
-    row('Arrivée', fmtDate(src.logistique?.dateArrivee ?? null)),
-    row('Départ', fmtDate(src.logistique?.dateDepart ?? null)),
+    row('Arrivée', fmtDateTime(src.logistique?.dateArrivee ?? null)),
+    row('Départ', fmtDateTime(src.logistique?.dateDepart ?? null)),
     row('Clinique', [sej.cliniqueNom, sej.cliniqueNuits && `${sej.cliniqueNuits} nuit(s)`].filter(Boolean).join(' — ') || '—'),
     row('Hébergement', hebergement),
     row('Transport', src.logistique?.transport ?? '—'),

@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
-import { sendPatientChatMessageEmail, sendNotificationEmail } from '../../lib/mailer.js'
+import { sendPatientChatMessageEmail, sendConfirmationReservationEmail, sendNotificationEmail } from '../../lib/mailer.js'
 import {
   publishChatToStaff,
   publishChatToUser,
@@ -8,7 +8,7 @@ import {
   type ChatRealtimeEvent,
 } from '../../lib/chatRealtime.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
-import { formatDevisPdfFileName } from '../../lib/devisNumber.js'
+import { formatDevisPdfFileName, getDevisVersionLetter, normalizeMcReferenceBase } from '../../lib/devisNumber.js'
 import type { UserRole } from '../auth/auth.types.js'
 import type { MarkReadInput, SendMessageInput } from './chat.schema.js'
 
@@ -55,31 +55,44 @@ async function lastPublicStaffRole(patientId: string): Promise<'medecin' | 'gest
   return null
 }
 
-/** True si le message chat est le PDF d’un devis (pièce jointe sendDevis). */
+/** True si le message chat est le PDF d’un devis (pièce jointe sendDevis). Correspondance stricte par version. */
 function messageMatchesDevisPdf(
   m: { pieceJointeNom?: string | null; pieceJointeUrl?: string | null; contenu?: string | null },
   refs: string[],
 ): boolean {
   if (refs.length === 0) return false
-  const hay = `${m.pieceJointeNom ?? ''} ${m.pieceJointeUrl ?? ''} ${m.contenu ?? ''}`.toLowerCase()
-  if (!hay.trim()) return false
-  const looksLikeAttachment =
-    Boolean(m.pieceJointeNom?.trim())
-    || Boolean(m.pieceJointeUrl?.trim())
-    || /pi[eè]ce jointe/i.test(m.contenu ?? '')
-    || /\.pdf\b/i.test(hay)
-  if (!looksLikeAttachment) return false
+  const nom = m.pieceJointeNom?.trim().toLowerCase()
+  if (!nom) return false
   return refs.some((ref) => {
     const r = ref.trim().toLowerCase()
-    if (r.length < 3) return false
-    // Nom de fichier complet (version -B, -C…) — pas le n° MC seul
-    if (m.pieceJointeNom?.trim().toLowerCase() === r) return true
-    if (r.endsWith('.pdf') && hay.includes(r)) return true
-    if (!r.endsWith('.pdf') && m.pieceJointeNom?.trim().toLowerCase() === `${r}.pdf`) return true
-    // Slug disque chat-…-MC-08-029-…_-B
-    if (m.pieceJointeUrl?.toLowerCase().includes(r.replace(/[^\w.-]+/g, '_'))) return true
-    return false
+    if (!r) return false
+    if (nom === r) return true
+    if (r.endsWith('.pdf')) return nom === r
+    return nom === `${r}.pdf`
   })
+}
+
+/** Tous les noms de fichier possibles pour une version (formats actuel + ancien « -E.pdf »). */
+function devisPdfNamesForVersion(input: {
+  numeroDevis?: string | null
+  dossierNumber?: string | null
+  version: number
+  patientFullName?: string | null
+}): string[] {
+  const baseNum = input.numeroDevis?.trim() || input.dossierNumber?.trim() || ''
+  const name = input.patientFullName?.trim() || ''
+  const names = new Set<string>()
+  const canonical = formatDevisPdfFileName(baseNum, name, input.version)
+  names.add(canonical)
+  names.add(canonical.replace(/\.pdf$/i, ''))
+  const letter = getDevisVersionLetter(input.version)
+  if (letter && baseNum) {
+    const mcBase = normalizeMcReferenceBase(baseNum)
+    names.add(`${mcBase} ${name} -${letter}.pdf`)
+    names.add(`${mcBase} ${name} -${letter}`)
+    names.add(`${mcBase}-${letter}.pdf`)
+  }
+  return [...names]
 }
 
 function buildDevisPdfMatchRefs(input: {
@@ -89,31 +102,68 @@ function buildDevisPdfMatchRefs(input: {
   version?: number | null
   patientFullName?: string | null
 }): string[] {
-  const refs = new Set<string>()
+  if (input.version == null || !Number.isFinite(input.version)) {
+    const explicit = input.pieceJointeNom?.trim()
+    return explicit ? [explicit, explicit.replace(/\.pdf$/i, '')] : []
+  }
+  return devisPdfNamesForVersion({
+    numeroDevis: input.numeroDevis,
+    dossierNumber: input.dossierNumber,
+    version: Math.floor(input.version),
+    patientFullName: input.patientFullName,
+  })
+}
 
-  const fileName =
-    input.pieceJointeNom?.trim()
-    || (input.version != null && (input.numeroDevis?.trim() || input.dossierNumber?.trim())
-      ? formatDevisPdfFileName(
-          input.numeroDevis ?? input.dossierNumber,
-          input.patientFullName,
-          input.version,
-        )
-      : null)
+async function activeDevisPdfNameSet(patientId: string): Promise<Set<string>> {
+  const rows = await prisma.devis.findMany({
+    where: {
+      patientId,
+      deletedAt: null,
+      statut: { in: ['envoye', 'accepte', 'refuse'] },
+    },
+    select: {
+      numeroDevis: true,
+      version: true,
+      patient: { select: { dossierNumber: true, user: { select: { fullName: true } } } },
+    },
+  })
+  const out = new Set<string>()
+  for (const d of rows) {
+    for (const n of devisPdfNamesForVersion({
+      numeroDevis: d.numeroDevis,
+      dossierNumber: d.patient.dossierNumber,
+      version: d.version,
+      patientFullName: d.patient.user.fullName,
+    })) {
+      out.add(n.trim().toLowerCase())
+    }
+  }
+  return out
+}
 
-  if (!fileName) return []
+function messageNomIsProtected(nom: string | null | undefined, protectedNames: Set<string>): boolean {
+  const key = nom?.trim().toLowerCase()
+  if (!key) return false
+  if (protectedNames.has(key)) return true
+  if (protectedNames.has(key.replace(/\.pdf$/i, ''))) return true
+  return false
+}
 
-  refs.add(fileName)
-  const base = fileName.replace(/\.pdf$/i, '').trim()
-  refs.add(base)
-  const slug = base.replace(/[^\w.-]+/g, '_').slice(0, 80)
-  if (slug) refs.add(slug)
-  return [...refs]
+async function removeDevisPdfMessagesFromChat(patientId: string, messageIds: string[]): Promise<number> {
+  if (messageIds.length === 0) return 0
+  await prisma.message.deleteMany({
+    where: { id: { in: messageIds }, patientId },
+  })
+  void publishThreadEvent(patientId, {
+    type: 'chat:thread',
+    patientId,
+  })
+  return messageIds.length
 }
 
 /**
- * Tombstone TOUS les PDF devis du fil chat patient (pièces jointes sendDevis).
- * Affiche « Message supprimé » côté patient + staff.
+ * Retire du fil chat les PDF devis (envoi sendDevis / rappel).
+ * Suppression réelle — pas de tombstone « Message supprimé ».
  */
 export async function softDeleteAllDevisPdfMessagesForPatient(patientId: string): Promise<number> {
   const candidates = await prisma.message.findMany({
@@ -156,30 +206,12 @@ export async function softDeleteAllDevisPdfMessagesForPatient(patientId: string)
 
   if (ids.length === 0) return 0
 
-  await prisma.message.updateMany({
-    where: { id: { in: ids } },
-    data: {
-      deletedForAll: true,
-      deletedForAllAt: new Date(),
-      contenu: '',
-      pieceJointeUrl: null,
-      pieceJointeNom: null,
-      pinned: false,
-      pinnedAt: null,
-      pinnedById: null,
-    },
-  })
-
-  void publishThreadEvent(patientId, {
-    type: 'chat:thread',
-    patientId,
-  })
-
-  return ids.length
+  return removeDevisPdfMessagesFromChat(patientId, ids)
 }
 
 /**
- * Tombstone les PDF devis dans le chat correspondant aux références données.
+ * Retire du chat les PDF devis correspondant à une version supprimée.
+ * Ne touche jamais aux PDF des versions encore actives (envoyées / acceptées).
  */
 export async function softDeleteDevisPdfMessages(
   patientId: string,
@@ -194,70 +226,47 @@ export async function softDeleteDevisPdfMessages(
   const refs = buildDevisPdfMatchRefs(match)
   if (refs.length === 0) return 0
 
+  const protectedNames = await activeDevisPdfNameSet(patientId)
+
   const candidates = await prisma.message.findMany({
     where: {
       patientId,
       deletedForAll: false,
-      OR: [
-        { pieceJointeNom: { not: null } },
-        { pieceJointeUrl: { not: null } },
-        { contenu: { contains: 'Pièce jointe' } },
-        { contenu: { contains: '.pdf' } },
-      ],
+      pieceJointeNom: { not: null },
     },
     select: {
       id: true,
       pieceJointeNom: true,
-      pieceJointeUrl: true,
-      contenu: true,
     },
   })
 
-  const ids = candidates.filter((m) => messageMatchesDevisPdf(m, refs)).map((m) => m.id)
+  const ids = candidates
+    .filter((m) => !messageNomIsProtected(m.pieceJointeNom, protectedNames))
+    .filter((m) => messageMatchesDevisPdf(m, refs))
+    .map((m) => m.id)
+
   if (ids.length === 0) return 0
 
-  await prisma.message.updateMany({
-    where: { id: { in: ids } },
-    data: {
+  return removeDevisPdfMessagesFromChat(patientId, ids)
+}
+
+/** Retire les anciennes tombstones laissées par l’ancienne logique. */
+async function purgeLegacyDevisPdfTombstones(patientId: string): Promise<void> {
+  await prisma.message.deleteMany({
+    where: {
+      patientId,
       deletedForAll: true,
-      deletedForAllAt: new Date(),
       contenu: '',
       pieceJointeUrl: null,
       pieceJointeNom: null,
-      pinned: false,
-      pinnedAt: null,
-      pinnedById: null,
+      expediteurRole: 'gestionnaire',
     },
   })
-
-  void publishThreadEvent(patientId, {
-    type: 'chat:thread',
-    patientId,
-  })
-
-  return ids.length
 }
 
-/** Masque les PDF encore visibles alors que le devis est déjà soft-supprimé. */
+/** Filet : retirer les PDF dont la version devis est soft-supprimée (sans toucher aux versions actives). */
 export async function syncHiddenDevisPdfsForPatient(patientId: string): Promise<void> {
-  const deletedCount = await prisma.devis.count({
-    where: { patientId, deletedAt: { not: null } },
-  })
-  if (deletedCount === 0) return
-
-  // Si au moins un devis a été supprimé : retirer tous les PDF devis restants du fil
-  // (les envois futurs recréeront une pièce jointe propre).
-  const activeVisible = await prisma.devis.count({
-    where: {
-      patientId,
-      deletedAt: null,
-      statut: { in: ['envoye', 'accepte', 'refuse'] },
-    },
-  })
-  if (activeVisible === 0) {
-    await softDeleteAllDevisPdfMessagesForPatient(patientId)
-    return
-  }
+  await purgeLegacyDevisPdfTombstones(patientId).catch(() => undefined)
 
   const deleted = await prisma.devis.findMany({
     where: { patientId, deletedAt: { not: null } },
@@ -267,19 +276,14 @@ export async function syncHiddenDevisPdfsForPatient(patientId: string): Promise<
       patient: { select: { dossierNumber: true, user: { select: { fullName: true } } } },
     },
   })
+  if (deleted.length === 0) return
 
   for (const d of deleted) {
-    const pieceJointeNom = formatDevisPdfFileName(
-      d.numeroDevis ?? d.patient.dossierNumber,
-      d.patient.user.fullName,
-      d.version,
-    )
     await softDeleteDevisPdfMessages(patientId, {
       numeroDevis: d.numeroDevis,
       dossierNumber: d.patient.dossierNumber,
       version: d.version,
       patientFullName: d.patient.user.fullName,
-      pieceJointeNom,
     })
   }
 }
@@ -555,10 +559,14 @@ async function notifyPatientNewStaffMessage(input: {
   patientStatus?: string | null
   senderRole: UserRole
   preview: string
+  patientEmailKind?: 'confirmation_reservation'
 }) {
   const who = input.senderRole === 'medecin' ? 'Dr Chennoufi' : 'la gestionnaire'
-  const titre = 'Nouveau message de l’équipe'
-  const message = `${who} : ${input.preview.slice(0, 140)}`
+  const isConfirmation = input.patientEmailKind === 'confirmation_reservation'
+  const titre = isConfirmation ? 'Confirmation de votre séjour' : 'Nouveau message de l’équipe'
+  const message = isConfirmation
+    ? 'Votre séjour médical est confirmé. Consultez le message dans votre espace patient.'
+    : `${who} : ${input.preview.slice(0, 140)}`
   await createUserNotification({
     userId: input.patientUserId,
     type: 'info',
@@ -570,11 +578,20 @@ async function notifyPatientNewStaffMessage(input: {
 
   const email = input.patientEmail?.trim()
   if (email) {
-    void sendPatientChatMessageEmail({
-      to: email,
-      patientFullName: input.patientFullName,
-      aboutDecision: input.patientStatus === 'abstention',
-    })
+    if (input.patientEmailKind === 'confirmation_reservation') {
+      void sendConfirmationReservationEmail({
+        to: email,
+        patientFullName: input.patientFullName,
+      }).catch((err) => {
+        console.warn('[chat] Email confirmation séjour non envoyé', err)
+      })
+    } else {
+      void sendPatientChatMessageEmail({
+        to: email,
+        patientFullName: input.patientFullName,
+        aboutDecision: input.patientStatus === 'abstention',
+      })
+    }
   } else {
     console.warn('[chat] Pas d’email patient — notification email message ignorée', {
       patientUserId: input.patientUserId,
@@ -829,7 +846,7 @@ export async function getMessages(
 
   const patientId = await resolvePatientIdForUser(userId, role, patientIdQuery)
 
-  // Filet : PDF d’un devis soft-supprimé → « Message supprimé »
+  // Filet : retirer les PDF des versions devis soft-supprimées (sans toucher aux versions actives)
   await syncHiddenDevisPdfsForPatient(patientId).catch(() => undefined)
 
   const staffFilter =
@@ -985,6 +1002,7 @@ export async function sendMessage(
       patientStatus: patient.status,
       senderRole: role,
       preview,
+      patientEmailKind: input.patientEmailKind,
     })
   }
 

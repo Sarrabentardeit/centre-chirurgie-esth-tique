@@ -1437,6 +1437,12 @@ export default function DevisGestionnairePage() {
     navigate('/gestionnaire/devis')
   }
 
+  const openPatientChat = (patientId: string) => {
+    navigate(
+      `/gestionnaire/chat?patientId=${encodeURIComponent(patientId)}&channel=patient`,
+    )
+  }
+
   useEffect(() => {
     if (view === 'detail' && selectedPatient) void loadPatientDetail(selectedPatient)
   }, [view, selectedPatient, loadPatientDetail])
@@ -3070,15 +3076,27 @@ export default function DevisGestionnairePage() {
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-wrap gap-2">
                     {isAbstention ? (
-                      <Button
-                        variant="brand"
-                        className="gap-2 h-10 text-sm font-semibold"
-                        onClick={openAbstentionMessage}
-                        disabled={detailLoading}
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                        Envoyer message
-                      </Button>
+                      <>
+                        <Button
+                          variant="brand"
+                          className="gap-2 h-10 text-sm font-semibold"
+                          onClick={openAbstentionMessage}
+                          disabled={detailLoading}
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Envoyer message
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-1.5 h-10 text-sm border-slate-200 text-slate-800 hover:bg-slate-50 bg-white"
+                          disabled={detailLoading}
+                          onClick={() => openPatientChat(patientRow.id)}
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Ouvrir le chat
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Button
@@ -3144,6 +3162,16 @@ export default function DevisGestionnairePage() {
                             Supprimer
                           </Button>
                         )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-1.5 h-10 text-sm border-slate-200 text-slate-800 hover:bg-slate-50 bg-white"
+                          disabled={detailLoading}
+                          onClick={() => openPatientChat(patientRow.id)}
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Ouvrir le chat
+                        </Button>
                       </>
                     )}
                   </div>

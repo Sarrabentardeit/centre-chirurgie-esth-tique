@@ -441,10 +441,6 @@ export function syncDureeTotaleSejourInHtml(html: string, dureeTotale: string): 
   return out
 }
 
-function refreshSejourBadgeInHtml(html: string, sejourLine: string, typeChambre = ''): string {
-  return syncOfferSejourInHtml(html, sejourLine, typeChambre)
-}
-
 /** Met à jour le badge séjour dans le HTML (lettre ou cellule offre éditeur). */
 export function syncOfferSejourInHtml(html: string, sejourLine: string, typeChambre = ''): string {
   const badgeLine = buildOfferSejourBadgeLine(sejourLine, typeChambre)

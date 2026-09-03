@@ -36,7 +36,7 @@ export type GoogleCalendarListItem = {
 }
 
 function isSyncableCalendarEntry(item: calendar_v3.Schema$CalendarListEntry): boolean {
-  if (!item.id || item.selected === false) return false
+  if (!item.id) return false
   const id = item.id.toLowerCase()
   if (id.includes('#holiday@') || id.includes('#contacts@') || id.includes('addressbook')) return false
   return true
@@ -626,9 +626,9 @@ export async function pullFromGoogle(medecinId: string): Promise<{ imported: num
   if (!client) return stats
 
   const timeMin = new Date()
-  timeMin.setMonth(timeMin.getMonth() - 3)
+  timeMin.setMonth(timeMin.getMonth() - 12)
   const timeMax = new Date()
-  timeMax.setMonth(timeMax.getMonth() + 12)
+  timeMax.setMonth(timeMax.getMonth() + 18)
 
   const pushCalendarId = client.sync.googleCalendarId
   const calendarIds = await getSyncCalendarIdsForMedecin(client.sync, client.calendar)

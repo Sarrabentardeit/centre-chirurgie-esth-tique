@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
+import { logger } from '../../lib/logger.js'
 import bcrypt from 'bcryptjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -1843,6 +1844,31 @@ export async function getLogistiquePatients() {
   }
 }
 
+/** Extrait un titre court d'intervention à partir du rapport et/ou du devis.
+ *  Ordre de priorité : interventionsRecommandees du rapport → planningMedical → défaut. */
+function extractInterventionMotif(
+  interventionsRecommandees: string[] | null | undefined,
+  planningMedical: string | null | undefined,
+): string {
+  // 1. Interventions recommandées du rapport médical (source la plus précise)
+  const interventions = (interventionsRecommandees ?? []).map((s) => s.trim()).filter(Boolean)
+  if (interventions.length > 0) return interventions.join(' + ').slice(0, 160)
+
+  // 2. planningMedical du devis (strip HTML)
+  if (planningMedical?.trim()) {
+    const text = planningMedical
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&[a-z]+;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const firstLine = text.split(/[.\n\r]/)[0]?.trim() ?? ''
+    if (firstLine.length >= 5 && firstLine.length <= 120) return firstLine
+    if (text.length >= 5) return text.slice(0, 120).trim()
+  }
+
+  return 'Intervention chirurgicale'
+}
+
 export async function upsertLogistique(gestionnaireId: string, patientId: string, input: LogistiqueInput) {
   const patient = await prisma.patient.findUnique({
     where: { id: patientId },
@@ -1871,6 +1897,19 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
       notesLogistiques,
     },
   })
+
+  // ── Agenda : créer / mettre à jour l'événement intervention du Dr ────────
+  if (input.dateIntervention) {
+    void upsertInterventionAgendaEvent({
+      patientId,
+      patientFullName: patient.user.fullName,
+      dossierNumber: patient.dossierNumber,
+      dateIntervention: new Date(input.dateIntervention),
+    }).catch((err) => {
+      logger.warn({ err, patientId }, '[agenda] upsert intervention event failed')
+    })
+  }
+  // ────────────────────────────────────────────────────────────────────────
 
   const complete =
     input.documents.passport.length > 0
@@ -1926,6 +1965,93 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
   })
 
   return { ok: true as const }
+}
+
+/** Crée ou met à jour l'événement agenda "intervention" lié à un patient.
+ *  Identifié par la note sentinel `__src:logistique__` pour le distinguer
+ *  des RDV manuels. Pushé vers Google Calendar si lié. */
+async function upsertInterventionAgendaEvent(input: {
+  patientId: string
+  patientFullName: string
+  dossierNumber: string
+  dateIntervention: Date
+}): Promise<void> {
+  const SENTINEL = '__src:logistique__'
+
+  // Trouver le médecin (premier médecin du compte)
+  const medecin = await prisma.user.findFirst({
+    where: { role: 'medecin' },
+    select: { id: true },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (!medecin) return
+
+  // Nom de l'intervention depuis le rapport lié au dernier devis accepté
+  const acceptedDevis = await prisma.devis.findFirst({
+    where: { patientId: input.patientId, statut: 'accepte', deletedAt: null },
+    orderBy: { dateCreation: 'desc' },
+    select: { rapportId: true, planningMedical: true },
+  })
+  let interventionsRecommandees: string[] | null = null
+  if (acceptedDevis?.rapportId) {
+    const rapport = await prisma.rapport.findUnique({
+      where: { id: acceptedDevis.rapportId },
+      select: { interventionsRecommandees: true },
+    })
+    interventionsRecommandees = rapport?.interventionsRecommandees ?? null
+  }
+  const motif = extractInterventionMotif(interventionsRecommandees, acceptedDevis?.planningMedical)
+
+  const dateDebut = input.dateIntervention
+  const dateFin = new Date(dateDebut.getTime() + 2 * 60 * 60 * 1000) // +2 h par défaut
+
+  const existing = await prisma.agendaEvent.findFirst({
+    where: {
+      patientId: input.patientId,
+      medecinId: medecin.id,
+      type: 'rdv',
+      notes: { contains: SENTINEL },
+    },
+  })
+
+  let eventId: string
+  if (existing) {
+    await prisma.agendaEvent.update({
+      where: { id: existing.id },
+      data: {
+        dateDebut,
+        dateFin,
+        motif,
+        title: input.patientFullName,
+        statut: 'confirme',
+        lastSyncedFrom: 'app',
+        notes: SENTINEL,
+      },
+    })
+    eventId = existing.id
+  } else {
+    const created = await prisma.agendaEvent.create({
+      data: {
+        medecinId: medecin.id,
+        patientId: input.patientId,
+        type: 'rdv',
+        title: input.patientFullName,
+        motif,
+        dateDebut,
+        dateFin,
+        allDay: false,
+        statut: 'confirme',
+        lastSyncedFrom: 'app',
+        notes: SENTINEL,
+      },
+    })
+    eventId = created.id
+  }
+
+  // Synchro Google Calendar (best-effort)
+  void googleCalendar.pushEventToGoogle(eventId).catch((err) => {
+    logger.warn({ err, eventId }, '[google-calendar] push intervention event failed')
+  })
 }
 
 async function loadPlanningSejourContext(patientId: string) {

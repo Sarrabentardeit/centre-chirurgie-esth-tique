@@ -43,9 +43,11 @@ export function toWhatsAppDigits(phone: string | null | undefined): string | nul
   return digits
 }
 
-function firstNameFromFullName(fullName: string): string {
-  const part = fullName.trim().split(/\s+/)[0]
-  return part || 'Madame'
+function splitFullName(fullName: string): { prenom: string; nom: string } {
+  const parts = fullName.trim().split(/\s+/)
+  const prenom = parts[0] || 'Madame'
+  const nom = parts.slice(1).join(' ')
+  return { prenom, nom }
 }
 
 export function buildDevisWhatsAppMessage(input: {
@@ -55,18 +57,37 @@ export function buildDevisWhatsAppMessage(input: {
   version: number
   pdfUrl: string | null
 }): string {
-  const first = firstNameFromFullName(input.patientFullName)
-  const base = input.numeroDevis?.trim() || input.dossierNumber
-  const ref = formatMcReferenceWithVersion(base, input.version)
+  const { prenom, nom } = splitFullName(input.patientFullName)
+  const salutation = nom ? `${prenom} ${nom}` : prenom
+
   const lines = [
-    `Bonjour ${first},`,
+    `Bonjour ${salutation},`,
     '',
-    `Voici votre devis ${ref} du Cabinet du Dr Mehdi Chennoufi.`,
+    `Nous vous remercions chaleureusement pour l'intérêt et la confiance que vous accordez au cabinet du Dr CHENNOUFI.`,
+    '',
+    `Après étude attentive de vos photographies ainsi que de votre dossier médical, nous avons le plaisir de vous transmettre, en pièce jointe, notre meilleure offre pour l'organisation de votre séjour médical.`,
   ]
+
   if (input.pdfUrl) {
-    lines.push('', input.pdfUrl)
+    lines.push('', 'Consulter votre devis :', input.pdfUrl)
   }
-  lines.push('', 'Nous restons à votre disposition.', '', 'Cabinet du Dr Mehdi Chennoufi')
+
+  lines.push(
+    '',
+    `Je vous en souhaite bonne réception et reste bien entendu à votre entière disposition pour toute question, précision complémentaire ou pour vous accompagner dans l'organisation de votre prise en charge médicale.`,
+    '',
+    `Merci de bien vouloir nous contacter durant les horaires de travail : Mardi, Mercredi & Jeudi de 09 à 15h (heure locale)`,
+    '',
+    `Je vous souhaite une excellente journée.`,
+    '',
+    `Bien cordialement,`,
+    `Houda CHENNOUFI`,
+    `Conciergerie & Coordination Patients`,
+    `Cabinet du Dr Mehdi Chennoufi`,
+    `Chirurgie Esthétique, Plastique et Réparatrice`,
+    `SCULPTURE, SMOOTH & SMILE`,
+  )
+
   return lines.join('\n')
 }
 

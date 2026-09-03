@@ -1,9 +1,10 @@
 import { Router } from 'express'
-import type { Request, Response } from 'express'
+import type { Request, Response, NextFunction } from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import multer from 'multer'
 import { rateLimit } from 'express-rate-limit'
+import { resolveDevisPdfPath, verifyDevisPdfToken } from '../../lib/devisPdfPublic.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
@@ -53,5 +54,40 @@ publicRouter.post(
     const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
     const url = `${baseUrl}/uploads/${req.file.filename}`
     res.json({ ok: true, url, name: req.file.originalname, size: req.file.size })
+  },
+)
+
+/** PDF devis public (WhatsApp) — pas de JSON 404, ouverture inline. */
+publicRouter.get(
+  '/devis/:devisId/pdf',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const devisId = String(req.params.devisId ?? '')
+      const k = typeof req.query.k === 'string' ? req.query.k : undefined
+      if (!devisId || !verifyDevisPdfToken(devisId, k)) {
+        res.status(404).type('html').send(
+          '<!doctype html><meta charset="utf-8"><title>Devis introuvable</title><p>Ce lien de devis n’est pas valide.</p>',
+        )
+        return
+      }
+      const found = await resolveDevisPdfPath(devisId)
+      if (!found) {
+        res.status(404).type('html').send(
+          '<!doctype html><meta charset="utf-8"><title>Devis introuvable</title><p>Le PDF de ce devis n’est pas encore disponible. Demandez à la clinique de le renvoyer.</p>',
+        )
+        return
+      }
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${found.downloadName.replace(/"/g, '')}"`,
+      )
+      res.sendFile(found.filePath, (err) => {
+        if (err) next(err)
+      })
+    } catch (e) {
+      next(e)
+    }
   },
 )

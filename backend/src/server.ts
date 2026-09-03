@@ -70,11 +70,22 @@ app.use('/uploads', (_req, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
   next()
 })
-app.use('/uploads', express.static(uploadsDir))
-app.get('/uploads/:filename', async (req, res, next) => {
+app.use('/uploads', express.static(uploadsDir, {
+  index: false,
+  fallthrough: true,
+  setHeaders(res, filePath) {
+    if (filePath.toLowerCase().endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', 'inline')
+    }
+  },
+}))
+// Express 5 : `:filename` ne matche pas `fichier.pdf` → wildcard obligatoire.
+app.get('/uploads/*file', async (req, res, next) => {
   try {
-    const requested = req.params.filename
-    const safeRequested = requested.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const raw = req.params.file
+    const requested = Array.isArray(raw) ? raw.join('/') : String(raw ?? '')
+    const safeRequested = path.basename(requested).replace(/[^a-zA-Z0-9._-]/g, '_')
     const directPath = path.join(uploadsDir, safeRequested)
 
     res.sendFile(directPath, async (err) => {
@@ -88,17 +99,19 @@ app.get('/uploads/:filename', async (req, res, next) => {
           .pop()
 
         if (!candidate) {
-          next()
+          res.status(404).type('html').send(
+            '<!doctype html><meta charset="utf-8"><title>Fichier introuvable</title><p>Ce document n’est plus disponible.</p>',
+          )
           return
         }
         res.sendFile(path.join(uploadsDir, candidate), (fallbackErr) => {
           if (fallbackErr) next(fallbackErr)
         })
       } catch (scanErr) {
-        // Si le dossier uploads n'existe pas encore, répondre en 404
-        // (évite un INTERNAL_ERROR pour un simple fichier absent).
         if (scanErr && typeof scanErr === 'object' && 'code' in scanErr && (scanErr as { code?: string }).code === 'ENOENT') {
-          next()
+          res.status(404).type('html').send(
+            '<!doctype html><meta charset="utf-8"><title>Fichier introuvable</title><p>Ce document n’est plus disponible.</p>',
+          )
           return
         }
         next(scanErr)
@@ -111,9 +124,10 @@ app.get('/uploads/:filename', async (req, res, next) => {
 
 // Compatibilité rétroactive : anciennes URLs stockées en `/api/uploads/...`
 // (ou caches frontend) doivent continuer à fonctionner en production.
-app.get('/api/uploads/:filename', (req, res) => {
-  const requested = String(req.params.filename ?? '')
-  const safeRequested = requested.replace(/[^a-zA-Z0-9._-]/g, '_')
+app.get('/api/uploads/*file', (req, res) => {
+  const raw = req.params.file
+  const requested = Array.isArray(raw) ? raw.join('/') : String(raw ?? '')
+  const safeRequested = path.basename(requested).replace(/[^a-zA-Z0-9._-]/g, '_')
   res.redirect(302, `/uploads/${safeRequested}`)
 })
 

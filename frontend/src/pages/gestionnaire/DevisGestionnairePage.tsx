@@ -41,6 +41,8 @@ import {
 } from '@/lib/confirmationReservationMessage'
 import { LogistiqueDossierSection } from '@/components/dossier/LogistiqueDossierSection'
 import { PlanningSejourDossierSection } from '@/components/dossier/PlanningSejourDossierSection'
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
+import { finishWhatsAppPopup, prepareWhatsAppPopup } from '@/lib/whatsappDevis'
 import {
   LOGISTIQUE_ESSENTIAL_TOTAL,
   logistiqueDocumentsDoneCount,
@@ -566,6 +568,9 @@ interface DevisModalProps {
   onDelete: () => void
   canDelete: boolean
   canSend?: boolean
+  onWhatsApp?: () => void
+  whatsAppNeedsConfirm?: boolean
+  hasPhone?: boolean
   onCustomize: () => void
   title?: string
   hint?: string
@@ -594,7 +599,7 @@ function DevisModal({
   exclutIds, setExclutIds,
   drainageNb, setDrainageNb,
   contentionDetail, setContentionDetail,
-  sent, savedDraft, autoSaving = false, actionLoading, onSend, onSaveDraft, onDelete, canDelete, canSend = true, onCustomize, currency,
+  sent, savedDraft, autoSaving = false, actionLoading, onSend, onSaveDraft, onDelete, canDelete, canSend = true, onWhatsApp, whatsAppNeedsConfirm = false, hasPhone = false, onCustomize, currency,
   tauxEur,
   formError = null,
   cliniqueNomInvalid = false,
@@ -608,6 +613,7 @@ function DevisModal({
   const tndPerEur = tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR
   const euroLabel = formatEuroApprox(total, tndPerEur)
   const [confirmSendOpen, setConfirmSendOpen] = useState(false)
+  const [confirmWhatsAppOpen, setConfirmWhatsAppOpen] = useState(false)
   const bodyScrollRef = useRef<HTMLDivElement>(null)
   const bodyScrollTopRef = useRef(0)
 
@@ -618,11 +624,11 @@ function DevisModal({
   // Fermer sur Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !confirmSendOpen) onClose()
+      if (e.key === 'Escape' && !confirmSendOpen && !confirmWhatsAppOpen) onClose()
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [onClose, confirmSendOpen])
+  }, [onClose, confirmSendOpen, confirmWhatsAppOpen])
 
   return (
     <div
@@ -1119,6 +1125,19 @@ function DevisModal({
                 <FilePenLine className="h-4 w-4" />
                 Lettre PDF
               </Button>
+              {onWhatsApp && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="sm:w-auto h-10 gap-2 border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                  onClick={() => onWhatsApp()}
+                  disabled={actionLoading || !hasPhone}
+                  title={hasPhone ? 'Ouvrir WhatsApp avec le devis de cette patiente' : 'Ajoutez un numéro de téléphone dans la fiche'}
+                >
+                  <WhatsAppIcon className="h-4 w-4" />
+                  WhatsApp
+                </Button>
+              )}
               <Button variant="ghost" className="sm:w-auto h-10 text-slate-500" onClick={onClose}>
                 Fermer
               </Button>
@@ -1138,6 +1157,24 @@ function DevisModal({
             {sent
               ? <><CheckCircle2 className="h-4 w-4" /> Devis envoyé !</>
               : <><Send className="h-4 w-4" /> Valider et envoyer au patient</>}
+          </Button>
+          )}
+          {onWhatsApp && (
+          <Button
+            type="button"
+            variant="outline"
+            className="sm:w-auto h-10 gap-2 border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+            onClick={() => {
+              if (whatsAppNeedsConfirm && sent) return
+              if (!hasPhone) return
+              if (whatsAppNeedsConfirm) setConfirmWhatsAppOpen(true)
+              else onWhatsApp()
+            }}
+            disabled={actionLoading || (whatsAppNeedsConfirm && sent) || !hasPhone}
+            title={hasPhone ? 'Ouvrir WhatsApp avec le devis de cette patiente' : 'Ajoutez un numéro de téléphone dans la fiche'}
+          >
+            <WhatsAppIcon className="h-4 w-4" />
+            {whatsAppNeedsConfirm ? 'Envoyer par WhatsApp' : 'WhatsApp'}
           </Button>
           )}
           <Button
@@ -1194,6 +1231,26 @@ function DevisModal({
         icon={
           <div className="h-11 w-11 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center">
             <Send className="h-5 w-5 text-brand-700" />
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={confirmWhatsAppOpen}
+        onClose={() => !actionLoading && setConfirmWhatsAppOpen(false)}
+        title="Envoyer ce devis par WhatsApp ?"
+        description={`Le devis sera validé, puis WhatsApp s’ouvrira avec le numéro de ${patientName}, un message déjà écrit et le lien du PDF. Cliquez ensuite sur Envoyer dans WhatsApp.`}
+        confirmLabel="Ouvrir WhatsApp"
+        cancelLabel="Annuler"
+        confirmVariant="brand"
+        loading={actionLoading}
+        onConfirm={async () => {
+          setConfirmWhatsAppOpen(false)
+          onWhatsApp?.()
+        }}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+            <WhatsAppIcon className="h-5 w-5 text-emerald-700" />
           </div>
         }
       />
@@ -2156,8 +2213,12 @@ export default function DevisGestionnairePage() {
     await persistDraft({ silent: false, requireNoms: true })
   }
 
-  const handleSend = async () => {
+  const handleSend = async (opts?: { whatsapp?: boolean }) => {
     if (!selectedPatient) return
+    if (opts?.whatsapp && !(patientRow?.phone ?? patientDetail?.phone)?.trim()) {
+      setModalError('Ajoutez un numéro de téléphone dans la fiche pour envoyer par WhatsApp.')
+      return
+    }
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     const status = patientRow?.status ?? patientDetail?.status
     if (!status || !canPatientHaveDevis(status)) {
@@ -2171,6 +2232,7 @@ export default function DevisGestionnairePage() {
       setModalError('Ajoutez au moins une prestation avec une désignation.')
       return
     }
+    const popup = opts?.whatsapp ? prepareWhatsAppPopup() : null
     setActionLoading(true); setModalError(null); setPageError(null)
     try {
       const payload = buildPayload()
@@ -2236,13 +2298,53 @@ export default function DevisGestionnairePage() {
           syncInclutExclut: true,
         }),
       )
-      await gestionnaireApi.sendDevis(r.devis.id, { html: fullHtml })
-      feedbackSuccess('Devis envoyé', 'Le patient a reçu le devis (PDF joint au chat).')
+      const sentResult = await gestionnaireApi.sendDevis(r.devis.id, { html: fullHtml })
+      if (opts?.whatsapp) {
+        const opened = finishWhatsAppPopup(popup, sentResult.whatsapp?.whatsappUrl)
+        if (opened) {
+          feedbackSuccess(
+            'WhatsApp ouvert',
+            'Cliquez sur Envoyer dans WhatsApp pour transmettre le devis.',
+          )
+        } else {
+          popup?.close()
+          setModalError('Ajoutez un numéro de téléphone dans la fiche pour envoyer par WhatsApp.')
+          feedbackSuccess('Devis envoyé', 'Le patient a reçu le devis (PDF joint au chat).')
+        }
+      } else {
+        feedbackSuccess('Devis envoyé', 'Le patient a reçu le devis (PDF joint au chat).')
+      }
       setSent(true); setTimeout(() => { setSent(false); setShowModal(false) }, 2000)
       setIsEditingExisting(false)
       await loadPatientDetail(selectedPatient); await loadPatients()
-    } catch (e) { setModalError(apiErrorMessage(e)) }
+    } catch (e) {
+      try { popup?.close() } catch { /* ignore */ }
+      setModalError(apiErrorMessage(e))
+    }
     finally { setActionLoading(false) }
+  }
+
+  const openDevisWhatsApp = async (devisId: string, e?: MouseEvent) => {
+    e?.preventDefault()
+    e?.stopPropagation()
+    const popup = prepareWhatsAppPopup()
+    try {
+      const r = await gestionnaireApi.getDevisWhatsApp(devisId)
+      if (!finishWhatsAppPopup(popup, r.whatsappUrl)) {
+        toast({
+          title: 'Pas de numéro WhatsApp',
+          description: 'Ajoutez le téléphone de la patiente dans la fiche.',
+          variant: 'error',
+        })
+      }
+    } catch (err) {
+      try { popup?.close() } catch { /* ignore */ }
+      toast({
+        title: 'WhatsApp impossible',
+        description: err instanceof Error ? err.message : 'Erreur.',
+        variant: 'error',
+      })
+    }
   }
 
   const handleRefuse = async (devisId?: string) => {
@@ -3739,77 +3841,92 @@ export default function DevisGestionnairePage() {
                         )
                         const linkedRapportNum = rapportNumero(rapportsList, d.rapportId)
                         return (
-                          <div key={d.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
-                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sc.cls}`}>{sc.label}</span>
+                          <div key={d.id} className="flex items-center gap-2 py-2 text-sm">
+                            {/* Statut */}
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${sc.cls}`}>
+                              {sc.label}
+                            </span>
+
+                            {/* Nom + meta */}
                             <div className="min-w-0 flex-1">
-                              <p className="font-medium text-slate-800 truncate">{devisName}</p>
-                              <p className="text-slate-400 text-xs">
-                                Version {d.version}
-                                {linkedRapportNum ? ` · Rapport R${linkedRapportNum}` : ''}
+                              <p className="text-sm font-medium text-slate-800 truncate">{devisName}</p>
+                              <p className="text-xs text-slate-400">
+                                v{d.version}{linkedRapportNum ? ` · R${linkedRapportNum}` : ''} · {formatDate(d.dateCreation)}
                               </p>
                             </div>
-                            <span className="font-bold text-slate-800">{formatCurrency(d.total, currency)}</span>
-                            <span className="text-xs text-slate-400">{formatDate(d.dateCreation)}</span>
+
+                            {/* Montant */}
+                            <span className="text-sm font-bold text-slate-800 tabular-nums shrink-0">{formatCurrency(d.total, currency)}</span>
+
+                            {/* Consulter */}
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
-                              onClick={() => void openDevisTable(
-                                d.statut === 'brouillon' ? 'edit-draft' : 'view',
-                                d,
-                              )}
+                              className="text-xs h-7 px-2.5 text-brand-700 hover:bg-brand-50 shrink-0"
+                              onClick={() => void openDevisTable(d.statut === 'brouillon' ? 'edit-draft' : 'view', d)}
                               disabled={d.statut === 'brouillon' && !devisAllowed}
                             >
                               Consulter
                             </Button>
-                            {d.statut !== 'brouillon' && d.statut !== 'refuse' && d.statut !== 'accepte' && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-brand-700 hover:bg-brand-50 h-7 px-2.5 gap-1"
-                                onClick={() => void openDevisTable('new-version', d)}
-                                disabled={!devisAllowed}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                                Nouvelle version
-                              </Button>
-                            )}
-                            {d.statut !== 'accepte' && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs text-destructive hover:bg-destructive/10 h-7 px-2.5 gap-1"
-                              disabled={actionLoading}
-                              onClick={() => requestDeleteDevis(d.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Supprimer
-                            </Button>
-                            )}
-                            {d.statut === 'envoye' && (
-                              <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-emerald-700 hover:bg-emerald-50 h-7 px-2.5 gap-1"
-                                onClick={() => setAcceptDevisId(d.id)}
-                                disabled={actionLoading}
-                              >
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                Devis accepté
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-red-500 hover:bg-red-50 h-7 px-2.5"
-                                onClick={() => void handleRefuse(d.id)}
-                                disabled={actionLoading}
-                              >
-                                Marquer refusé
-                              </Button>
-                              </>
-                            )}
+
+                            {/* Icônes actions */}
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              {d.statut !== 'refuse' && (
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 flex items-center justify-center rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors disabled:opacity-40"
+                                  disabled={actionLoading || !patientRow.phone}
+                                  title={patientRow.phone ? 'Envoyer par WhatsApp' : 'Ajoutez un numéro de téléphone'}
+                                  onClick={() => void openDevisWhatsApp(d.id)}
+                                >
+                                  <WhatsAppIcon className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              {d.statut !== 'brouillon' && d.statut !== 'refuse' && d.statut !== 'accepte' && (
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 flex items-center justify-center rounded-md text-slate-400 hover:text-brand-700 hover:bg-brand-50 transition-colors disabled:opacity-40"
+                                  title="Nouvelle version"
+                                  onClick={() => void openDevisTable('new-version', d)}
+                                  disabled={!devisAllowed}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              {d.statut === 'envoye' && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="h-7 w-7 flex items-center justify-center rounded-md text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition-colors disabled:opacity-40"
+                                    title="Marquer comme accepté"
+                                    onClick={() => setAcceptDevisId(d.id)}
+                                    disabled={actionLoading}
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="h-7 w-7 flex items-center justify-center rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                                    title="Marquer comme refusé"
+                                    onClick={() => void handleRefuse(d.id)}
+                                    disabled={actionLoading}
+                                  >
+                                    <Ban className="h-3.5 w-3.5" />
+                                  </button>
+                                </>
+                              )}
+                              {d.statut !== 'accepte' && (
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 flex items-center justify-center rounded-md text-slate-300 hover:text-destructive hover:bg-destructive/5 transition-colors disabled:opacity-40"
+                                  title="Supprimer"
+                                  disabled={actionLoading}
+                                  onClick={() => requestDeleteDevis(d.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )
                       })}
@@ -3927,6 +4044,15 @@ export default function DevisGestionnairePage() {
           contentionDetail={contentionDetail} setContentionDetail={setContentionDetail}
           sent={sent} savedDraft={savedDraft} autoSaving={autoSaving} actionLoading={actionLoading}
           onSend={() => void handleSend()}
+          onWhatsApp={
+            !tableReadOnly && (!modalDevis || modalDevis.statut === 'brouillon')
+              ? () => void handleSend({ whatsapp: true })
+              : tableReadOnly && modalDevis && (modalDevis.statut === 'envoye' || modalDevis.statut === 'accepte')
+                ? () => void openDevisWhatsApp(modalDevis.id)
+                : undefined
+          }
+          whatsAppNeedsConfirm={!tableReadOnly && (!modalDevis || modalDevis.statut === 'brouillon')}
+          hasPhone={Boolean((patientRow?.phone ?? patientDetail?.phone)?.trim())}
           onSaveDraft={() => void handleSaveDraft()}
           onDelete={() => handleDeleteDevis()}
           canDelete={!!modalDevis && modalDevis.statut !== 'accepte' && !tableReadOnly}

@@ -364,6 +364,15 @@ export interface DevisLigne {
   total: number
 }
 
+export interface DevisWhatsAppPayload {
+  hasPhone: boolean
+  phone: string | null
+  pdfUrl: string | null
+  whatsappUrl: string | null
+  patientName: string
+  numeroDevis: string
+}
+
 export interface Devis {
   id: string
   numeroDevis?: string | null
@@ -1397,10 +1406,17 @@ export const gestionnaireApi = {
     }),
 
   sendDevis: (devisId: string, body?: { html?: string }) =>
-    request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/envoyer`, {
-      method: 'POST',
-      body: JSON.stringify(body ?? {}),
-    }),
+    request<{ ok: true; devis: Devis; whatsapp?: DevisWhatsAppPayload }>(
+      `/gestionnaire/devis/${devisId}/envoyer`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      },
+    ),
+
+  /** Lien WhatsApp prérempli (numéro de la patiente + message + PDF du devis). */
+  getDevisWhatsApp: (devisId: string) =>
+    request<{ ok: true } & DevisWhatsAppPayload>(`/gestionnaire/devis/${devisId}/whatsapp`),
 
   /** Rappel chat + PDF de la version envoyée (sans re-changer le statut). */
   sendDevisRappel: (devisId: string, body: { contenu: string; html?: string }) =>

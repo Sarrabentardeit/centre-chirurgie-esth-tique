@@ -30,6 +30,8 @@ import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSe
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 import { sendDevisReadyEmail, sendDevisRappelEmail, sendNotificationEmail } from '../../lib/mailer.js'
+import { buildDevisWhatsAppPayload, type DevisWhatsAppPayload } from '../../lib/whatsappDevis.js'
+import { publicDevisPdfUrl } from '../../lib/devisPdfPublic.js'
 import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
 import { softDeleteDevisPdfMessages, sendStaffOnlyMessage } from '../chat/chat.service.js'
 
@@ -908,7 +910,89 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
     },
   }).catch(() => undefined)
 
-  return { devis: updated }
+  const whatsapp = buildDevisWhatsAppPayload({
+    phone: patient.phone,
+    patientFullName: patient.user.fullName,
+    numeroDevis: devis.numeroDevis,
+    dossierNumber: patient.dossierNumber,
+    version: devis.version,
+    storedPdfUrl: pieceJointeUrl,
+    publicPdfUrl: publicDevisPdfUrl(devis.id),
+  })
+
+  return { devis: updated, whatsapp }
+}
+
+async function findLatestDevisPdfUrl(input: {
+  patientId: string
+  numeroDevis: string | null
+  dossierNumber: string
+  fullName: string
+  version: number
+}): Promise<string | null> {
+  const pieceJointeNom = formatDevisPdfFileName(
+    input.numeroDevis ?? input.dossierNumber,
+    input.fullName,
+    input.version,
+  )
+  const exact = await prisma.message.findFirst({
+    where: {
+      patientId: input.patientId,
+      staffOnly: false,
+      deletedForAll: false,
+      pieceJointeUrl: { not: null },
+      pieceJointeNom,
+    },
+    orderBy: { dateEnvoi: 'desc' },
+    select: { pieceJointeUrl: true },
+  })
+  if (exact?.pieceJointeUrl) return exact.pieceJointeUrl
+
+  const fallback = await prisma.message.findFirst({
+    where: {
+      patientId: input.patientId,
+      staffOnly: false,
+      deletedForAll: false,
+      pieceJointeUrl: { contains: '/uploads/' },
+      pieceJointeNom: { endsWith: '.pdf', mode: 'insensitive' },
+    },
+    orderBy: { dateEnvoi: 'desc' },
+    select: { pieceJointeUrl: true },
+  })
+  return fallback?.pieceJointeUrl ?? null
+}
+
+/** Lien WhatsApp prérempli (numéro patiente + message + PDF du devis concerné). */
+export async function getDevisWhatsApp(devisId: string): Promise<{ ok: true } & DevisWhatsAppPayload> {
+  const devis = await prisma.devis.findFirst({ where: { id: devisId, deletedAt: null } })
+  if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+
+  const patient = await prisma.patient.findUnique({
+    where: { id: devis.patientId },
+    include: { user: { select: { fullName: true } } },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const storedPdfUrl = await findLatestDevisPdfUrl({
+    patientId: patient.id,
+    numeroDevis: devis.numeroDevis,
+    dossierNumber: patient.dossierNumber,
+    fullName: patient.user.fullName,
+    version: devis.version,
+  })
+
+  return {
+    ok: true,
+    ...buildDevisWhatsAppPayload({
+      phone: patient.phone,
+      patientFullName: patient.user.fullName,
+      numeroDevis: devis.numeroDevis,
+      dossierNumber: patient.dossierNumber,
+      version: devis.version,
+      storedPdfUrl,
+      publicPdfUrl: publicDevisPdfUrl(devis.id),
+    }),
+  }
 }
 
 /** Rappel chat + PDF de la dernière version envoyée (sans changer le statut devis). */

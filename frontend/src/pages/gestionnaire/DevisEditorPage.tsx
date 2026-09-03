@@ -104,6 +104,8 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { toast } from '@/store/toastStore'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
+import { finishWhatsAppPopup, prepareWhatsAppPopup } from '@/lib/whatsappDevis'
 import { formatDate, formatDevisPdfFileName, formatDevisTitle, getDevisDisplayNumber } from '@/lib/utils'
 import { DEFAULT_TND_PER_EUR, replaceDevisAmountPlaceholders } from '@/lib/moneyWords'
 import { inlineHtmlImages } from '@/lib/pdf'
@@ -582,6 +584,7 @@ export default function DevisEditorPage() {
   const [sentOk, setSentOk]             = useState(false)
   const [sendError, setSendError]       = useState<string | null>(null)
   const [confirmSendOpen, setConfirmSendOpen] = useState(false)
+  const [confirmWhatsAppOpen, setConfirmWhatsAppOpen] = useState(false)
   const [initialTopHtml, setInitialTopHtml] = useState<string>('')
   const [initialBottomHtml, setInitialBottomHtml] = useState<string>('')
   const [initialOfferTitle, setInitialOfferTitle] = useState<string>('')
@@ -1010,35 +1013,83 @@ export default function DevisEditorPage() {
   }
 
   /** Valider + envoyer au patient — reste sur cette page (pas de retour liste). */
-  const handleValidateAndSend = async () => {
+  const handleValidateAndSend = async (opts?: { whatsapp?: boolean }) => {
     const id = devisIdRef.current
     if (!id) {
       setSendError('Aucun devis à envoyer. Créez d’abord un brouillon.')
       return
     }
+    if (opts?.whatsapp && !patient?.phone?.trim()) {
+      setSendError('Ajoutez un numéro de téléphone dans la fiche pour envoyer par WhatsApp.')
+      return
+    }
     setSending(true)
     setSendError(null)
     setSentOk(false)
+    const popup = opts?.whatsapp ? prepareWhatsAppPopup() : null
     try {
       // Toujours persister la version écran actuelle avant PDF / chat
       await flushSave({ force: true })
 
       // PDF chat = exactement ce qui est à l’écran
       const fullHtml = await inlineHtmlImages(buildDevisFullHtml())
-      await gestionnaireApi.sendDevis(id, { html: fullHtml })
+      const sentResult = await gestionnaireApi.sendDevis(id, { html: fullHtml })
       setSentOk(true)
-      toast({
-        title: 'Devis envoyé au patient',
-        description: 'PDF personnalisé joint dans le chat.',
-        variant: 'success',
-      })
+      if (opts?.whatsapp) {
+        const opened = finishWhatsAppPopup(popup, sentResult.whatsapp?.whatsappUrl)
+        toast({
+          title: opened ? 'WhatsApp ouvert' : 'Devis envoyé au patient',
+          description: opened
+            ? 'Cliquez sur Envoyer dans WhatsApp pour transmettre le devis.'
+            : 'Ajoutez le téléphone de la patiente pour WhatsApp. PDF déjà joint au chat.',
+          variant: opened ? 'success' : 'error',
+        })
+      } else {
+        toast({
+          title: 'Devis envoyé au patient',
+          description: 'PDF personnalisé joint dans le chat.',
+          variant: 'success',
+        })
+      }
 
       await load()
     } catch (e) {
+      try { popup?.close() } catch { /* ignore */ }
       setSendError(e instanceof Error ? e.message : 'Envoi impossible.')
       toast({ title: 'Envoi impossible', description: e instanceof Error ? e.message : undefined, variant: 'error' })
     } finally {
       setSending(false)
+    }
+  }
+
+  const openEditorWhatsApp = async () => {
+    const id = devisIdRef.current
+    if (!id) return
+    if (!patient?.phone?.trim()) {
+      toast({
+        title: 'Pas de numéro WhatsApp',
+        description: 'Ajoutez le téléphone de la patiente dans la fiche.',
+        variant: 'error',
+      })
+      return
+    }
+    const popup = prepareWhatsAppPopup()
+    try {
+      const r = await gestionnaireApi.getDevisWhatsApp(id)
+      if (!finishWhatsAppPopup(popup, r.whatsappUrl)) {
+        toast({
+          title: 'Pas de numéro WhatsApp',
+          description: 'Ajoutez le téléphone de la patiente dans la fiche.',
+          variant: 'error',
+        })
+      }
+    } catch (e) {
+      try { popup?.close() } catch { /* ignore */ }
+      toast({
+        title: 'WhatsApp impossible',
+        description: e instanceof Error ? e.message : undefined,
+        variant: 'error',
+      })
     }
   }
 
@@ -1424,6 +1475,31 @@ export default function DevisEditorPage() {
                 ? 'Déjà envoyé. Modifiez le contenu puis sauvegardez si besoin.'
                 : 'Enregistre le document puis l’envoie au patient, sans quitter cette page.'}
           </p>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+          {(dv?.statut === 'envoye' || dv?.statut === 'accepte' || sentOk) && (
+            <button
+              type="button"
+              onClick={() => void openEditorWhatsApp()}
+              disabled={sending || !devisId || !patient?.phone}
+              title={patient?.phone ? 'Ouvrir WhatsApp avec ce devis' : 'Ajoutez un numéro de téléphone'}
+              className="inline-flex items-center justify-center gap-2 h-11 sm:h-10 px-4 text-sm font-semibold rounded-xl border border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+            >
+              <WhatsAppIcon className="h-4 w-4" />
+              WhatsApp
+            </button>
+          )}
+          {dv?.statut !== 'envoye' && dv?.statut !== 'accepte' && !sentOk && (
+            <button
+              type="button"
+              onClick={() => setConfirmWhatsAppOpen(true)}
+              disabled={sending || saving || !devisId || !patient?.phone}
+              title={patient?.phone ? 'Envoyer ce devis par WhatsApp' : 'Ajoutez un numéro de téléphone'}
+              className="inline-flex items-center justify-center gap-2 h-11 sm:h-10 px-4 text-sm font-semibold rounded-xl border border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+            >
+              <WhatsAppIcon className="h-4 w-4" />
+              Envoyer par WhatsApp
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setConfirmSendOpen(true)}
@@ -1439,6 +1515,7 @@ export default function DevisEditorPage() {
               <><Send className="h-4 w-4" /> Valider et envoyer</>
             )}
           </button>
+          </div>
         </div>
       </div>
 
@@ -1458,6 +1535,26 @@ export default function DevisEditorPage() {
         icon={
           <div className="h-11 w-11 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center">
             <Send className="h-5 w-5 text-brand-700" />
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={confirmWhatsAppOpen}
+        onClose={() => !sending && setConfirmWhatsAppOpen(false)}
+        title="Envoyer ce devis par WhatsApp ?"
+        description={`Le document sera enregistré, puis WhatsApp s’ouvrira avec le numéro de ${patient?.user.fullName ?? 'la patiente'}, un message déjà écrit et le lien du PDF. Cliquez ensuite sur Envoyer dans WhatsApp.`}
+        confirmLabel="Ouvrir WhatsApp"
+        cancelLabel="Annuler"
+        confirmVariant="brand"
+        loading={sending}
+        onConfirm={async () => {
+          setConfirmWhatsAppOpen(false)
+          await handleValidateAndSend({ whatsapp: true })
+        }}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+            <WhatsAppIcon className="h-5 w-5 text-emerald-700" />
           </div>
         }
       />

@@ -170,6 +170,18 @@ gestionnaireRouter.post(
   },
 )
 
+gestionnaireRouter.get(
+  '/devis/:devisId/whatsapp',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.getDevisWhatsApp(pid(req.params.devisId))
+      res.json(result)
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
 gestionnaireRouter.post(
   '/devis/:devisId/rappel',
   validate(sendDevisRappelSchema),

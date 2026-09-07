@@ -99,6 +99,62 @@ const DevisHighlight = Highlight.extend({
     }
   },
 })
+
+/** StarterKit v3 inclut déjà underline — on le désactive pour n’en garder qu’un. */
+const STARTER_KIT_DOC = StarterKit.configure({
+  heading: { levels: [1, 2, 3] },
+  horizontalRule: {},
+  paragraph: false,
+  underline: false,
+})
+const STARTER_KIT_BOT = StarterKit.configure({
+  heading: { levels: [1, 2, 3] },
+  paragraph: false,
+  underline: false,
+})
+const STARTER_KIT_OFFER = StarterKit.configure({
+  heading: false,
+  horizontalRule: false,
+  blockquote: false,
+  codeBlock: false,
+  bulletList: false,
+  orderedList: false,
+  listItem: false,
+  paragraph: false,
+  underline: false,
+})
+const TEXT_ALIGN_DOC = TextAlign.configure({ types: ['heading', 'paragraph'] })
+const TEXT_ALIGN_OFFER = TextAlign.configure({ types: ['paragraph'] })
+const HIGHLIGHT_MULTI = DevisHighlight.configure({ multicolor: true })
+
+const DEVIS_DOC_EXTENSIONS = [
+  STARTER_KIT_DOC,
+  DevisParagraph,
+  Underline,
+  TEXT_ALIGN_DOC,
+  DevisTextStyle,
+  DevisColor,
+  HIGHLIGHT_MULTI,
+]
+const DEVIS_BOT_EXTENSIONS = [
+  STARTER_KIT_BOT,
+  DevisParagraph,
+  Underline,
+  TEXT_ALIGN_DOC,
+  DevisTextStyle,
+  DevisColor,
+  HIGHLIGHT_MULTI,
+]
+const DEVIS_OFFER_EXTENSIONS = [
+  STARTER_KIT_OFFER,
+  DevisParagraph,
+  Underline,
+  TEXT_ALIGN_OFFER,
+  DevisTextStyle,
+  DevisColor,
+  HIGHLIGHT_MULTI,
+]
+
 import { ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw, Send } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { toast } from '@/store/toastStore'
@@ -834,82 +890,28 @@ export default function DevisEditorPage() {
 
   const editorTop = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-        horizontalRule: {},
-        paragraph: false,
-      }),
-      DevisParagraph,
-      Underline,
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      DevisTextStyle,
-      DevisColor,
-      DevisHighlight.configure({ multicolor: true }),
-    ],
+    extensions: DEVIS_DOC_EXTENSIONS,
     content: initialTopHtml || '<p></p>',
     onFocus: () => setActiveZone('top'),
     onUpdate: triggerSave,
   })
   const editorBot = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, paragraph: false }),
-      DevisParagraph,
-      Underline,
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      DevisTextStyle,
-      DevisColor,
-      DevisHighlight.configure({ multicolor: true }),
-    ],
+    extensions: DEVIS_BOT_EXTENSIONS,
     content: initialBottomHtml || '<p></p>',
     onFocus: () => setActiveZone('bottom'),
     onUpdate: triggerSave,
   })
   const editorOffer = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({
-        heading: false,
-        horizontalRule: false,
-        blockquote: false,
-        codeBlock: false,
-        bulletList: false,
-        orderedList: false,
-        listItem: false,
-        paragraph: false,
-      }),
-      DevisParagraph,
-      Underline,
-      TextAlign.configure({ types: ['paragraph'] }),
-      DevisTextStyle,
-      DevisColor,
-      DevisHighlight.configure({ multicolor: true }),
-    ],
+    extensions: DEVIS_OFFER_EXTENSIONS,
     content: loadOfferEditorHtml(initialOfferTitle, 'Séjour médical personnalisé'),
     onFocus: () => setActiveZone('offer'),
     onUpdate: triggerSave,
   })
   const editorOfferTotal = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({
-        heading: false,
-        horizontalRule: false,
-        blockquote: false,
-        codeBlock: false,
-        bulletList: false,
-        orderedList: false,
-        listItem: false,
-        paragraph: false,
-      }),
-      DevisParagraph,
-      Underline,
-      TextAlign.configure({ types: ['paragraph'] }),
-      DevisTextStyle,
-      DevisColor,
-      DevisHighlight.configure({ multicolor: true }),
-    ],
+    extensions: DEVIS_OFFER_EXTENSIONS,
     content: loadOfferTotalEditorHtml(initialOfferTotal, '0'),
     onFocus: () => {
       setActiveZone('offerTotal')
@@ -920,34 +922,16 @@ export default function DevisEditorPage() {
       triggerSave()
     },
   })
-  const makeOfferChromeExts = () => [
-    StarterKit.configure({
-      heading: false,
-      horizontalRule: false,
-      blockquote: false,
-      codeBlock: false,
-      bulletList: false,
-      orderedList: false,
-      listItem: false,
-      paragraph: false,
-    }),
-    DevisParagraph,
-    Underline,
-    TextAlign.configure({ types: ['paragraph'] }),
-    DevisTextStyle,
-    DevisColor,
-    DevisHighlight.configure({ multicolor: true }),
-  ]
   const editorOfferHeadDesc = useEditor({
     immediatelyRender: false,
-    extensions: makeOfferChromeExts(),
+    extensions: DEVIS_OFFER_EXTENSIONS,
     content: initialOfferHeadDesc || defaultOfferHeadDescHtml(),
     onFocus: () => setActiveZone('offerHeadDesc'),
     onUpdate: triggerSave,
   })
   const editorOfferHeadPrice = useEditor({
     immediatelyRender: false,
-    extensions: makeOfferChromeExts(),
+    extensions: DEVIS_OFFER_EXTENSIONS,
     content: initialOfferHeadPrice || defaultOfferHeadPriceHtml(),
     onFocus: () => setActiveZone('offerHeadPrice'),
     onUpdate: triggerSave,

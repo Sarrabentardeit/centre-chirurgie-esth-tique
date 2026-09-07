@@ -25,6 +25,16 @@ import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 
 const GLOBAL_CSS = buildPlanningSejourPrintStyles()
 
+const PLANNING_EDITOR_EXTENSIONS = [
+  StarterKit.configure({ heading: { levels: [1, 2, 3] }, horizontalRule: {}, underline: false }),
+  Underline,
+  TextAlign.configure({ types: ['heading', 'paragraph'] }),
+  TextStyle,
+  Color,
+  Highlight.configure({ multicolor: true }),
+  Image.configure({ inline: true, allowBase64: false }),
+]
+
 export default function PlanningSejourEditorPage() {
   const { patientId } = useParams<{ patientId: string }>()
   const navigate = useNavigate()
@@ -119,15 +129,7 @@ export default function PlanningSejourEditorPage() {
   }, [persist])
 
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, horizontalRule: {} }),
-      Underline,
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      TextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
-      Image.configure({ inline: true, allowBase64: false }),
-    ],
+    extensions: PLANNING_EDITOR_EXTENSIONS,
     content: initialHtml,
     onUpdate: triggerSave,
     editorProps: {

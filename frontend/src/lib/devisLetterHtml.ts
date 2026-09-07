@@ -1411,20 +1411,53 @@ export function syncDevisLetterDataOnlyTopHtml(
   return out
 }
 
+/**
+ * Titre « Diagnostic du chirurgien » + corps jusqu’à « Durée TOTALE ».
+ * Index, pas de regex imbriquée (sinon Chrome gèle sur une lettre longue).
+ */
+function splitDiagnosticHeadingAndBody(html: string): {
+  before: string
+  head: string
+  body: string
+  after: string
+} | null {
+  const diagAt = html.search(/Diagnostic du chirurgien/i)
+  if (diagAt < 0) return null
+  const headStart = html.lastIndexOf('<p', diagAt)
+  if (headStart < 0) return null
+  const headClose = html.indexOf('</p>', diagAt)
+  if (headClose < 0) return null
+  const headEnd = headClose + 4
+  const rest = html.slice(headEnd)
+  const dureeAt = rest.search(/Durée\s+TOTALE\s+du\s+s[ée]jour/i)
+  let bodyEnd = html.length
+  if (dureeAt >= 0) {
+    const absDuree = headEnd + dureeAt
+    const pBefore = html.lastIndexOf('<p', absDuree)
+    bodyEnd = pBefore > headEnd ? pBefore : absDuree
+  }
+  return {
+    before: html.slice(0, headStart),
+    head: html.slice(headStart, headEnd),
+    body: html.slice(headEnd, bodyEnd),
+    after: html.slice(bodyEnd),
+  }
+}
+
+function applyDiagnosticLayoutInTopHtml(html: string, fallbackWholeDoc: boolean): string {
+  const parts = splitDiagnosticHeadingAndBody(html)
+  if (!parts) {
+    return fallbackWholeDoc ? upgradeDiagnosticMissingLayoutInHtml(html) : html
+  }
+  return `${parts.before}${parts.head}${upgradeDiagnosticMissingLayoutInHtml(parts.body)}${parts.after}`
+}
+
 /** Complète la charte uniquement sur les éléments encore « nus » (sans toucher aux styles utilisateur). */
 export function upgradeDevisMissingLayoutInTopHtml(html: string): string {
   let out = migrateBronzeSectionHeadingsOnly(html)
   out = refreshSalmonFieldLabelsInTopHtml(out)
   out = ensureOffrePrixSectionHeading(out)
-  if (/diagnostic du chirurgien/i.test(out)) {
-    const re =
-      /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
-    if (re.test(out)) {
-      out = out.replace(re, (_full, head, body) =>
-        `${head}${upgradeDiagnosticMissingLayoutInHtml(body)}`,
-      )
-    }
-  }
+  out = applyDiagnosticLayoutInTopHtml(out, false)
   return stripDiagnosticOpTitlesInTopHtml(out)
 }
 
@@ -1434,17 +1467,7 @@ export function restoreDevisCanonicalColorsInTopHtml(html: string): string {
   let out = normalizeDiagnosticBlockGapsInTopHtml(html)
   out = normalizeDiagnosticDarkFluoInTopHtml(out)
   out = refreshExamensSalmonPhrasesInTopHtml(out)
-  if (/diagnostic du chirurgien/i.test(out)) {
-    const re =
-      /((?:<p\b[^>]*>)(?:(?!<\/p>)[\s\S])*Diagnostic du chirurgien(?:(?!<\/p>)[\s\S])*<\/p>)([\s\S]*?)(?=<p\b[^>]*>(?:(?!<\/p>)[\s\S])*Durée\s+TOTALE\s+du\s+séjour)/i
-    if (re.test(out)) {
-      out = out.replace(re, (_full, head, body) =>
-        `${head}${upgradeDiagnosticMissingLayoutInHtml(body)}`,
-      )
-    }
-  } else {
-    out = upgradeDiagnosticMissingLayoutInHtml(out)
-  }
+  out = applyDiagnosticLayoutInTopHtml(out, true)
   return out
 }
 
@@ -1710,9 +1733,9 @@ export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetter
         const afterExclutTitle = out.indexOf('</p>', exclutIdx)
         if (afterExclutTitle > exclutIdx) {
           let pos = afterExclutTitle + 4
-          while (true) {
+          for (let guard = 0; guard < 40; guard++) {
             const empty = out.slice(pos).match(/^\s*<p\b[^>]*>\s*<\/p>/i)
-            if (!empty) break
+            if (!empty || empty[0].length === 0) break
             pos += empty[0].length
           }
           const ulMatch = out.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)
@@ -1824,9 +1847,9 @@ export function ensureOfferMeilleureHeadingInTopHtml(html: string, subtitleHtml?
   let pos = out.indexOf('</p>', exclutIdx)
   if (pos < 0) pos = exclutIdx
   else pos += 4
-  while (true) {
+  for (let guard = 0; guard < 40; guard++) {
     const empty = out.slice(pos).match(/^\s*<p\b[^>]*>\s*<\/p>/i)
-    if (!empty) break
+    if (!empty || empty[0].length === 0) break
     pos += empty[0].length
   }
   const ulMatch = out.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)

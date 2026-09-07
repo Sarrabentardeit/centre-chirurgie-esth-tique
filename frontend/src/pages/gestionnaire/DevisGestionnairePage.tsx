@@ -2031,11 +2031,14 @@ export default function DevisGestionnairePage() {
     try {
       const r = await gestionnaireApi.upsertDevisDraft(selectedPatient, payload)
       let savedDevis = r.devis
-      const existingContent =
-        r.devis.customContent
-        ?? patientDetail?.devis?.find((d) => d.id === r.devis.id)?.customContent
-        ?? null
-      {
+      // Auto-save : lignes + cases seulement. Reconstruire la lettre HTML ici
+      // bloque Chrome (« Page ne répondant pas ») après le tableau budget.
+      // Merge lettre : bouton Brouillon / Envoyer / Personnaliser.
+      if (!silent) {
+        const existingContent =
+          r.devis.customContent
+          ?? patientDetail?.devis?.find((d) => d.id === r.devis.id)?.customContent
+          ?? null
         const detail = patientDetail?.id === selectedPatient
           ? patientDetail
           : (await gestionnaireApi.getPatient(selectedPatient)).patient

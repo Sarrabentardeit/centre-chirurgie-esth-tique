@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import { formatDiagnosticLetterHtml, diagnosticDarkFluoCss, diagnosticBlockGapCss, diagnosticZoneLeadCss, diagnosticVisageCss } from '@/lib/diagnosticFormat'
 import { cn } from '@/lib/utils'
 
@@ -7,12 +8,15 @@ type DiagnosticFormattedViewProps = {
   className?: string
 }
 
-export function DiagnosticFormattedView({
+export const DiagnosticFormattedView = memo(function DiagnosticFormattedView({
   text,
   interventionLabels,
   className,
 }: DiagnosticFormattedViewProps) {
-  const html = formatDiagnosticLetterHtml(text, interventionLabels)
+  const html = useMemo(
+    () => formatDiagnosticLetterHtml(text, interventionLabels),
+    [text, interventionLabels],
+  )
   return (
     <>
       <style>{`${diagnosticDarkFluoCss('.diagnostic-formatted')}${diagnosticBlockGapCss('.diagnostic-formatted')}${diagnosticZoneLeadCss('.diagnostic-formatted')}${diagnosticVisageCss('.diagnostic-formatted')}`}</style>
@@ -35,4 +39,4 @@ export function DiagnosticFormattedView({
       />
     </>
   )
-}
+})

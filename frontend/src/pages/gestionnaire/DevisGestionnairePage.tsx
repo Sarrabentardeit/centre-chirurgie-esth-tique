@@ -620,7 +620,7 @@ function DevisModal({
   useLayoutEffect(() => {
     const el = bodyScrollRef.current
     if (el) el.scrollTop = bodyScrollTopRef.current
-  })
+  }, [autoSaving, savedDraft])
   // Fermer sur Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -2075,22 +2075,23 @@ export default function DevisGestionnairePage() {
         savedDevis = { ...r.devis, customContent: contentToPersist }
       }
 
-      setPatientDetail((prev) => {
-        if (!prev || prev.id !== selectedPatient) return prev
-        const rest = (prev.devis ?? []).filter((d) => d.id !== savedDevis.id)
-        return { ...prev, devis: [savedDevis, ...rest] }
-      })
       createNewVersionOnceRef.current = false
-      setIsEditingExisting(true)
-      setModalDevis(savedDevis)
       modalDevisIdRef.current = savedDevis.id
       if (savedDevis.rapportId) modalRapportIdRef.current = savedDevis.rapportId
-      setSavedDraft(true)
-      window.setTimeout(() => setSavedDraft(false), 2200)
-
       if (!silent) {
+        setPatientDetail((prev) => {
+          if (!prev || prev.id !== selectedPatient) return prev
+          const rest = (prev.devis ?? []).filter((d) => d.id !== savedDevis.id)
+          return { ...prev, devis: [savedDevis, ...rest] }
+        })
+        setIsEditingExisting(true)
+        setModalDevis(savedDevis)
+        setSavedDraft(true)
+        window.setTimeout(() => setSavedDraft(false), 2200)
         await loadPatientDetail(selectedPatient)
         await loadPatients()
+      } else {
+        setSavedDraft(true)
       }
       return true
     } catch (e) {
@@ -2191,7 +2192,7 @@ export default function DevisGestionnairePage() {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     draftSaveTimerRef.current = setTimeout(() => {
       void persistDraftSilentRef.current()
-    }, 900)
+    }, 1800)
     return () => {
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
     }
@@ -4011,7 +4012,7 @@ export default function DevisGestionnairePage() {
         </div>
       )}
 
-      {view === 'list' ? renderList() : renderDetail()}
+      {!showModal && (view === 'list' ? renderList() : renderDetail())}
 
       {/* Modal devis */}
       {showModal && patientRow && (

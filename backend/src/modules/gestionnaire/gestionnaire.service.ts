@@ -16,6 +16,7 @@ import type {
   UpsertDevisDraftInput,
 } from './gestionnaire.schema.js'
 import { isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '../../lib/phonePolicy.js'
+import { formatAgendaSlot } from '../../lib/agendaTime.js'
 import type { CreateAgendaEventInput, UpdateAgendaEventInput } from '../medecin/medecin.schema.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import {
@@ -1900,14 +1901,16 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
 
   // ── Agenda : créer / mettre à jour l'événement intervention du Dr ────────
   if (input.dateIntervention) {
-    void upsertInterventionAgendaEvent({
-      patientId,
-      patientFullName: patient.user.fullName,
-      dossierNumber: patient.dossierNumber,
-      dateIntervention: new Date(input.dateIntervention),
-    }).catch((err) => {
-      logger.warn({ err, patientId }, '[agenda] upsert intervention event failed')
-    })
+    try {
+      await upsertInterventionAgendaEvent({
+        patientId,
+        patientFullName: patient.user.fullName,
+        dossierNumber: patient.dossierNumber,
+        dateIntervention: new Date(input.dateIntervention),
+      })
+    } catch (err) {
+      logger.error({ err, patientId }, '[agenda] upsert intervention event failed')
+    }
   }
   // ────────────────────────────────────────────────────────────────────────
 
@@ -2746,18 +2749,22 @@ export async function getAgendaForGestionnaire(from?: string, to?: string, medec
 
   const rdvs = events
     .filter((e) => e.type === 'rdv')
-    .map((e) => ({
-      id: e.id,
-      date: e.dateDebut.toISOString().slice(0, 10),
-      heure: `${e.dateDebut.getHours().toString().padStart(2, '0')}:${e.dateDebut.getMinutes().toString().padStart(2, '0')}`,
-      heureFin: `${e.dateFin.getHours().toString().padStart(2, '0')}:${e.dateFin.getMinutes().toString().padStart(2, '0')}`,
-      type: e.title ?? 'RDV',
-      motif: e.motif ?? null,
-      statut: e.statut ?? 'planifie',
-      patient: e.patient
-        ? { id: e.patient.id, dossierNumber: e.patient.dossierNumber, user: { fullName: e.patient.user.fullName } }
-        : null,
-    }))
+    .map((e) => {
+      const debut = formatAgendaSlot(e.dateDebut)
+      const fin = formatAgendaSlot(e.dateFin)
+      return {
+        id: e.id,
+        date: debut.date,
+        heure: debut.heure,
+        heureFin: fin.heure,
+        type: e.title ?? 'RDV',
+        motif: e.motif ?? null,
+        statut: e.statut ?? 'planifie',
+        patient: e.patient
+          ? { id: e.patient.id, dossierNumber: e.patient.dossierNumber, user: { fullName: e.patient.user.fullName } }
+          : null,
+      }
+    })
 
   return { medecinId: targetMedecinId, events, rdvs }
 }

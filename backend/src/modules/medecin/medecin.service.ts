@@ -17,6 +17,7 @@ import {
 import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
+import { formatAgendaSlot } from '../../lib/agendaTime.js'
 import { sendStaffOnlyMessage } from '../chat/chat.service.js'
 
 function notifyGestionnaires(input: {
@@ -1053,19 +1054,23 @@ export async function getAgenda(medecinId: string, from?: string, to?: string) {
   // Les rdvs sont maintenant dans AgendaEvent (type='rdv') — compatibilité frontend
   const rdvs = events
     .filter((e) => e.type === 'rdv')
-    .map((e) => ({
-      id:     e.id,
-      // L'agenda frontend attend YYYY-MM-DD (pas un datetime ISO complet)
-      date:   e.dateDebut.toISOString().slice(0, 10),
-      heure:  `${e.dateDebut.getHours().toString().padStart(2, '0')}:${e.dateDebut.getMinutes().toString().padStart(2, '0')}`,
-      heureFin: `${e.dateFin.getHours().toString().padStart(2, '0')}:${e.dateFin.getMinutes().toString().padStart(2, '0')}`,
-      type:   e.title ?? 'RDV',
-      motif:  e.motif ?? null,
-      statut: e.statut ?? 'planifie',
-      patient: e.patient
-        ? { id: e.patient.id, dossierNumber: e.patient.dossierNumber, user: { fullName: e.patient.user.fullName } }
-        : null,
-    }))
+    .map((e) => {
+      const debut = formatAgendaSlot(e.dateDebut)
+      const fin = formatAgendaSlot(e.dateFin)
+      return {
+        id: e.id,
+        // Fuseau cabinet (Africa/Tunis) — pas l'heure UTC du serveur
+        date: debut.date,
+        heure: debut.heure,
+        heureFin: fin.heure,
+        type: e.title ?? 'RDV',
+        motif: e.motif ?? null,
+        statut: e.statut ?? 'planifie',
+        patient: e.patient
+          ? { id: e.patient.id, dossierNumber: e.patient.dossierNumber, user: { fullName: e.patient.user.fullName } }
+          : null,
+      }
+    })
 
   return { events, rdvs }
 }

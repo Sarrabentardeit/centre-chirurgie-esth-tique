@@ -55,18 +55,32 @@ type RdnOverride = {
   end: string
 }
 
+function pad2(n: number) {
+  return n.toString().padStart(2, '0')
+}
+
+/** Date calendrier locale YYYY-MM-DD (évite le décalage UTC de toISOString). */
+function toLocalIsoDate(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function toLocalTime(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
 function addDays(isoDate: string, days: number): string {
-  const d = new Date(`${isoDate}T00:00:00`)
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+  const [y, m, d] = isoDate.split('-').map(Number)
+  const dt = new Date(y, m - 1, d + days)
+  return toLocalIsoDate(dt)
 }
 
 function getWeekStart(dateIso: string): string {
-  const d = new Date(`${dateIso}T00:00:00`)
-  const day = d.getDay() // 0 sunday
+  const [y, m, d] = dateIso.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  const day = dt.getDay() // 0 sunday
   const mondayOffset = day === 0 ? -6 : 1 - day
-  d.setDate(d.getDate() + mondayOffset)
-  return d.toISOString().slice(0, 10)
+  dt.setDate(dt.getDate() + mondayOffset)
+  return toLocalIsoDate(dt)
 }
 
 function getHourFromTime(time: string): number {
@@ -90,7 +104,7 @@ interface AgendaMedecinPageProps {
 
 export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPageProps) {
   const { user } = useAuthStore()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = toLocalIsoDate(new Date())
   const agendaApi = mode === 'gestionnaire' ? gestionnaireApi : medecinApi
   const normalizeRdvStatut = (s?: string): 'planifie' | 'confirme' | 'annule' =>
     s === 'confirme' || s === 'annule' ? s : 'planifie'
@@ -170,15 +184,15 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
       const mapped: LocalAgendaEvent[] = events.map((ev) => {
         const dateDebut = new Date(ev.dateDebut)
         const dateFin   = new Date(ev.dateFin)
-        const date  = dateDebut.toISOString().slice(0, 10)
-        const start = `${dateDebut.getHours().toString().padStart(2, '0')}:${dateDebut.getMinutes().toString().padStart(2, '0')}`
-        const end   = `${dateFin.getHours().toString().padStart(2, '0')}:${dateFin.getMinutes().toString().padStart(2, '0')}`
+        const date  = toLocalIsoDate(dateDebut)
+        const start = ev.allDay ? '00:00' : toLocalTime(dateDebut)
+        const end   = ev.allDay ? '23:59' : toLocalTime(dateFin)
         return {
           id: ev.id,
           medecinId: targetMedecinId ?? user?.id ?? '',
           date,
-          start: ev.allDay ? '00:00' : start,
-          end: ev.allDay ? '23:59' : end,
+          start,
+          end,
           type: ev.type === 'blocage' ? 'blocked' : ev.type === 'vacances' ? 'vacation' : 'rdv',
           title: ev.title ?? '',
           patientId: ev.patientId ?? undefined,

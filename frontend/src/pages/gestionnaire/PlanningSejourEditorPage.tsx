@@ -12,7 +12,7 @@ import {
   ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw,
 } from 'lucide-react'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { DEVIS_ACCENT } from '@/lib/devisCharte'
 import { ensurePlanningDocShell, PLANNING_HIGHLIGHT_COLORS } from '@/lib/planningSejourBranding'
 import { buildPlanningSejourPrintPage, buildPlanningSejourPrintStyles } from '@/lib/planningSejourPrint'
@@ -116,11 +116,11 @@ export default function PlanningSejourEditorPage() {
       })
       if (nextStatut) setStatut(nextStatut)
       setSaved(true)
-      if (nextStatut === 'finalise') toast.success('Planning finalisé avec succès.')
+      if (nextStatut === 'finalise') toast({ title: 'Planning finalisé avec succès.', variant: 'success' })
     } catch (err: unknown) {
       if (nextStatut) {
         const msg = err instanceof Error ? err.message : 'Erreur lors de la sauvegarde.'
-        toast.error(msg)
+        toast({ title: msg, variant: 'error' })
       }
       /* silencieux en auto-save sans nextStatut */
     } finally {

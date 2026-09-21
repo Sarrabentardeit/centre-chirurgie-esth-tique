@@ -40,7 +40,7 @@ const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../
 
 
 /** Liste planning séjour : uniquement dossiers « devis accepté » (pas les étapes suivantes). */
-const PLANNING_SEJOUR_STATUSES = ['devis_accepte'] as const
+const PLANNING_SEJOUR_STATUSES = ['devis_accepte', 'date_reservee', 'logistique', 'intervention', 'post_op'] as const
 
 const patientListInclude = {
   user: { select: { id: true, fullName: true, email: true, createdAt: true } },

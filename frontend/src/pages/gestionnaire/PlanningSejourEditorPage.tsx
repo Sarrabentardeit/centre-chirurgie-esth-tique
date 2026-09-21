@@ -12,6 +12,7 @@ import {
   ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw,
 } from 'lucide-react'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
+import { toast } from 'sonner'
 import { DEVIS_ACCENT } from '@/lib/devisCharte'
 import { ensurePlanningDocShell, PLANNING_HIGHLIGHT_COLORS } from '@/lib/planningSejourBranding'
 import { buildPlanningSejourPrintPage, buildPlanningSejourPrintStyles } from '@/lib/planningSejourPrint'
@@ -115,8 +116,13 @@ export default function PlanningSejourEditorPage() {
       })
       if (nextStatut) setStatut(nextStatut)
       setSaved(true)
-    } catch {
-      /* silencieux en auto-save */
+      if (nextStatut === 'finalise') toast.success('Planning finalisé avec succès.')
+    } catch (err: unknown) {
+      if (nextStatut) {
+        const msg = err instanceof Error ? err.message : 'Erreur lors de la sauvegarde.'
+        toast.error(msg)
+      }
+      /* silencieux en auto-save sans nextStatut */
     } finally {
       setSaving(false)
     }

@@ -252,6 +252,18 @@ const STATUTS_DEVIS = [
   'date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine',
 ]
 
+/** Statut affiché dans filtres/KPI : un devis accepté prime sur les versions plus récentes envoyées. */
+function primaryDevisStatut(
+  devis: Array<{ statut?: string | null }> | undefined | null,
+): 'brouillon' | 'envoye' | 'accepte' | 'refuse' | null {
+  if (!devis?.length) return null
+  if (devis.some((d) => d.statut === 'accepte')) return 'accepte'
+  if (devis.some((d) => d.statut === 'envoye')) return 'envoye'
+  if (devis.some((d) => d.statut === 'brouillon')) return 'brouillon'
+  if (devis.some((d) => d.statut === 'refuse')) return 'refuse'
+  return null
+}
+
 /** Repli si l’API Communication est indisponible. */
 const ABSTENTION_MESSAGE_FALLBACK = `Chère Madame,
 Merci encore pour votre intérêt et la confiance que vous témoignez envers le cabinet du Dr CHENNOUFI.
@@ -1407,7 +1419,7 @@ export default function DevisGestionnairePage() {
     )
     if (devisFilter === 'all') return bySearch
     return bySearch.filter((p) => {
-      const statut = p.devis[0]?.statut ?? null
+      const statut = primaryDevisStatut(p.devis)
       if (devisFilter === 'aucun') return !statut
       return statut === devisFilter
     })
@@ -2800,11 +2812,11 @@ export default function DevisGestionnairePage() {
     const allDevisPatients = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
     const kpi = {
       total:     allDevisPatients.length,
-      aucun:     allDevisPatients.filter((p) => !p.devis[0]?.statut).length,
-      brouillon: allDevisPatients.filter((p) => p.devis[0]?.statut === 'brouillon').length,
-      envoye:    allDevisPatients.filter((p) => p.devis[0]?.statut === 'envoye').length,
-      accepte:   allDevisPatients.filter((p) => p.devis[0]?.statut === 'accepte').length,
-      refuse:    allDevisPatients.filter((p) => p.devis[0]?.statut === 'refuse').length,
+      aucun:     allDevisPatients.filter((p) => !primaryDevisStatut(p.devis)).length,
+      brouillon: allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'brouillon').length,
+      envoye:    allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'envoye').length,
+      accepte:   allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'accepte').length,
+      refuse:    allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'refuse').length,
       supprime:  deletedDevis.length,
     }
     const listBusy = devisFilter === 'supprime' ? deletedLoading : listLoading
@@ -3020,7 +3032,7 @@ export default function DevisGestionnairePage() {
             <div className="divide-y divide-border/40">
               {pagePatients.map((p) => {
               const lastDevis = p.devis[0]
-              const devisStatut = lastDevis?.statut
+              const devisStatut = primaryDevisStatut(p.devis) ?? lastDevis?.statut
               const hasDevis = !!devisStatut
               const isRead    = !!lastDevis?.vuParPatientAt
 

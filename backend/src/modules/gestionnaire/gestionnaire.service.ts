@@ -46,7 +46,8 @@ const PLANNING_SEJOUR_STATUSES = ['devis_accepte', 'date_reservee', 'logistique'
 const patientListInclude = {
   user: { select: { id: true, fullName: true, email: true, createdAt: true } },
   formulaires: { orderBy: { createdAt: 'desc' as const }, take: 1 },
-  devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' as const }, take: 1 },
+  /** Tous les devis actifs : le filtre KPI utilise le statut prioritaire (accepte > envoye > …). */
+  devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' as const } },
   _count: { select: { rapports: true } },
 } as const
 
@@ -822,10 +823,21 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
     data: { statut: 'envoye', envoyeAt: new Date(), rappelAutoEnvoyeAt: null },
   })
 
-  await prisma.patient.update({
-    where: { id: patient.id },
-    data: { status: 'devis_envoye' },
-  })
+  // Ne pas rétrograder un dossier déjà accepté / en logistique / intervention
+  const keepStatus = [
+    'devis_accepte',
+    'date_reservee',
+    'logistique',
+    'intervention',
+    'post_op',
+    'suivi_termine',
+  ]
+  if (!keepStatus.includes(patient.status)) {
+    await prisma.patient.update({
+      where: { id: patient.id },
+      data: { status: 'devis_envoye' },
+    })
+  }
 
   const templates = await getTemplateMap()
 
@@ -906,7 +918,7 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
       after: {
         statut: updated.statut,
         patientId: patient.id,
-        patientStatus: 'devis_envoye',
+        patientStatus: keepStatus.includes(patient.status) ? patient.status : 'devis_envoye',
         numeroDevis: devis.numeroDevis,
       } as never,
     },

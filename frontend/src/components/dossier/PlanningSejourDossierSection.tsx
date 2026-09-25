@@ -1,10 +1,18 @@
-import { CalendarDays, CheckCircle2, FilePenLine, Pencil } from 'lucide-react'
+import { CalendarDays, CheckCircle2, FilePenLine, MessageCircle, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { GestionnairePlanningSejourSummary } from '@/lib/api'
+import { PlanningSendDialog } from '@/components/dossier/PlanningSendDialog'
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
+import { gestionnaireApi, type GestionnairePlanningSejourSummary } from '@/lib/api'
+import { ensurePlanningDocShell } from '@/lib/planningSejourBranding'
+import { buildPlanningSejourPrintPage } from '@/lib/planningSejourPrint'
 import { cn, formatDateTime } from '@/lib/utils'
+import { useState } from 'react'
 
 type PlanningSejourDossierSectionProps = {
   patientId: string
+  patientName: string
+  dateArrivee?: string | null
+  transport?: string | null
   planning: GestionnairePlanningSejourSummary | null | undefined
   logistiqueComplete: boolean
   onOpenEditor: (patientId: string) => void
@@ -12,12 +20,23 @@ type PlanningSejourDossierSectionProps = {
 
 export function PlanningSejourDossierSection({
   patientId,
+  patientName,
+  dateArrivee,
+  transport,
   planning,
   logistiqueComplete,
   onOpenEditor,
 }: PlanningSejourDossierSectionProps) {
   const isFinalise = planning?.statut === 'finalise'
   const hasContent = planning?.hasContent === true
+  const [sendChannel, setSendChannel] = useState<'chat' | 'whatsapp' | null>(null)
+
+  const getHtml = async () => {
+    const detail = await gestionnaireApi.getPlanningSejourDetail(patientId)
+    const content = detail.planning?.content ?? ''
+    const wrapped = ensurePlanningDocShell(content, window.location.origin)
+    return buildPlanningSejourPrintPage(wrapped, `Planning séjour — ${patientName}`)
+  }
 
   return (
     <div className="space-y-4">
@@ -74,15 +93,49 @@ export function PlanningSejourDossierSection({
         </p>
       )}
 
-      <Button
-        type="button"
-        variant="brand"
-        className="gap-2 h-11 text-sm font-semibold"
-        onClick={() => onOpenEditor(patientId)}
-      >
-        {hasContent ? <Pencil className="h-4 w-4" /> : <FilePenLine className="h-4 w-4" />}
-        {hasContent ? 'Personnaliser le planning' : 'Créer le planning séjour'}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="brand"
+          className="gap-2 h-11 text-sm font-semibold"
+          onClick={() => onOpenEditor(patientId)}
+        >
+          {hasContent ? <Pencil className="h-4 w-4" /> : <FilePenLine className="h-4 w-4" />}
+          {hasContent ? 'Personnaliser le planning' : 'Créer le planning séjour'}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2 h-11 text-sm font-semibold"
+          disabled={!isFinalise}
+          title={isFinalise ? 'Ouvrir le message, puis envoyer' : 'Disponible une fois le planning finalisé'}
+          onClick={() => setSendChannel('chat')}
+        >
+          <MessageCircle className="h-4 w-4" />
+          Chat
+        </Button>
+        <Button
+          type="button"
+          className="gap-2 h-11 text-sm font-semibold text-white bg-[#25D366] hover:bg-[#1ebe5d]"
+          disabled={!isFinalise}
+          title={isFinalise ? 'Ouvrir le message, puis envoyer sur WhatsApp' : 'Disponible une fois le planning finalisé'}
+          onClick={() => setSendChannel('whatsapp')}
+        >
+          <WhatsAppIcon className="h-4 w-4" />
+          WhatsApp
+        </Button>
+      </div>
+
+      <PlanningSendDialog
+        open={sendChannel !== null}
+        channel={sendChannel ?? 'chat'}
+        patientId={patientId}
+        patientName={patientName}
+        dateArrivee={dateArrivee}
+        transport={transport}
+        getHtml={getHtml}
+        onClose={() => setSendChannel(null)}
+      />
 
       <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
         <CalendarDays className="h-3.5 w-3.5" />

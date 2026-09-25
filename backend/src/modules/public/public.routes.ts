@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import multer from 'multer'
 import { rateLimit } from 'express-rate-limit'
 import { resolveDevisPdfPath, verifyDevisPdfToken } from '../../lib/devisPdfPublic.js'
+import { resolvePlanningPdfPath, verifyPlanningPdfToken } from '../../lib/planningPdfPublic.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
@@ -74,6 +75,41 @@ publicRouter.get(
       if (!found) {
         res.status(404).type('html').send(
           '<!doctype html><meta charset="utf-8"><title>Devis introuvable</title><p>Le PDF de ce devis n’est pas encore disponible. Demandez à la clinique de le renvoyer.</p>',
+        )
+        return
+      }
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${found.downloadName.replace(/"/g, '')}"`,
+      )
+      res.sendFile(found.filePath, (err) => {
+        if (err) next(err)
+      })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+/** PDF planning séjour public (WhatsApp). */
+publicRouter.get(
+  '/planning/:patientId/pdf',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const patientId = String(req.params.patientId ?? '')
+      const k = typeof req.query.k === 'string' ? req.query.k : undefined
+      if (!patientId || !verifyPlanningPdfToken(patientId, k)) {
+        res.status(404).type('html').send(
+          '<!doctype html><meta charset="utf-8"><title>Planning introuvable</title><p>Ce lien de planning n’est pas valide.</p>',
+        )
+        return
+      }
+      const found = resolvePlanningPdfPath(patientId)
+      if (!found) {
+        res.status(404).type('html').send(
+          '<!doctype html><meta charset="utf-8"><title>Planning introuvable</title><p>Le PDF de ce planning n’est pas encore disponible.</p>',
         )
         return
       }

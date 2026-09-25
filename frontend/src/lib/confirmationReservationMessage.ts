@@ -110,7 +110,7 @@ export function applyConfirmationReservationVars(
     ? formatIsoDateFrLong(isoAddDays(ctx.dateIntervention, -15))
     : '—'
   const dateLimiteExamens = ctx.dateIntervention
-    ? formatIsoDateFrLong(isoAddDays(ctx.dateIntervention, 10))
+    ? formatIsoDateFrLong(isoAddDays(ctx.dateIntervention, -10))
     : '—'
   const intervention = ctx.intervention?.trim() || 'intervention prévue'
   const examensMedicaux = ctx.examensMedicaux?.trim() || 'bilan sanguin'

@@ -30,9 +30,11 @@ import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
-import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 import { sendDevisReadyEmail, sendDevisRappelEmail, sendNotificationEmail } from '../../lib/mailer.js'
-import { buildDevisWhatsAppPayload, type DevisWhatsAppPayload } from '../../lib/whatsappDevis.js'
+import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
+import { planningPdfDiskPath, planningPdfFileName, publicPlanningPdfUrl } from '../../lib/planningPdfPublic.js'
+import { buildDevisWhatsAppPayload, buildWhatsAppClickToChatUrl, toWhatsAppDigits, type DevisWhatsAppPayload } from '../../lib/whatsappDevis.js'
+import { buildPlanningAccompagnementMessage } from '../../lib/whatsappPlanning.js'
 import { publicDevisPdfUrl } from '../../lib/devisPdfPublic.js'
 import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
 import { softDeleteDevisPdfMessages, sendStaffOnlyMessage } from '../chat/chat.service.js'
@@ -2301,6 +2303,86 @@ export async function upsertPlanningSejour(
       updatedAt: row.updatedAt.toISOString(),
     },
   }
+}
+
+/** Envoie le planning finalisé dans le chat (PDF) et prépare le lien WhatsApp. */
+export async function sendPlanningSejour(
+  gestionnaireId: string,
+  patientId: string,
+  input: { html: string; message?: string },
+) {
+  const html = input.html.trim()
+  if (!html) throw new AppError(400, 'EMPTY_PLANNING', 'Le planning est vide.')
+
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    include: { user: { select: { id: true, fullName: true } } },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const planning = await prisma.planningSejour.findUnique({ where: { patientId } })
+  if (!planning || planning.statut !== 'finalise') {
+    throw new AppError(400, 'PLANNING_NOT_FINAL', 'Finalisez le planning avant de l’envoyer à la patiente.')
+  }
+
+  const log = await prisma.logistique.findUnique({ where: { patientId } })
+  const pdfBuffer = await renderHtmlToPdf(html)
+  await mkdir(UPLOADS_DIR, { recursive: true })
+  const filename = planningPdfFileName(patientId)
+  await writeFile(planningPdfDiskPath(patientId), pdfBuffer)
+
+  const baseUrl = (process.env.API_BASE_URL ?? 'http://localhost:4000').replace(/\/$/, '')
+  const pieceJointeUrl = `${baseUrl}/uploads/${filename}`
+  const pieceJointeNom = `Planning séjour — ${patient.user.fullName}.pdf`
+  const dateArrivee = log?.dateArrivee?.toISOString() ?? null
+
+  const chatText = input.message?.trim()
+    || buildPlanningAccompagnementMessage({
+      patientFullName: patient.user.fullName,
+      dateArrivee,
+      transport: log?.transport ?? null,
+    })
+
+  await prisma.message.create({
+    data: {
+      patientId,
+      expediteurId: gestionnaireId,
+      expediteurRole: 'gestionnaire',
+      contenu: chatText,
+      pieceJointeUrl,
+      pieceJointeNom,
+      lu: false,
+    },
+  })
+
+  await createUserNotification({
+    userId: patient.user.id,
+    type: 'success',
+    titre: 'Votre planning de séjour',
+    message: 'Votre planning médical détaillé est disponible dans le chat.',
+    lienAction: '/patient/chat',
+    kind: 'chat',
+  }).catch(() => undefined)
+
+  const pdfUrl = publicPlanningPdfUrl(patientId)
+  const waText = chatText.includes(pdfUrl)
+    ? chatText
+    : `${chatText}\n\nConsulter votre planning :\n${pdfUrl}`
+  const phoneDigits = toWhatsAppDigits(patient.phone)
+  const whatsappUrl = phoneDigits ? buildWhatsAppClickToChatUrl(phoneDigits, waText) : null
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'create',
+      entity: 'planning_sejour',
+      entityId: planning.id,
+      after: { patientId, channel: 'chat' } as never,
+    },
+  }).catch(() => undefined)
+
+  return { ok: true as const, whatsappUrl, hasPhone: Boolean(whatsappUrl), pdfUrl }
 }
 
 export async function deletePlanningSejour(gestionnaireId: string, patientId: string) {

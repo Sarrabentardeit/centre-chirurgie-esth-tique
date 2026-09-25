@@ -4,8 +4,9 @@
  */
 import type { GestionnairePatientDetail } from '@/lib/api'
 import { parseSejourMeta } from '@/lib/devisSejourNotes'
+import { resolveDrainageNb, resolveInclutIds } from '@/lib/devisOfferInclus'
 import { DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
-import { getDevisDisplayNumber } from '@/lib/utils'
+import { formatMcReferenceWithVersion, getDevisDisplayNumber } from '@/lib/utils'
 import {
   footerImageHtml,
   gray,
@@ -52,12 +53,30 @@ function arr(v: unknown): string[] {
 }
 
 function pickDevis(p: GestionnairePatientDetail) {
+  const list = p.devis ?? []
   return (
-    p.devis?.find((d) => d.statut === 'accepte')
-    ?? p.devis?.find((d) => d.statut === 'envoye')
-    ?? p.devis?.find((d) => d.statut === 'brouillon')
+    list.find((d) => d.statut === 'accepte')
+    ?? list.find((d) => d.statut === 'envoye')
+    ?? list.find((d) => d.statut === 'brouillon')
     ?? null
   )
+}
+
+/** Numéro affiché : devis accepté, avec sa lettre de version (ex. MC-09-004B-2026). */
+export function acceptedDevisPlanningRef(patient: GestionnairePatientDetail): string {
+  const dv = pickDevis(patient)
+  const base = getDevisDisplayNumber(dv, patient.dossierNumber) || patient.dossierNumber
+  const version =
+    dv?.version != null && Number.isFinite(dv.version) && dv.version >= 1
+      ? Math.floor(dv.version)
+      : 1
+  return formatMcReferenceWithVersion(base, version) || base
+}
+
+/** Remplace la référence (MC-…) déjà figée dans un planning enregistré. */
+export function refreshPlanningDevisRef(html: string, ref: string): string {
+  if (!html.trim() || !ref.trim()) return html
+  return html.replace(/\(MC-\d{2}-\d{3}[A-Z]?-\d{4}\)/g, `(${ref})`)
 }
 
 function devisTotalDt(p: GestionnairePatientDetail): number {
@@ -145,13 +164,44 @@ function wifiClinique(clinique: string): string {
   return '…'
 }
 
+function formatHmFr(d: Date | null, fallback: string): string {
+  if (!d) return fallback
+  const h = d.getHours()
+  const m = d.getMinutes()
+  if (h === 0 && m === 0) return fallback
+  return `${h}h${String(m).padStart(2, '0')}`
+}
+
+/** Hôtel et drainage selon les cases du devis accepté (forfait). */
+function planningOffer(p: GestionnairePatientDetail): {
+  includeHotel: boolean
+  drainageNb: number
+  includeNurseHotel: boolean
+} {
+  const dv = pickDevis(p)
+  const notes = dv?.notesSejour ?? ''
+  const sej = parseSejourMeta(notes)
+  const ids = resolveInclutIds(notes)
+  const hotelNom = sej.hotelNom.trim()
+  const namedAucun = /^aucun$/i.test(hotelNom) || /sans\s*h[oô]tel/i.test(hotelNom)
+  const nuits = Number.parseInt(sej.hotelNuits, 10)
+  const includeHotel = ids.includes('convalescence_hotel') && !namedAucun && nuits !== 0
+  const drainageNb = ids.includes('drainage')
+    ? resolveDrainageNb(notes, p.rapports?.[0] ?? null)
+    : 0
+  return {
+    includeHotel,
+    drainageNb,
+    includeNurseHotel: includeHotel && ids.includes('soins_infirmiers_hotel'),
+  }
+}
+
 export function buildPlanningSejourHtml(
   patient: GestionnairePatientDetail,
   log?: PlanningLogistiqueHint | null,
   opts?: BuildPlanningSejourOptions,
 ): string {
-  const dv = pickDevis(patient)
-  const dossierRef = getDevisDisplayNumber(dv, patient.dossierNumber) || patient.dossierNumber
+  const dossierRef = acceptedDevisPlanningRef(patient)
   const intervention = interventionLabel(patient)
   const suffix = log?.accompagnateur?.trim() || 'Double'
   const nomLine = `${civiliteNom(patient.user.fullName)} (${suffix})`
@@ -170,6 +220,9 @@ export function buildPlanningSejourHtml(
   const { nom: cliniqueNom, reste: cliniqueReste } = splitClinique(cliniqueFull)
   const hotel = hotelLabel(patient, log)
   const chauffeur = chauffeurPrenom(log)
+  const offer = planningOffer(patient)
+  const heureArrivee = formatHmFr(d0, '11h35')
+  const heureDepart = formatHmFr(dDepart, '06h45')
 
   const tndPerEur = opts?.tndPerEur && opts.tndPerEur > 0 ? opts.tndPerEur : DEFAULT_TND_PER_EUR
   const totalDt = devisTotalDt(patient)
@@ -178,6 +231,12 @@ export function buildPlanningSejourHtml(
   const eurTxt = totalEur > 0 ? `${fmtPlanningAmount(totalEur)}€` : '…€'
 
   const f = (d: Date | null) => formatPlanningDay(d)
+  let drainageLeft = offer.drainageNb
+  const takeDrainage = (label: string) => {
+    if (drainageLeft <= 0) return null
+    drainageLeft -= 1
+    return paraGold(label)
+  }
 
   const chunks: string[] = [
     headerLogoHtml(),
@@ -189,7 +248,7 @@ export function buildPlanningSejourHtml(
 
     paraDay(`Jour d’arrivée : ${f(d0)}`),
     paraMixed(
-      gray(`Arrivée à l’aéroport Tunis Carthage 11h35 `),
+      gray(`Arrivée à l’aéroport Tunis Carthage ${heureArrivee} `),
       salmonHi(`(RDV avec votre chauffeur ${chauffeur}* devant les stands agences à la sortie de douane à droite)`),
     ),
     paraSalmonHi(`Change avec votre chauffeur pour ${dtTxt} soit à peu près l’équivalent de ${eurTxt} puis encaissement de la totalité de la somme.`),
@@ -215,41 +274,61 @@ export function buildPlanningSejourHtml(
 
     paraDay(`Jour de convalescence : ${f(d2)}`),
     paraGray('Visite du personnel médical et soins infirmiers'),
+  ]
 
-    paraDay(`Jour de transfert à l’hôtel : ${f(d3)}`),
-    paraGold('Séance 1 Drainage à 10h00'),
-    paraGray('Visite du chirurgien et autorisation de sortie'),
-    paraGray('Check out clinique 12h00'),
-    paraMixed(gray('Transfert à l’'), salmon(`hôtel ${hotel}`)),
+  if (offer.includeHotel) {
+    chunks.push(
+      paraDay(`Jour de transfert à l’hôtel : ${f(d3)}`),
+      takeDrainage('Séance 1 Drainage à 10h00') ?? '',
+      paraGray('Visite du chirurgien et autorisation de sortie'),
+      paraGray('Check out clinique 12h00'),
+      paraMixed(gray('Transfert à l’'), salmon(`hôtel ${hotel}`)),
+      paraDay(`Jour 2 à l’hôtel : ${f(d4)}`),
+    )
+    if (offer.includeNurseHotel) chunks.push(paraGray('Passage infirmière pour soins médicaux'))
+    chunks.push(paraDay(`Jour 3 à l’hôtel : ${f(d5)}`))
+    if (offer.includeNurseHotel) chunks.push(paraGray('Passage infirmière pour soins médicaux'))
+    const d2line = takeDrainage('Séance 2 drainage (horaire à confirmer)')
+    if (d2line) chunks.push(d2line)
+    chunks.push(paraGray('Examen de contrôle au cabinet du chirurgien ou clinique (horaire et lieu à confirmer)'))
+    chunks.push(paraDay(`Jour 4 à l’hôtel : ${f(d6)}`))
+    const d3line = takeDrainage('Séance 3 drainage (horaire à confirmer)')
+    if (d3line) chunks.push(d3line)
+    if (offer.includeNurseHotel) chunks.push(paraGray('Passage infirmière pour soins médicaux'))
+  } else {
+    chunks.push(
+      paraDay(`Jour de sortie de clinique : ${f(d3)}`),
+      paraGray('Visite du chirurgien et autorisation de sortie'),
+      paraGray('Check out clinique 12h00'),
+    )
+    while (drainageLeft > 0) {
+      const n = offer.drainageNb - drainageLeft + 1
+      const line = takeDrainage(
+        n === 1 ? 'Séance 1 Drainage à 10h00' : `Séance ${n} drainage (horaire à confirmer)`,
+      )
+      if (line) chunks.push(line)
+    }
+  }
 
-    paraDay(`Jour 2 à l’hôtel : ${f(d4)}`),
-    paraGray('Passage infirmière pour soins médicaux'),
-
-    paraDay(`Jour 3 à l’hôtel : ${f(d5)}`),
-    paraGray('Passage infirmière pour soins médicaux'),
-    paraGold('Séance 2 drainage (horaire à confirmer)'),
-    paraGray('Examen de contrôle au cabinet du chirurgien ou clinique (horaire et lieu à confirmer)'),
-
-    paraDay(`Jour 4 à l’hôtel : ${f(d6)}`),
-    paraGold('Séance 3 drainage (horaire à confirmer)'),
-    paraGray('Passage infirmière pour soins médicaux'),
-
+  chunks.push(
     paraDay(`Jour de Départ : ${f(dDepart)}`),
     paraSalmonHi('N’oubliez pas de mettre vos bas de contention pour toute la durée du vol'),
-    paraGray('Check out Hôtel 04h15'),
+  )
+  if (offer.includeHotel) chunks.push(paraGray('Check out Hôtel 04h15'))
+  chunks.push(
     paraGray('Transfert à l’aéroport à 04h30'),
-    paraGray('Départ 06h45'),
-
+    paraGray(`Départ ${heureDepart}`),
     paraContact(`Wifi Clinique : ${wifiClinique(cliniqueFull)}`),
     paraContact('Liste des contacts utiles pour votre séjour :'),
     paraContact(`Votre conseillère médicale : ${CONTACTS.conseillere}`),
     paraContact(`Votre Chauffeur : ${chauffeur} ${CONTACTS.chauffeurTel}`),
-    paraContact(`Votre Kinésithérapeute : ${CONTACTS.kine}`),
+  )
+  if (offer.drainageNb > 0) chunks.push(paraContact(`Votre Kinésithérapeute : ${CONTACTS.kine}`))
+  chunks.push(
     paraContact(`Votre infirmière : ${CONTACTS.infirmiere}`),
     paraContact(`Cabinet : ${CONTACTS.cabinet}`),
-
     footerImageHtml(),
-  ]
+  )
 
-  return `<div class="planning-doc">\n${chunks.join('\n')}\n</div>`
+  return `<div class="planning-doc">\n${chunks.filter(Boolean).join('\n')}\n</div>`
 }

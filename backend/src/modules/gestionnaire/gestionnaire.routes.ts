@@ -7,6 +7,7 @@ import {
   createUserByGestionnaireSchema,
   logistiqueSchema,
   planningSejourSchema,
+  sendPlanningSejourSchema,
   refuseDevisSchema,
   saveDevisContentSchema,
   sendDevisSchema,
@@ -334,6 +335,23 @@ gestionnaireRouter.post('/planning-sejour/:patientId/generer', async (req: Reque
     next(e)
   }
 })
+
+gestionnaireRouter.post(
+  '/planning-sejour/:patientId/envoyer',
+  validate(sendPlanningSejourSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.sendPlanningSejour(
+        req.auth!.sub,
+        pid(req.params.patientId),
+        req.body,
+      )
+      res.json(result)
+    } catch (e) {
+      next(e)
+    }
+  },
+)
 
 gestionnaireRouter.put(
   '/planning-sejour/:patientId',

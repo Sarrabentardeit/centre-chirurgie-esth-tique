@@ -69,6 +69,13 @@ export const planningSejourSchema = z.object({
 
 export type PlanningSejourInput = z.infer<typeof planningSejourSchema>
 
+export const sendPlanningSejourSchema = z.object({
+  html: z.string().min(1),
+  message: z.string().min(1).optional(),
+})
+
+export type SendPlanningSejourInput = z.infer<typeof sendPlanningSejourSchema>
+
 const templateKeySchema = z.enum([
   'formulaireAck',
   'devisSent',

@@ -159,7 +159,7 @@ export default function CommunicationPage() {
             <code className="font-mono">{'{dateIntervention}'}</code>,{' '}
             <code className="font-mono">{'{dateDepart}'}</code>,{' '}
             <code className="font-mono">{'{dateDebutPreop}'}</code> (J-15),{' '}
-            <code className="font-mono">{'{dateLimiteExamens}'}</code> (J+10),{' '}
+            <code className="font-mono">{'{dateLimiteExamens}'}</code> (J-10),{' '}
             <code className="font-mono">{'{intervention}'}</code>,{' '}
             <code className="font-mono">{'{examensMedicaux}'}</code>,{' '}
             <code className="font-mono">{'{paysRetour}'}</code>,{' '}

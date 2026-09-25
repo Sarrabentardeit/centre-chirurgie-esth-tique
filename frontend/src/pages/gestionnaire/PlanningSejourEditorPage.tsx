@@ -9,20 +9,24 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
 import Image from '@tiptap/extension-image'
 import {
-  ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw,
+  ArrowLeft, Printer, RotateCcw, CheckCircle2, RefreshCw, MessageCircle,
 } from 'lucide-react'
 import { gestionnaireApi, type GestionnairePatientDetail } from '@/lib/api'
 import { toast } from '@/store/toastStore'
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
 import { DEVIS_ACCENT } from '@/lib/devisCharte'
 import { ensurePlanningDocShell, PLANNING_HIGHLIGHT_COLORS } from '@/lib/planningSejourBranding'
 import { buildPlanningSejourPrintPage, buildPlanningSejourPrintStyles } from '@/lib/planningSejourPrint'
 import { DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import {
+  acceptedDevisPlanningRef,
   buildPlanningSejourHtml,
   moisLabelFromDate,
+  refreshPlanningDevisRef,
   type PlanningLogistiqueHint,
 } from '@/lib/planningSejourTemplate'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
+import { PlanningSendDialog } from '@/components/dossier/PlanningSendDialog'
 
 const GLOBAL_CSS = buildPlanningSejourPrintStyles()
 
@@ -48,6 +52,7 @@ export default function PlanningSejourEditorPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [sendChannel, setSendChannel] = useState<'chat' | 'whatsapp' | null>(null)
   const [initialHtml, setInitialHtml] = useState('')
 
   const patientIdRef = useRef<string | null>(null)
@@ -90,7 +95,11 @@ export default function PlanningSejourEditorPage() {
       }
 
       if (detail.planning?.content?.trim()) {
-        setInitialHtml(ensurePlanningDocShell(detail.planning.content))
+        const withAcceptedRef = refreshPlanningDevisRef(
+          detail.planning.content,
+          acceptedDevisPlanningRef(p),
+        )
+        setInitialHtml(ensurePlanningDocShell(withAcceptedRef))
       } else {
         setInitialHtml(buildPlanningSejourHtml(p, log, { tndPerEur }))
       }
@@ -193,6 +202,13 @@ export default function PlanningSejourEditorPage() {
     setTimeout(() => { popup.print(); popup.close() }, 400)
   }
 
+  const planningPrintHtml = async () => {
+    await persist('finalise')
+    const bodyHtml = editorRef.current?.getHTML() ?? ''
+    const wrapped = ensurePlanningDocShell(bodyHtml, window.location.origin)
+    return buildPlanningSejourPrintPage(wrapped, `Planning séjour — ${patient?.user.fullName ?? ''}`)
+  }
+
   if (loading) {
     return (
       <div className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center gap-4">
@@ -272,6 +288,29 @@ export default function PlanningSejourEditorPage() {
           >
             Finaliser
           </button>
+          {statut === 'finalise' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setSendChannel('chat')}
+                disabled={saving}
+                className="flex items-center gap-1.5 h-8 px-3 text-xs font-semibold text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+              >
+                <MessageCircle className="h-3.5 w-3.5" />
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setSendChannel('whatsapp')}
+                disabled={saving}
+                title="Ouvrir le message, puis WhatsApp"
+                className="flex items-center gap-1.5 h-8 px-3 text-xs font-semibold text-white bg-[#25D366] hover:bg-[#1ebe5d] rounded-lg disabled:opacity-50"
+              >
+                <WhatsAppIcon className="h-3.5 w-3.5" />
+                WhatsApp
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={handlePrint}
@@ -305,6 +344,18 @@ export default function PlanningSejourEditorPage() {
           <EditorContent editor={editor} />
         </div>
       </div>
+      {patientId && (
+        <PlanningSendDialog
+          open={sendChannel !== null}
+          channel={sendChannel ?? 'chat'}
+          patientId={patientId}
+          patientName={patient.user.fullName}
+          dateArrivee={logistique?.dateArrivee}
+          transport={logistique?.transport}
+          getHtml={planningPrintHtml}
+          onClose={() => setSendChannel(null)}
+        />
+      )}
     </div>
   )
 }

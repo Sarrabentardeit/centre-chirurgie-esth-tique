@@ -1217,6 +1217,7 @@ export interface GestionnaireLogistiqueRow {
   dateIntervention: string | null
   documents: GestionnaireLogistiqueDocuments
   notes: string
+  transport?: string | null
 }
 
 export interface GestionnaireLogistiquePatient {
@@ -1602,6 +1603,12 @@ export const gestionnaireApi = {
     request<{ ok: true; planning: GestionnairePlanningSejourDetail }>(
       `/gestionnaire/planning-sejour/${patientId}`,
       { method: 'PUT', body: JSON.stringify(body) }
+    ),
+
+  sendPlanningSejour: (patientId: string, body: { html: string; message?: string }) =>
+    request<{ ok: true; whatsappUrl: string | null; hasPhone: boolean; pdfUrl: string }>(
+      `/gestionnaire/planning-sejour/${patientId}/envoyer`,
+      { method: 'POST', body: JSON.stringify(body) },
     ),
 
   deletePlanningSejour: (patientId: string) =>

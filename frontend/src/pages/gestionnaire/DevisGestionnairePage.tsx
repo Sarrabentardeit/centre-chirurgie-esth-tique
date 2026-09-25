@@ -3983,6 +3983,9 @@ export default function DevisGestionnairePage() {
                     >
                       <PlanningSejourDossierSection
                         patientId={patientRow.id}
+                        patientName={patientRow.user.fullName}
+                        dateArrivee={patientDetail?.logistique?.dateArrivee}
+                        transport={patientDetail?.logistique?.transport}
                         planning={patientDetail?.planningSejour}
                         logistiqueComplete={logComplete}
                         onOpenEditor={(id) => navigate(`/gestionnaire/planning-sejour/${id}/personnaliser`)}

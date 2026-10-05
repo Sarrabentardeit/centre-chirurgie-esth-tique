@@ -369,6 +369,39 @@ function refreshDevisFieldByLabel(html: string, label: string, value: string): s
   return html
 }
 
+/** Insère ou met à jour « Fumeuse : » sous « Allergie : » uniquement si Oui ; sinon retire la ligne. */
+function syncFumeuseAfterAllergie(html: string, value: string | null): string {
+  if (typeof window === 'undefined') return html
+  const hasLine = /Fumeuse\s*:/i.test(html.replace(/<[^>]+>/g, ' '))
+  if (!value) {
+    if (!hasLine) return html
+    const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+    const root = doc.getElementById('__root')
+    if (!root) return html
+    const target = normalizeFieldLabel('Fumeuse :')
+    for (const p of Array.from(root.querySelectorAll('p'))) {
+      if (!normalizeFieldLabel(p.textContent ?? '').startsWith(target)) continue
+      p.remove()
+      return root.innerHTML
+    }
+    return html
+  }
+  if (hasLine) return refreshDevisFieldByLabel(html, 'Fumeuse :', value)
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  const allergTarget = normalizeFieldLabel('Allergie :')
+  for (const p of Array.from(root.querySelectorAll('p'))) {
+    if (!normalizeFieldLabel(p.textContent ?? '').startsWith(allergTarget)) continue
+    const wrap = doc.createElement('div')
+    wrap.innerHTML = devisFieldRow('Fumeuse :', value)
+    const node = wrap.firstElementChild
+    if (node) p.after(node)
+    return root.innerHTML
+  }
+  return html
+}
+
 const DUREE_TOTALE_SEJOUR_LABEL = 'Durée TOTALE du séjour :'
 
 /** Ligne « Durée TOTALE du séjour » — texte jaune + fluo gris foncé (identique badge séjour). */
@@ -1348,20 +1381,24 @@ function recapAndDetailsFromContext(ctx: DevisLetterContext) {
   const inter = arr(pay.typeIntervention).join(', ') || '—'
   const nom = patient?.fullName || '—'
   const age = str(pay.dateNaissance) ? computeAge(str(pay.dateNaissance)) : ''
-  const mensStr = [
-    str(pay.poids) ? `${str(pay.poids)} kg` : '',
-    str(pay.taille) ? `${str(pay.taille)} cm` : '',
-  ].filter(Boolean).join(' ')
-  const ageMens = [age, mensStr].filter(Boolean).join(' — ') || '—'
+  // Formulaire stocke poids/taille en nombres — format charte : « 55 ans 1m65 65 kg »
+  const ageMens = [age, formatTailleMeters(pay.taille), formatPoidsKg(pay.poids)]
+    .filter(Boolean)
+    .join(' ') || '—'
   const trait = pay.traitementEnCours === true ? (str(pay.traitementDetails) || 'Oui') : 'Aucun'
   const allerg = arr(pay.allergies).join(', ') || 'Aucune'
+  // Affiché uniquement si fumeuse = oui (+ détails tabac si renseignés)
+  const fumeuse =
+    pay.fumeur === true
+      ? (str(pay.detailsTabac) ? `Oui — ${str(pay.detailsTabac)}` : 'Oui')
+      : null
   const antecMed = [...arr(pay.antecedentsMedicaux), str(pay.autresMaladiesChroniques)].filter(Boolean).join(', ') || 'Aucun'
   const antecCh = pay.chirurgiesAnterieures === true ? (str(pay.chirurgiesDetails) || 'Oui') : 'Aucun'
   const adresse = [patient?.ville, patient?.pays].filter(Boolean).join(' — ') || '—'
   const tel = patient?.phone || '—'
   const interRec = (rap?.interventionsRecommandees ?? []).filter(Boolean).join(', ') || '—'
   const anesthType = rap?.anesthesieGenerale === true ? 'Générale' : 'Locale / Sédation'
-  return { inter, nom, ageMens, trait, allerg, antecMed, antecCh, adresse, tel, interRec, anesthType }
+  return { inter, nom, ageMens, trait, allerg, fumeuse, antecMed, antecCh, adresse, tel, interRec, anesthType }
 }
 
 /**
@@ -1392,6 +1429,7 @@ export function syncDevisLetterDataOnlyTopHtml(
     out = refreshDevisFieldByLabel(out, 'Âge / Mensurations :', recap.ageMens)
     out = refreshDevisFieldByLabel(out, 'Traitement en cours :', recap.trait)
     out = refreshDevisFieldByLabel(out, 'Allergie :', recap.allerg)
+    out = syncFumeuseAfterAllergie(out, recap.fumeuse)
     out = refreshDevisFieldByLabel(out, 'Antécédents médicaux :', recap.antecMed)
     out = refreshDevisFieldByLabel(out, 'Antécédents chirurgicaux :', recap.antecCh)
     out = refreshDevisFieldByLabel(out, 'Adresse :', recap.adresse)
@@ -1516,6 +1554,7 @@ export function refreshDevisLetterTopHtml(
     out = refreshDevisFieldByLabel(out, 'Âge / Mensurations :', recap.ageMens)
     out = refreshDevisFieldByLabel(out, 'Traitement en cours :', recap.trait)
     out = refreshDevisFieldByLabel(out, 'Allergie :', recap.allerg)
+    out = syncFumeuseAfterAllergie(out, recap.fumeuse)
     out = refreshDevisFieldByLabel(out, 'Antécédents médicaux :', recap.antecMed)
     out = refreshDevisFieldByLabel(out, 'Antécédents chirurgicaux :', recap.antecCh)
     out = refreshDevisFieldByLabel(out, 'Adresse :', recap.adresse)
@@ -1615,6 +1654,29 @@ function computeAge(d: string) {
 }
 function arr(v: unknown): string[] { return Array.isArray(v) ? v.map(String).filter(Boolean) : [] }
 function str(v: unknown): string { return typeof v === 'string' ? v.trim() : '' }
+function numField(v: unknown): string {
+  if (typeof v === 'number' && Number.isFinite(v)) return String(Math.round(v))
+  if (typeof v === 'string') return v.trim()
+  return ''
+}
+/** 170 → 1m70 · 165 → 1m65 · déjà « 1m65 » conservé. */
+function formatTailleMeters(v: unknown): string {
+  const raw = numField(v)
+  if (!raw) return ''
+  if (/^\d+m\d{1,2}$/i.test(raw)) return raw.toLowerCase()
+  const cm = Number.parseInt(raw, 10)
+  if (!Number.isFinite(cm) || cm <= 0) return ''
+  const m = Math.floor(cm / 100)
+  const rest = String(cm % 100).padStart(2, '0')
+  return `${m}m${rest}`
+}
+function formatPoidsKg(v: unknown): string {
+  const raw = numField(v)
+  if (!raw) return ''
+  const n = Number.parseInt(raw.replace(/[^\d]/g, ''), 10)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return `${n} kg`
+}
 
 /** Lettre haute initiale (sans customContent). */
 export function buildDevisLetterTopHtml(ctx: DevisLetterContext): string {
@@ -1644,6 +1706,7 @@ ${devisFieldRow('Nom Prénom :', recap.nom)}
 ${devisFieldRow('Âge / Mensurations :', recap.ageMens)}
 ${devisFieldRow('Traitement en cours :', recap.trait)}
 ${devisFieldRow('Allergie :', recap.allerg)}
+${recap.fumeuse ? devisFieldRow('Fumeuse :', recap.fumeuse) : ''}
 ${devisFieldRow('Antécédents médicaux :', recap.antecMed)}
 ${devisFieldRow('Antécédents chirurgicaux :', recap.antecCh)}
 ${devisFieldRow('Adresse :', recap.adresse)}

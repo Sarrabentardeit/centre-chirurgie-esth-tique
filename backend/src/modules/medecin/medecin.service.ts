@@ -18,6 +18,7 @@ import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
 import { formatAgendaSlot } from '../../lib/agendaTime.js'
+import { getDashboardInterventions } from '../../lib/interventionsDashboard.js'
 import { sendStaffOnlyMessage } from '../chat/chat.service.js'
 
 function notifyGestionnaires(input: {
@@ -274,12 +275,16 @@ export async function getDashboard(medecinId: string) {
     .sort((a, b) => b.count - a.count)
     .slice(0, 6)
 
+  const { aProgrammer, realisees } = await getDashboardInterventions(prisma)
+
   return {
     stats: { totalPatients, aAnalyser, rdvAujourdhui, rdvCetteSemaine },
     derniersPatients,
     prochainRdv,
     evolutionPatients: months,
     sourcesContact,
+    operationsAProgrammer: aProgrammer,
+    interventionsRealisees: realisees,
   }
 }
 

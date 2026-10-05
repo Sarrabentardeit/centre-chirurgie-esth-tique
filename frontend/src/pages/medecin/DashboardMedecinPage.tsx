@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Users, FileText, Calendar, TrendingUp, Clock, AlertTriangle,
   ChevronRight, Stethoscope, Plus, ClipboardList, RefreshCw, AlertCircle,
+  CalendarClock, CheckCircle2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNavigate } from 'react-router-dom'
-import { STATUS_LABELS, STATUS_COLORS, formatDate, formatRelative } from '@/lib/utils'
+import { STATUS_LABELS, STATUS_COLORS, formatDate, formatRelative, formatDateTime } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { medecinApi } from '@/lib/api'
 import type {
@@ -18,6 +19,7 @@ import type {
   DashboardMonthStat,
   DashboardSourceStat,
   DashboardAlerte,
+  DashboardInterventionItem,
 } from '@/lib/api'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -56,6 +58,8 @@ export default function DashboardMedecinPage() {
   const [evolutionPatients, setEvolutionPatients] = useState<DashboardMonthStat[]>([])
   const [sourcesContact, setSourcesContact]       = useState<DashboardSourceStat[]>([])
   const [alertes, setAlertes] = useState<DashboardAlerte[]>([])
+  const [aProgrammer, setAProgrammer] = useState<DashboardInterventionItem[]>([])
+  const [realisees, setRealisees] = useState<DashboardInterventionItem[]>([])
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -69,6 +73,8 @@ export default function DashboardMedecinPage() {
       setProchainRdv(res.prochainRdv)
       setEvolutionPatients(res.evolutionPatients)
       setSourcesContact(res.sourcesContact)
+      setAProgrammer(res.operationsAProgrammer ?? [])
+      setRealisees(res.interventionsRealisees ?? [])
       setAlertes(alertesRes.alertes.filter((a) => a.count > 0))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -227,6 +233,95 @@ export default function DashboardMedecinPage() {
             </button>
           )
         })}
+      </div>
+
+      {/* ── Opérations : à programmer / réalisées ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-brand-600" />
+              À programmer
+              <Badge className="ml-auto bg-brand-50 text-brand-800 border-brand-200 text-[10px]">
+                {aProgrammer.length}
+              </Badge>
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Opérations qui arrivent</p>
+          </CardHeader>
+          <CardContent>
+            {aProgrammer.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Aucune opération à venir</p>
+            ) : (
+              <div className="space-y-2">
+                {aProgrammer.map((op) => (
+                  <button
+                    key={op.patientId}
+                    type="button"
+                    className="w-full flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left hover:bg-muted/50 transition-colors group"
+                    onClick={() => navigate(`/medecin/patients/${op.patientId}`)}
+                  >
+                    <Avatar className="h-7 w-7 shrink-0">
+                      <AvatarFallback className="bg-brand-100 text-brand-700 text-xs font-bold">
+                        {getInitials(op.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold truncate">{op.fullName}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {formatDateTime(op.dateIntervention)}
+                        {op.intervention ? ` · ${op.intervention}` : ''}
+                      </p>
+                    </div>
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-brand-600 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              Interventions réalisées
+              <Badge className="ml-auto bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px]">
+                {realisees.length}
+              </Badge>
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Déjà faites</p>
+          </CardHeader>
+          <CardContent>
+            {realisees.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Aucune intervention réalisée</p>
+            ) : (
+              <div className="space-y-2">
+                {realisees.map((op) => (
+                  <button
+                    key={op.patientId}
+                    type="button"
+                    className="w-full flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left hover:bg-muted/50 transition-colors group"
+                    onClick={() => navigate(`/medecin/patients/${op.patientId}`)}
+                  >
+                    <Avatar className="h-7 w-7 shrink-0">
+                      <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs font-bold">
+                        {getInitials(op.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold truncate">{op.fullName}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {formatDateTime(op.dateIntervention)}
+                        {op.intervention ? ` · ${op.intervention}` : ''}
+                      </p>
+                    </div>
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-emerald-600 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* ── Grille principale ── */}

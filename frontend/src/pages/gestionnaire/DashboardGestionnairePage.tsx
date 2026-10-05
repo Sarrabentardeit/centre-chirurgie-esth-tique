@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   FileCheck, Package, Bell, Users, ChevronRight, AlertCircle, RefreshCw,
-  CalendarClock, Hourglass,
+  CalendarClock, Hourglass, CheckCircle2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { useAuthStore } from '@/store/authStore'
 import {
   gestionnaireApi,
+  type DashboardInterventionItem,
   type GestionnaireDashboardDevisAttente,
   type GestionnaireDashboardRdvAttente,
   type GestionnaireFunnelStep,
@@ -47,6 +48,8 @@ export default function DashboardGestionnairePage() {
   const [rdvAConfirmer, setRdvAConfirmer] = useState<GestionnaireDashboardRdvAttente[]>([])
   const [patientsLogistique, setPatientsLogistique] = useState<GestionnairePatientSummary[]>([])
   const [notifPreview, setNotifPreview] = useState<Array<{ id: string; titre: string; message: string; lienAction?: string | null }>>([])
+  const [aProgrammer, setAProgrammer] = useState<DashboardInterventionItem[]>([])
+  const [realisees, setRealisees] = useState<DashboardInterventionItem[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -59,6 +62,8 @@ export default function DashboardGestionnairePage() {
       setDevisSansReponse(res.devisSansReponse ?? [])
       setRdvAConfirmer(res.rdvAConfirmer ?? [])
       setPatientsLogistique(res.patientsLogistique)
+      setAProgrammer(res.operationsAProgrammer ?? [])
+      setRealisees(res.interventionsRealisees ?? [])
       const notifs = await gestionnaireApi.getNotifications()
       setNotifPreview(notifs.notifications.filter((n) => !n.lu).slice(0, 2))
     } catch (e) {
@@ -205,6 +210,116 @@ export default function DashboardGestionnairePage() {
             )
           })}
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-brand-600" />
+                À programmer
+                <Badge className="bg-brand-50 text-brand-800 border-brand-200 text-[10px]">
+                  {aProgrammer.length}
+                </Badge>
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Opérations qui arrivent</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/gestionnaire/logistique')}>
+              Logistique <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {aProgrammer.length === 0 ? (
+              <EmptyState
+                icon={CalendarClock}
+                title="Aucune opération à venir"
+                description="Les dates d'intervention renseignées en logistique apparaîtront ici."
+                className="py-8"
+              />
+            ) : (
+              <div className="space-y-2">
+                {aProgrammer.map((op) => (
+                  <button
+                    key={op.patientId}
+                    type="button"
+                    className="w-full flex items-center gap-3 rounded-xl border p-3 hover:bg-muted/50 text-left group"
+                    onClick={() => navigate(`/gestionnaire/devis/${op.patientId}`)}
+                  >
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="bg-brand-100 text-brand-700 text-sm font-semibold">
+                        {initialsFromFullName(op.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{op.fullName}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {formatDateTime(op.dateIntervention)}
+                        {op.intervention ? ` · ${op.intervention}` : ` · ${op.dossierNumber}`}
+                      </p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                Interventions réalisées
+                <Badge className="bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px]">
+                  {realisees.length}
+                </Badge>
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Déjà faites</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/gestionnaire/patients?status=post_op')}>
+              Post-op <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {realisees.length === 0 ? (
+              <EmptyState
+                icon={CheckCircle2}
+                title="Aucune intervention réalisée"
+                description="Les opérations passées (date d'intervention) apparaîtront ici."
+                className="py-8"
+              />
+            ) : (
+              <div className="space-y-2">
+                {realisees.map((op) => (
+                  <button
+                    key={op.patientId}
+                    type="button"
+                    className="w-full flex items-center gap-3 rounded-xl border p-3 hover:bg-muted/50 text-left group"
+                    onClick={() => navigate(`/gestionnaire/devis/${op.patientId}`)}
+                  >
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="bg-emerald-100 text-emerald-700 text-sm font-semibold">
+                        {initialsFromFullName(op.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{op.fullName}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {formatDateTime(op.dateIntervention)}
+                        {op.intervention ? ` · ${op.intervention}` : ` · ${op.dossierNumber}`}
+                      </p>
+                    </div>
+                    <Badge className={`text-[10px] ${STATUS_COLORS[op.status as keyof typeof STATUS_COLORS] ?? ''}`}>
+                      {STATUS_LABELS[op.status as keyof typeof STATUS_LABELS] ?? op.status}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

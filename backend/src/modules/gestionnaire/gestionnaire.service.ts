@@ -17,6 +17,7 @@ import type {
 } from './gestionnaire.schema.js'
 import { isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '../../lib/phonePolicy.js'
 import { formatAgendaSlot } from '../../lib/agendaTime.js'
+import { getDashboardInterventions } from '../../lib/interventionsDashboard.js'
 import type { CreateAgendaEventInput, UpdateAgendaEventInput } from '../medecin/medecin.schema.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import {
@@ -392,6 +393,8 @@ export async function getDashboard(gestionnaireUserId: string) {
     { step: 'Interventions', count: interventions },
   ]
 
+  const { aProgrammer, realisees } = await getDashboardInterventions(prisma)
+
   return {
     stats: {
       totalPatients,
@@ -420,6 +423,8 @@ export async function getDashboard(gestionnaireUserId: string) {
     })),
     patientsLogistique,
     funnel: funnelData,
+    operationsAProgrammer: aProgrammer,
+    interventionsRealisees: realisees,
   }
 }
 

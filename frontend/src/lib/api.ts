@@ -803,6 +803,15 @@ export interface DashboardAlerte {
   count: number
 }
 
+export interface DashboardInterventionItem {
+  patientId: string
+  dossierNumber: string
+  fullName: string
+  status: string
+  dateIntervention: string
+  intervention: string | null
+}
+
 export interface DevisWithPatient extends Devis {
   patient: {
     id: string
@@ -820,6 +829,8 @@ export const medecinApi = {
       prochainRdv: RdvMedecin[]
       evolutionPatients: DashboardMonthStat[]
       sourcesContact: DashboardSourceStat[]
+      operationsAProgrammer: DashboardInterventionItem[]
+      interventionsRealisees: DashboardInterventionItem[]
     }>('/medecin/dashboard'),
 
   getDashboardAlertes: () =>
@@ -1339,6 +1350,8 @@ export const gestionnaireApi = {
       rdvAConfirmer: GestionnaireDashboardRdvAttente[]
       patientsLogistique: GestionnairePatientSummary[]
       funnel: GestionnaireFunnelStep[]
+      operationsAProgrammer: DashboardInterventionItem[]
+      interventionsRealisees: DashboardInterventionItem[]
     }>('/gestionnaire/dashboard'),
 
   getPatients: (params?: { search?: string; status?: string }) => {

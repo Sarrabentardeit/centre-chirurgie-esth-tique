@@ -60,6 +60,8 @@ function pad2(n: number) {
 }
 
 /** Date calendrier locale YYYY-MM-DD (évite le décalage UTC de toISOString). */
+const MAX_PERIOD_DAYS = 366
+
 function toLocalIsoDate(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
@@ -133,6 +135,7 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
     medecinId: '',
     patientId: '',
     date: today,
+    endDate: '',
     start: '09:00',
     end: '10:00',
     motif: '',
@@ -489,9 +492,24 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
     [events]
   )
 
+  const isPeriodType = quickType === 'blocked' || quickType === 'vacation'
+  const periodDates = useMemo(() => {
+    if (!isPeriodType || !quickForm.date) return quickForm.date ? [quickForm.date] : []
+    if (!quickForm.endDate || quickForm.endDate <= quickForm.date) return [quickForm.date]
+    const list: string[] = []
+    let cursor = quickForm.date
+    while (cursor <= quickForm.endDate && list.length < MAX_PERIOD_DAYS) {
+      list.push(cursor)
+      cursor = addDays(cursor, 1)
+    }
+    return list
+  }, [isPeriodType, quickForm.date, quickForm.endDate])
+  const periodInvalid = isPeriodType && !!quickForm.endDate && quickForm.endDate < quickForm.date
+
   const canSubmitQuick =
     quickForm.medecinId &&
     quickForm.date &&
+    !periodInvalid &&
     (quickType === 'vacation' || (quickForm.start && quickForm.end)) &&
     (quickType !== 'rdv' || quickForm.patientId)
 
@@ -888,7 +906,7 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                 className="gap-1.5"
                 onClick={() => {
                   setQuickType(type)
-                  setQuickForm((f) => ({ ...f, medecinId: f.medecinId || medecinDefault }))
+                  setQuickForm((f) => ({ ...f, medecinId: f.medecinId || medecinDefault, endDate: '' }))
                 }}
               >
                 <Icon className="h-4 w-4" />
@@ -955,6 +973,7 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                       ...f,
                       medecinId: f.medecinId || medecinDefault,
                       date: cellPicker.date,
+                      endDate: '',
                       start: cellPicker.start,
                       end: cellPicker.end,
                       motif: '',
@@ -1001,8 +1020,8 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {quickType === 'rdv' && 'Créer un RDV pour une patiente'}
-                  {quickType === 'blocked' && 'Rendre un créneau indisponible'}
-                  {quickType === 'vacation' && 'Marquer une journée complète'}
+                  {quickType === 'blocked' && 'Rendre un créneau indisponible (un jour ou une période)'}
+                  {quickType === 'vacation' && 'Marquer une ou plusieurs journées complètes'}
                 </p>
               </div>
               <button onClick={() => setQuickType('none')} className="text-muted-foreground hover:text-foreground">
@@ -1085,15 +1104,30 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
               )}
 
               {/* Date + Heure */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className={`grid grid-cols-1 gap-4 ${isPeriodType ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
                 <div className="space-y-1.5">
-                  <Label>Date</Label>
+                  <Label>{isPeriodType ? 'Du' : 'Date'}</Label>
                   <Input
                     type="date"
                     value={quickForm.date}
-                    onChange={(e) => setQuickForm((f) => ({ ...f, date: e.target.value }))}
+                    onChange={(e) => setQuickForm((f) => ({
+                      ...f,
+                      date: e.target.value,
+                      endDate: f.endDate && f.endDate < e.target.value ? e.target.value : f.endDate,
+                    }))}
                   />
                 </div>
+                {isPeriodType && (
+                  <div className="space-y-1.5">
+                    <Label>Au (optionnel)</Label>
+                    <Input
+                      type="date"
+                      min={quickForm.date || undefined}
+                      value={quickForm.endDate}
+                      onChange={(e) => setQuickForm((f) => ({ ...f, endDate: e.target.value }))}
+                    />
+                  </div>
+                )}
                 {quickType !== 'vacation' && (
                   <>
                     <div className="space-y-1.5">
@@ -1161,7 +1195,11 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
 
             <div className="px-5 py-4 border-t border-border flex items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
-                {quickForm.date && `${formatDate(quickForm.date)}${quickType !== 'vacation' ? ` · ${quickForm.start} - ${quickForm.end}` : ''}`}
+                {quickForm.date && (
+                  periodDates.length > 1
+                    ? `${formatDate(periodDates[0])} → ${formatDate(periodDates[periodDates.length - 1])} · ${periodDates.length} jours${quickType !== 'vacation' ? ` · ${quickForm.start} - ${quickForm.end}` : ''}`
+                    : `${formatDate(quickForm.date)}${quickType !== 'vacation' ? ` · ${quickForm.start} - ${quickForm.end}` : ''}`
+                )}
               </p>
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={() => setQuickType('none')}>
@@ -1180,52 +1218,52 @@ export default function AgendaMedecinPage({ mode = 'medecin' }: AgendaMedecinPag
                         : quickType === 'blocked'
                         ? `Créneau bloqué - ${medecinName}`
                         : `Vacances - ${medecinName}`
-                    const localId = crypto.randomUUID()
                     const startTime = quickType === 'vacation' ? '00:00' : quickForm.start
                     const endTime   = quickType === 'vacation' ? '23:59' : quickForm.end
-                    setLocalEvents((prev) => [
-                      ...prev,
-                      {
-                        id: localId,
-                        medecinId: quickForm.medecinId,
-                        patientId: quickType === 'rdv' ? quickForm.patientId : undefined,
-                        date: quickForm.date,
-                        start: startTime,
-                        end: endTime,
-                        type: quickType,
+                    const targetDates = isPeriodType ? periodDates : [quickForm.date]
+                    for (const day of targetDates) {
+                      const localId = crypto.randomUUID()
+                      setLocalEvents((prev) => [
+                        ...prev,
+                        {
+                          id: localId,
+                          medecinId: quickForm.medecinId,
+                          patientId: quickType === 'rdv' ? quickForm.patientId : undefined,
+                          date: day,
+                          start: startTime,
+                          end: endTime,
+                          type: quickType,
+                          title,
+                          motif: quickType === 'rdv' ? quickForm.motif : undefined,
+                          notes: quickForm.notes || undefined,
+                          statut: quickType === 'rdv' ? (quickForm.confirmer ? 'confirme' : 'planifie') : undefined,
+                        },
+                      ])
+                      // Persister aussi côté API (format ISO local sans timezone)
+                      const eventBody = {
+                        type: quickType === 'blocked' ? 'blocage' as const : quickType === 'vacation' ? 'vacances' as const : 'rdv' as const,
                         title,
                         motif: quickType === 'rdv' ? quickForm.motif : undefined,
+                        dateDebut: `${day}T${startTime}:00.000`,
+                        dateFin: `${day}T${endTime}:00.000`,
+                        allDay: quickType === 'vacation',
+                        patientId: quickType === 'rdv' ? quickForm.patientId : undefined,
+                        statut: quickType === 'rdv' ? (quickForm.confirmer ? 'confirme' as const : 'planifie' as const) : undefined,
                         notes: quickForm.notes || undefined,
-                        statut: quickType === 'rdv' ? (quickForm.confirmer ? 'confirme' : 'planifie') : undefined,
-                      },
-                    ])
-                    // Persister aussi côté API (format ISO local sans timezone)
-                    const dateDebutIso = `${quickForm.date}T${startTime}:00.000`
-                    const dateFinIso   = `${quickForm.date}T${endTime}:00.000`
-                    const eventBody = {
-                      type: quickType === 'blocked' ? 'blocage' as const : quickType === 'vacation' ? 'vacances' as const : 'rdv' as const,
-                      title,
-                      motif: quickType === 'rdv' ? quickForm.motif : undefined,
-                      dateDebut: dateDebutIso,
-                      dateFin: dateFinIso,
-                      allDay: quickType === 'vacation',
-                      patientId: quickType === 'rdv' ? quickForm.patientId : undefined,
-                      statut: quickType === 'rdv' ? (quickForm.confirmer ? 'confirme' as const : 'planifie' as const) : undefined,
-                      notes: quickForm.notes || undefined,
+                      }
+                      const createPromise = mode === 'gestionnaire'
+                        ? gestionnaireApi.createAgendaEvent(eventBody, {
+                            medecinId: quickForm.medecinId || selectedMedecin || undefined,
+                          })
+                        : medecinApi.createAgendaEvent(eventBody)
+                      void createPromise.then((res) => {
+                        setLocalEvents((prev) => prev.map((e) =>
+                          e.id === localId ? { ...e, id: res.event.id, _apiId: res.event.id } : e
+                        ))
+                      }).catch(() => {})
                     }
-                    const createPromise = mode === 'gestionnaire'
-                      ? gestionnaireApi.createAgendaEvent(eventBody, {
-                          medecinId: quickForm.medecinId || selectedMedecin || undefined,
-                        })
-                      : medecinApi.createAgendaEvent(eventBody)
-                    void createPromise.then((res) => {
-                      // Mettre à jour l'id local avec l'id API
-                      setLocalEvents((prev) => prev.map((e) =>
-                        e.id === localId ? { ...e, id: res.event.id, _apiId: res.event.id } : e
-                      ))
-                    }).catch(() => {})
                     setQuickType('none')
-                    setQuickForm((f) => ({ ...f, motif: '', notes: '', confirmer: false, patientId: '' }))
+                    setQuickForm((f) => ({ ...f, endDate: '', motif: '', notes: '', confirmer: false, patientId: '' }))
                   }}
                 >
                   {quickType === 'rdv' && quickForm.confirmer ? 'Ajouter et confirmer' : 'Ajouter'}

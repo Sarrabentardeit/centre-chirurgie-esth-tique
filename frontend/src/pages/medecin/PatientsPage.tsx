@@ -377,6 +377,7 @@ export default function PatientsPage() {
   const navigate      = useNavigate()
   const { user }      = useAuthStore()
   const isGestionnaire = user?.role === 'gestionnaire'
+  const newPatientPath = isGestionnaire ? '/gestionnaire/patients/nouveau' : '/medecin/patients/nouveau'
   const [searchParams] = useSearchParams()
   const initialStatus  = parseInitialFilter(searchParams.get('status'))
 
@@ -460,13 +461,11 @@ export default function PatientsPage() {
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               <span className="ml-2 hidden sm:inline">Actualiser</span>
             </Button>
-            {!isGestionnaire && (
-              <Button variant="brand" size="sm" className="gap-2" onClick={() => navigate('/medecin/patients/nouveau')}>
-                <UserPlus className="h-4 w-4" />
-                <span className="hidden sm:inline">Nouveau patient</span>
-                <span className="sm:hidden">Nouveau</span>
-              </Button>
-            )}
+            <Button variant="brand" size="sm" className="gap-2" onClick={() => navigate(newPatientPath)}>
+              <UserPlus className="h-4 w-4" />
+              <span className="hidden sm:inline">Nouveau patient</span>
+              <span className="sm:hidden">Nouveau</span>
+            </Button>
           </>
         }
       />
@@ -589,13 +588,11 @@ export default function PatientsPage() {
                   ? 'Aucun dossier classé en abstention'
                   : statusFilter === 'non_traites'
                     ? 'Aucun dossier à traiter pour le moment'
-                    : isGestionnaire
-                      ? 'Modifiez le filtre pour afficher d’autres dossiers'
-                      : 'Modifiez le filtre ou ajoutez un nouveau patient'
+                    : 'Modifiez le filtre ou ajoutez un nouveau patient'
             }
-            actionLabel={!isGestionnaire && !search ? 'Nouveau patient' : 'Voir les non traités'}
+            actionLabel={!search ? 'Nouveau patient' : 'Voir les non traités'}
             onAction={() => {
-              if (!isGestionnaire && !search && statusFilter === 'all') navigate('/medecin/patients/nouveau')
+              if (!search && statusFilter === 'all') navigate(newPatientPath)
               else { setSearch(''); setStatusFilter('non_traites') }
             }}
           />

@@ -237,6 +237,14 @@ export default function App() {
                 }
               />
               <Route
+                path="/gestionnaire/patients/nouveau"
+                element={
+                  <ProtectedRoute allowedRoles={['gestionnaire']}>
+                    <NouveauPatientPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/gestionnaire/users"
                 element={
                   <ProtectedRoute allowedRoles={['gestionnaire']}>

@@ -173,6 +173,21 @@ function isItalicLine(line: string): boolean {
   return ITALIC_PREFIXES.some((p) => t.startsWith(p))
 }
 
+/**
+ * Une ligne « 2 - … » n'est un titre d'intervention que si elle ressemble à un intitulé.
+ * Une phrase numérotée tapée à la main (minuscule initiale, point final) reste du texte :
+ * sinon elle serait masquée dans la fiche gestionnaire et le devis.
+ */
+function matchTitleLine(line: string): RegExpMatchArray | null {
+  const m = line.trim().match(TITLE_RE)
+  if (!m) return null
+  const title = m[2].trim()
+  if (/^\p{Ll}/u.test(title)) return null
+  if (/[.!?;:…]$/.test(title)) return null
+  if (title.length > 120) return null
+  return m
+}
+
 export function splitDiagnosticBlocks(text: string): DiagnosticBlock[] {
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   const blocks: DiagnosticBlock[] = []
@@ -180,7 +195,7 @@ export function splitDiagnosticBlocks(text: string): DiagnosticBlock[] {
   const preamble: string[] = []
 
   for (const line of lines) {
-    const m = line.trim().match(TITLE_RE)
+    const m = matchTitleLine(line)
     if (m) {
       if (current) {
         blocks.push({

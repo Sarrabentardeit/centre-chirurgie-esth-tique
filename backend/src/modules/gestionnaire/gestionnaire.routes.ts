@@ -19,8 +19,14 @@ import {
   upsertDevisDraftSchema,
   updatePatientFicheSchema,
 } from './gestionnaire.schema.js'
-import { createAgendaEventSchema, updateAgendaEventSchema, updatePatientStatusSchema } from '../medecin/medecin.schema.js'
+import {
+  createAgendaEventSchema,
+  createPreDossierSchema,
+  updateAgendaEventSchema,
+  updatePatientStatusSchema,
+} from '../medecin/medecin.schema.js'
 import * as gestionnaireService from './gestionnaire.service.js'
+import * as medecinService from '../medecin/medecin.service.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { getTndEurRate } from '../../lib/exchangeRate.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
@@ -64,6 +70,19 @@ gestionnaireRouter.get('/patients', async (req: Request, res: Response, next: Ne
     next(e)
   }
 })
+
+gestionnaireRouter.post(
+  '/patients',
+  validate(createPreDossierSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await medecinService.createPreDossier(req.auth!.sub, req.body, 'gestionnaire')
+      res.status(201).json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
 
 gestionnaireRouter.get('/patients/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

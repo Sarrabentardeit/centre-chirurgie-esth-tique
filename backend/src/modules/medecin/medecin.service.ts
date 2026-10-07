@@ -443,7 +443,11 @@ export async function getPatients(search?: string, status?: string) {
   return { patients: filtered.map(mapPatientListRow), counts }
 }
 
-export async function createPreDossier(medecinId: string, input: CreatePreDossierInput) {
+export async function createPreDossier(
+  actorId: string,
+  input: CreatePreDossierInput,
+  actorRole: 'medecin' | 'gestionnaire' = 'medecin',
+) {
   const email = input.email?.trim().toLowerCase() || buildPlaceholderEmail()
   const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } })
   if (existing) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
@@ -478,7 +482,7 @@ export async function createPreDossier(medecinId: string, input: CreatePreDossie
             ville: input.ville?.trim() || null,
             pays: input.pays?.trim() || null,
             nationalite: input.nationalite?.trim() || null,
-            sourceContact: input.sourceContact?.trim() || 'medecin',
+            sourceContact: input.sourceContact?.trim() || actorRole,
             status: 'nouveau',
           },
           include: { user: { select: { fullName: true, email: true } } },
@@ -497,8 +501,8 @@ export async function createPreDossier(medecinId: string, input: CreatePreDossie
   if (input.noteMedicale?.trim()) {
     await prisma.auditLog.create({
       data: {
-        actorId: medecinId,
-        actorRole: 'medecin',
+        actorId,
+        actorRole,
         action: 'create',
         entity: 'pre_dossier_note',
         entityId: createdPatient.id,
@@ -507,12 +511,23 @@ export async function createPreDossier(medecinId: string, input: CreatePreDossie
     })
   }
 
-  await notifyGestionnaires({
-    type: 'info',
-    titre: 'Pré-dossier patient créé par le médecin',
-    message: `${createdPatient.user.fullName} (${createdPatient.dossierNumber}) a été ajouté par le médecin. Activation compte patient à finaliser.`,
-    lienAction: '/gestionnaire/patients',
-  })
+  if (actorRole === 'medecin') {
+    await notifyGestionnaires({
+      type: 'info',
+      titre: 'Pré-dossier patient créé par le médecin',
+      message: `${createdPatient.user.fullName} (${createdPatient.dossierNumber}) a été ajouté par le médecin. Activation compte patient à finaliser.`,
+      lienAction: '/gestionnaire/patients',
+    })
+  } else {
+    await notifyStaff({
+      role: 'medecin',
+      email: false,
+      type: 'info',
+      titre: 'Pré-dossier patient créé par la gestionnaire',
+      message: `${createdPatient.user.fullName} (${createdPatient.dossierNumber}) a été ajouté par la gestionnaire.`,
+      lienAction: `/medecin/patients/${createdPatient.id}`,
+    })
+  }
 
   return { patient: createdPatient }
 }

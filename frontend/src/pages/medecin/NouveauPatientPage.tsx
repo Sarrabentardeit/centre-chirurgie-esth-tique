@@ -6,10 +6,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { medecinApi } from '@/lib/api'
+import { gestionnaireApi, medecinApi } from '@/lib/api'
+import { useAuthStore } from '@/store/authStore'
 
 export default function NouveauPatientPage() {
   const navigate = useNavigate()
+  const isGestionnaire = useAuthStore((s) => s.user?.role) === 'gestionnaire'
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -20,7 +22,7 @@ export default function NouveauPatientPage() {
     ville: '',
     pays: 'Tunisie',
     nationalite: '',
-    sourceContact: 'medecin',
+    sourceContact: isGestionnaire ? 'gestionnaire' : 'medecin',
     noteMedicale: '',
   })
 
@@ -34,7 +36,8 @@ export default function NouveauPatientPage() {
     setError(null)
     setSuccess(null)
     try {
-      const res = await medecinApi.createPreDossier({
+      const createPreDossier = isGestionnaire ? gestionnaireApi.createPreDossier : medecinApi.createPreDossier
+      const res = await createPreDossier({
         fullName: form.fullName.trim(),
         email: form.email.trim() || undefined,
         phone: form.phone.trim() || undefined,
@@ -45,7 +48,10 @@ export default function NouveauPatientPage() {
         noteMedicale: form.noteMedicale.trim() || undefined,
       })
       setSuccess(`Pré-dossier créé: ${res.patient.dossierNumber}`)
-      setTimeout(() => navigate(`/medecin/patients/${res.patient.id}?tab=formulaire&saisie=1`), 600)
+      const target = isGestionnaire
+        ? `/gestionnaire/devis/${res.patient.id}?saisie=1`
+        : `/medecin/patients/${res.patient.id}?tab=formulaire&saisie=1`
+      setTimeout(() => navigate(target), 600)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de création.')
     } finally {
@@ -59,10 +65,14 @@ export default function NouveauPatientPage() {
         <div className="min-w-0">
           <h2 className="text-lg sm:text-xl font-bold">Nouveau pré-dossier patient</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Création rapide par le médecin, sans compte patient actif.
+            Création rapide par {isGestionnaire ? 'la gestionnaire' : 'le médecin'}, sans compte patient actif.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => navigate('/medecin/patients')}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => navigate(isGestionnaire ? '/gestionnaire/patients' : '/medecin/patients')}
+        >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Retour
         </Button>

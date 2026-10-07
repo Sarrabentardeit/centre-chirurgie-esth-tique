@@ -1617,6 +1617,31 @@ export default function DevisGestionnairePage() {
     view,
   ])
 
+  useEffect(() => {
+    if (searchParams.get('saisie') !== '1') return
+    if (view !== 'detail' || !selectedPatient || detailLoading || !patientDetail) return
+    if (patientDetail.id !== selectedPatient) return
+    if (!patientDetail.formulaires?.length) {
+      setFicheError(null)
+      setEditingIdentity(false)
+      setEditingFormulaire(true)
+      setSectionOpen('formulaire', true)
+      scrollToDossierSection('dossier-formulaire')
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('saisie')
+    setSearchParams(next, { replace: true })
+  }, [
+    detailLoading,
+    patientDetail,
+    scrollToDossierSection,
+    searchParams,
+    selectedPatient,
+    setSearchParams,
+    setSectionOpen,
+    view,
+  ])
+
   const existingDevis: Devis | null = useMemo(() => {
     const list = [...(patientDetail?.devis ?? [])]
     const editable = list.filter(

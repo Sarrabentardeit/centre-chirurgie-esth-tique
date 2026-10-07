@@ -1372,6 +1372,24 @@ export const gestionnaireApi = {
     }>(`/gestionnaire/patients${qs ? `?${qs}` : ''}`)
   },
 
+  createPreDossier: (body: {
+    fullName: string
+    email?: string
+    phone?: string
+    ville?: string
+    pays?: string
+    nationalite?: string
+    sourceContact?: string
+    noteMedicale?: string
+  }) =>
+    request<{ ok: true; patient: { id: string; dossierNumber: string; user: { fullName: string; email: string } } }>(
+      '/gestionnaire/patients',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
+
   getPatient: (id: string) =>
     request<{ ok: true; patient: GestionnairePatientDetail }>(`/gestionnaire/patients/${id}`),
 

@@ -1859,8 +1859,45 @@ async function readUploadError(res: Response): Promise<never> {
   throw new ApiRequestError(res.status, 'UPLOAD_ERROR', message)
 }
 
+export function isHeicFile(file: File): boolean {
+  return /^image\/hei[cf]/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
+}
+
+/** Photos iPhone HEIC/HEIF → JPEG (le serveur n'accepte que JPG/PNG/WEBP/PDF). */
+async function convertHeicToJpeg(file: File): Promise<File> {
+  const base = file.name.replace(/\.[^.]+$/, '') || 'photo'
+  const toFile = (blob: Blob) =>
+    new File([blob], `${base}.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
+
+  try {
+    const bitmap = await createImageBitmap(file)
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0)
+    bitmap.close()
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.88))
+    if (blob) return toFile(blob)
+  } catch {
+    // navigateur sans décodage HEIC natif (Chrome/Firefox/Edge) : repli sur la librairie
+  }
+
+  try {
+    const { heicTo } = await import('heic-to')
+    const blob = await heicTo({ blob: file, type: 'image/jpeg', quality: 0.88 })
+    return toFile(blob)
+  } catch {
+    throw new ApiRequestError(
+      415,
+      'HEIC_CONVERSION_FAILED',
+      'Impossible de lire cette photo HEIC. Réessayez ou exportez-la en JPG.',
+    )
+  }
+}
+
 /** Réduit les photos téléphone trop lourdes avant upload (évite les 413 nginx). */
 export async function compressImageForUpload(file: File, maxSide = 1920, quality = 0.82): Promise<File> {
+  if (isHeicFile(file)) file = await convertHeicToJpeg(file)
   if (!file.type.startsWith('image/') || file.type === 'image/gif') return file
   // PDF et petits fichiers : pas de recompression
   if (file.size <= 900_000) return file

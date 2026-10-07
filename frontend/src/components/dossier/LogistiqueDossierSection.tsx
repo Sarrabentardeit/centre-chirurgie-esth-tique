@@ -139,7 +139,7 @@ function DocumentSlot({
         ref={inputRef}
         type="file"
         multiple
-        accept="image/jpeg,image/png,image/webp,application/pdf"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif,application/pdf"
         className="hidden"
         onChange={(e) => {
           const picked = Array.from(e.target.files ?? [])

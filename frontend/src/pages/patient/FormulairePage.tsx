@@ -1801,14 +1801,14 @@ export default function FormulairePage() {
               {/* â”€â”€ STEP 4 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
               {currentStep === 4 && (
                 <div className="space-y-6">
-                  <input ref={photosInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                  <input ref={photosInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" multiple className="hidden"
                     onChange={(e) => {
                       const files = Array.from(e.target.files ?? [])
                       void handleFilesSelected(files, setUploadedPhotos, setUploadingPhotos)
                       e.currentTarget.value = ''
                     }}
                   />
-                  <input ref={docsInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple className="hidden"
+                  <input ref={docsInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" multiple className="hidden"
                     onChange={(e) => {
                       const files = Array.from(e.target.files ?? [])
                       void handleFilesSelected(files, setUploadedDocs, setUploadingDocs)

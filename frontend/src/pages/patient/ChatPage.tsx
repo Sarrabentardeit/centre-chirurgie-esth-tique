@@ -14,6 +14,7 @@ import { useAuthStore } from '@/store/authStore'
 import {
   chatApi,
   EQUIPE_THREAD_ID,
+  isHeicFile,
   type ChatConversation,
   type ChatMessage,
   type ChatPatientOption,
@@ -660,7 +661,8 @@ export default function ChatPage() {
 
   const onPickFile = (file: File | null) => {
     if (!file) return
-    const ok = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(file.type)
+    const heic = isHeicFile(file)
+    const ok = heic || ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(file.type)
     if (!ok) {
       setError('Formats acceptés : JPG, PNG, WEBP, PDF (max 12 Mo).')
       return
@@ -672,7 +674,7 @@ export default function ChatPage() {
     clearPendingFile()
     setPendingFile({
       file,
-      previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+      previewUrl: file.type.startsWith('image/') && !heic ? URL.createObjectURL(file) : undefined,
     })
     setError(null)
   }
@@ -1746,7 +1748,7 @@ export default function ChatPage() {
           <input
             ref={fileRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif,application/pdf"
             className="hidden"
             onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
           />

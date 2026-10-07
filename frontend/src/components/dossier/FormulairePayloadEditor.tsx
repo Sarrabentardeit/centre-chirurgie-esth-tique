@@ -1,5 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { Save, X } from 'lucide-react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { FileText, Loader2, Save, Trash2, Upload, X } from 'lucide-react'
+import { chatApi } from '@/lib/api'
+import { resolveFormulaireFileUrl } from '@/components/dossier/FormulairePayloadView'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -43,6 +45,33 @@ function currentYear(): number {
 }
 
 type InterventionKey = (typeof INTERVENTION_CATEGORIES)[number]['key']
+
+type FileItem = { value: unknown; url: string; name: string }
+
+/** Photos / docs du payload : URL string ou objet `{ url, name }` — la forme d'origine est conservée à l'enregistrement. */
+function toFileItems(value: unknown): FileItem[] {
+  if (!Array.isArray(value)) return []
+  const out: FileItem[] = []
+  value.forEach((item, idx) => {
+    if (typeof item === 'string') {
+      const url = item.trim()
+      if (!url) return
+      out.push({ value: item, url, name: decodeURIComponent(url.split('/').pop() ?? `fichier-${idx + 1}`) })
+      return
+    }
+    if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>
+      const url = String(o.url ?? o.path ?? o.src ?? '').trim()
+      if (!url) return
+      out.push({ value: item, url, name: String(o.name ?? o.filename ?? url.split('/').pop() ?? `fichier-${idx + 1}`) })
+    }
+  })
+  return out
+}
+
+function isImageFile(name: string): boolean {
+  return /\.(jpe?g|png|webp|gif)$/i.test(name)
+}
 
 export function FormulairePayloadEditor({
   initialPayload,
@@ -104,6 +133,36 @@ export function FormulairePayloadEditor({
   const [periodeMois, setPeriodeMois] = useState(periodeInit.mois)
   const [periodeAnnee, setPeriodeAnnee] = useState(periodeInit.annee)
 
+  const [photos, setPhotos] = useState<FileItem[]>(() => toFileItems(p.photos))
+  const [docs, setDocs] = useState<FileItem[]>(() => toFileItems(p.documentsPDF))
+  const [uploading, setUploading] = useState<'photos' | 'docs' | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const photosInputRef = useRef<HTMLInputElement | null>(null)
+  const docsInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleUpload = async (
+    files: FileList | null,
+    kind: 'photos' | 'docs',
+  ) => {
+    if (!files?.length) return
+    setUploading(kind)
+    setUploadError(null)
+    const setter = kind === 'photos' ? setPhotos : setDocs
+    const failed: string[] = []
+    for (const file of Array.from(files)) {
+      try {
+        const res = await chatApi.upload(file)
+        setter((prev) => [...prev, { value: res.url, url: res.url, name: res.name || file.name }])
+      } catch {
+        failed.push(file.name)
+      }
+    }
+    if (failed.length > 0) {
+      setUploadError(`Fichier(s) non envoyé(s) : ${failed.join(', ')}. Formats acceptés : JPG, PNG, WEBP, PDF (12 Mo max).`)
+    }
+    setUploading(null)
+  }
+
   const years = useMemo(() => {
     const y = currentYear()
     return [y, y + 1, y + 2, y + 3]
@@ -154,6 +213,8 @@ export function FormulairePayloadEditor({
       attentes: descriptionDemande || undefined,
       periodeSouhaitee: periode || undefined,
       dateSouhaitee: periode || asString(initialPayload.dateSouhaitee) || undefined,
+      photos: photos.map((f) => f.value),
+      documentsPDF: docs.length > 0 ? docs.map((f) => f.value) : undefined,
     }
     if (accompagnant) {
       payload.nbAdultesAccompagnement = nbAdultes.trim() ? Number.parseInt(nbAdultes, 10) : 0
@@ -171,7 +232,7 @@ export function FormulairePayloadEditor({
         <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>
       )}
       <p className="text-xs text-slate-500">
-        Corrigez les informations manquantes ou inexactes. Les photos et documents déjà envoyés sont conservés.
+        Corrigez les informations manquantes ou inexactes. Vous pouvez aussi ajouter ou retirer des photos et documents en bas de page.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -373,6 +434,130 @@ export function FormulairePayloadEditor({
             </div>
           </CardContent>
         </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader><CardTitle className="text-sm">Photos et documents</CardTitle></CardHeader>
+          <CardContent className="space-y-5">
+            {uploadError && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{uploadError}</p>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Photos (face, dos, profils) · {photos.length}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={uploading !== null}
+                  onClick={() => photosInputRef.current?.click()}
+                >
+                  {uploading === 'photos' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Ajouter des photos
+                </Button>
+                <input
+                  ref={photosInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleUpload(e.target.files, 'photos')
+                    e.target.value = ''
+                  }}
+                />
+              </div>
+              {photos.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aucune photo.</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                  {photos.map((photo, idx) => {
+                    const src = resolveFormulaireFileUrl(photo.url)
+                    return (
+                      <div key={`${photo.url}-${idx}`} className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30">
+                        {src ? (
+                          <img src={src} alt={photo.name} className="h-full w-full object-cover" loading="lazy" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center p-2 text-[10px] text-muted-foreground text-center">
+                            {photo.name}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          aria-label={`Retirer ${photo.name}`}
+                          onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                          className="absolute right-1.5 top-1.5 rounded-full bg-white/90 p-1.5 text-rose-600 shadow hover:bg-white"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Documents médicaux (PDF ou images) · {docs.length}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={uploading !== null}
+                  onClick={() => docsInputRef.current?.click()}
+                >
+                  {uploading === 'docs' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Ajouter des documents
+                </Button>
+                <input
+                  ref={docsInputRef}
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleUpload(e.target.files, 'docs')
+                    e.target.value = ''
+                  }}
+                />
+              </div>
+              {docs.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aucun document.</p>
+              ) : (
+                <div className="space-y-2">
+                  {docs.map((doc, idx) => (
+                    <div key={`${doc.url}-${idx}`} className="flex items-center gap-2 rounded-lg border px-3 py-2">
+                      <FileText className={cn('h-4 w-4 shrink-0', isImageFile(doc.name) ? 'text-brand-600' : 'text-rose-500')} />
+                      <a
+                        href={resolveFormulaireFileUrl(doc.url) || undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm truncate flex-1 hover:underline"
+                      >
+                        {doc.name}
+                      </a>
+                      <button
+                        type="button"
+                        aria-label={`Retirer ${doc.name}`}
+                        onClick={() => setDocs((prev) => prev.filter((_, i) => i !== idx))}
+                        className="rounded-full p-1.5 text-rose-600 hover:bg-rose-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="flex justify-end gap-2">
@@ -380,7 +565,7 @@ export function FormulairePayloadEditor({
           <X className="h-4 w-4 mr-1.5" />
           Annuler
         </Button>
-        <Button type="button" variant="brand" onClick={handleSave} disabled={saving}>
+        <Button type="button" variant="brand" onClick={handleSave} disabled={saving || uploading !== null}>
           <Save className="h-4 w-4 mr-1.5" />
           {saving ? 'Enregistrement…' : 'Enregistrer le formulaire'}
         </Button>

@@ -13,6 +13,7 @@ import {
   createAgendaEventSchema,
   updateAgendaEventSchema,
   updatePatientStatusSchema,
+  updatePatientFormulaireSchema,
   createPreDossierSchema,
 } from './medecin.schema.js'
 import * as medecinService from './medecin.service.js'
@@ -198,6 +199,21 @@ medecinRouter.patch(
         req.auth!.sub,
         paramToString(req.params.id),
         req.body,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) { next(e) }
+  }
+)
+
+medecinRouter.patch(
+  '/patients/:id/formulaire',
+  validate(updatePatientFormulaireSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await medecinService.updatePatientFormulaire(
+        req.auth!.sub,
+        paramToString(req.params.id),
+        req.body.formulairePayload,
       )
       res.json({ ok: true, ...result })
     } catch (e) { next(e) }

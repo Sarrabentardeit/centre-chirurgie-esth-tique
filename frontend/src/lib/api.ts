@@ -907,6 +907,12 @@ export const medecinApi = {
   deletePatient: (id: string) =>
     request<{ ok: true; deleted: true }>(`/medecin/patients/${id}`, { method: 'DELETE' }),
 
+  updatePatientFormulaire: (id: string, formulairePayload: Record<string, unknown>) =>
+    request<{ ok: true; patient: unknown }>(`/medecin/patients/${id}/formulaire`, {
+      method: 'PATCH',
+      body: JSON.stringify({ formulairePayload }),
+    }),
+
   updatePatientStatus: (id: string, status: string) =>
     request<{ ok: true; patient: unknown }>(`/medecin/patients/${id}/status`, {
       method: 'PATCH',

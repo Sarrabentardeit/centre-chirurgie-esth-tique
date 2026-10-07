@@ -45,7 +45,7 @@ export default function NouveauPatientPage() {
         noteMedicale: form.noteMedicale.trim() || undefined,
       })
       setSuccess(`Pré-dossier créé: ${res.patient.dossierNumber}`)
-      setTimeout(() => navigate(`/medecin/patients/${res.patient.id}`), 600)
+      setTimeout(() => navigate(`/medecin/patients/${res.patient.id}?tab=formulaire&saisie=1`), 600)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de création.')
     } finally {

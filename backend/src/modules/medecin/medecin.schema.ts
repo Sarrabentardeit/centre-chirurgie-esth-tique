@@ -56,6 +56,11 @@ export const updatePatientStatusSchema = z.object({
 })
 export type UpdatePatientStatusInput = z.infer<typeof updatePatientStatusSchema>
 
+export const updatePatientFormulaireSchema = z.object({
+  formulairePayload: z.record(z.string(), z.unknown()),
+})
+export type UpdatePatientFormulaireInput = z.infer<typeof updatePatientFormulaireSchema>
+
 export const createPreDossierSchema = z.object({
   fullName: z.string().min(2).max(120),
   email: z.string().email().optional(),

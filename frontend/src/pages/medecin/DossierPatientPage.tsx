@@ -22,6 +22,7 @@ import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import { InfoRow, FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DiagnosticPicker } from '@/components/dossier/DiagnosticPicker'
+import { FormulairePayloadEditor } from '@/components/dossier/FormulairePayloadEditor'
 import { accompagnantsFromFormulairePayload } from '@/lib/devisSejourNotes'
 
 // ─── Types locaux ──────────────────────────────────────────────────────────────
@@ -167,6 +168,9 @@ export default function DossierPatientPage() {
   const [deleteRapportError, setDeleteRapportError] = useState<string | null>(null)
   const [nouveauFromUrlApplied, setNouveauFromUrlApplied] = useState(false)
 
+  const [editingFormulaire, setEditingFormulaire] = useState(searchParams.get('saisie') === '1')
+  const [formulaireSaving, setFormulaireSaving] = useState(false)
+  const [formulaireError, setFormulaireError] = useState<string | null>(null)
   const [statusSaving, setStatusSaving] = useState(false)
   const [abstentionDialog, setAbstentionDialog] = useState<'classer' | 'reouvrir' | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
@@ -385,6 +389,25 @@ export default function DossierPatientPage() {
       setRapportError(e instanceof Error ? e.message : 'Erreur lors de la sauvegarde.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleSaveFormulaire = async (payload: Record<string, unknown>) => {
+    if (!id) return
+    setFormulaireSaving(true)
+    setFormulaireError(null)
+    try {
+      const res = await medecinApi.updatePatientFormulaire(id, payload)
+      const detail = res.patient as PatientDetail
+      setPatient(detail)
+      if ((detail.rapports ?? []).length === 0) {
+        applyRapportToForm(null, formulairePayloadForRapport(detail))
+      }
+      setEditingFormulaire(false)
+    } catch (e) {
+      setFormulaireError(e instanceof Error ? e.message : 'Impossible d’enregistrer le formulaire.')
+    } finally {
+      setFormulaireSaving(false)
     }
   }
 
@@ -630,18 +653,50 @@ export default function DossierPatientPage() {
 
         {/* ── Formulaire médical ── */}
         <TabsContent value="formulaire">
-          {!formulaire ? (
+          {editingFormulaire ? (
+            <FormulairePayloadEditor
+              initialPayload={(formulaire?.payload ?? {}) as Record<string, unknown>}
+              saving={formulaireSaving}
+              error={formulaireError}
+              onCancel={() => { setEditingFormulaire(false); setFormulaireError(null) }}
+              onSave={(payload) => void handleSaveFormulaire(payload)}
+            />
+          ) : !formulaire ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <FileText className="h-10 w-10 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">Aucun formulaire soumis</p>
+              <Button
+                type="button"
+                variant="brand"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => { setFormulaireError(null); setEditingFormulaire(true) }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Saisir le formulaire
+              </Button>
             </div>
           ) : (
-            <FormulairePayloadView
-              status={formulaire.status}
-              submittedAt={formulaire.submittedAt}
-              createdAt={formulaire.createdAt}
-              payload={(formulaire.payload ?? {}) as Record<string, unknown>}
-            />
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => { setFormulaireError(null); setEditingFormulaire(true) }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Modifier le formulaire
+                </Button>
+              </div>
+              <FormulairePayloadView
+                status={formulaire.status}
+                submittedAt={formulaire.submittedAt}
+                createdAt={formulaire.createdAt}
+                payload={(formulaire.payload ?? {}) as Record<string, unknown>}
+              />
+            </div>
           )}
         </TabsContent>
 

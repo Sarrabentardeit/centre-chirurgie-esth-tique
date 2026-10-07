@@ -593,6 +593,80 @@ export async function updatePatient(patientId: string, input: {
   return { patient: updated }
 }
 
+function parseIsoDateOnly(raw: unknown): Date | null {
+  if (typeof raw !== 'string') return null
+  const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/** Saisie / mise à jour du formulaire médical par le médecin (pré-dossier créé au cabinet). */
+export async function updatePatientFormulaire(
+  actorId: string,
+  patientId: string,
+  payload: Record<string, unknown>,
+) {
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    include: {
+      user: { select: { fullName: true } },
+      formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
+    },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const latest = patient.formulaires[0]
+  if (latest) {
+    await prisma.formulaire.update({
+      where: { id: latest.id },
+      data: { payload: payload as never },
+    })
+  } else {
+    await prisma.formulaire.create({
+      data: {
+        patientId,
+        status: 'submitted',
+        submittedAt: new Date(),
+        payload: payload as never,
+      },
+    })
+    if (patient.status === 'nouveau' || patient.status === 'formulaire_en_cours') {
+      await prisma.patient.update({
+        where: { id: patientId },
+        data: { status: 'en_analyse' },
+      })
+    }
+  }
+
+  const src = typeof payload.sourceContact === 'string' ? payload.sourceContact.trim() : ''
+  const dateNaissance = parseIsoDateOnly(payload.dateNaissance)
+  const nationalite = typeof payload.nationalite === 'string' ? payload.nationalite.trim() : ''
+  if (src || dateNaissance || nationalite) {
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: {
+        ...(src ? { sourceContact: src } : {}),
+        ...(dateNaissance ? { dateNaissance } : {}),
+        ...(nationalite ? { nationalite } : {}),
+      },
+    })
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      actorRole: 'medecin',
+      action: 'update',
+      entity: 'patient_formulaire',
+      entityId: patientId,
+      after: { formulaireCreated: !latest } as never,
+    },
+  }).catch(() => undefined)
+
+  return getPatientById(patientId)
+}
+
 export async function deletePatient(patientId: string) {
   const patient = await prisma.patient.findUnique({ where: { id: patientId } })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')

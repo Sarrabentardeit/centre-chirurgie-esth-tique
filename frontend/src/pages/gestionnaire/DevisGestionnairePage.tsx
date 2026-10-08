@@ -41,6 +41,7 @@ import {
 } from '@/lib/confirmationReservationMessage'
 import { LogistiqueDossierSection } from '@/components/dossier/LogistiqueDossierSection'
 import { PlanningSejourDossierSection } from '@/components/dossier/PlanningSejourDossierSection'
+import { PostOpDossierSection } from '@/components/dossier/PostOpDossierSection'
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
 import { finishWhatsAppPopup, prepareWhatsAppPopup } from '@/lib/whatsappDevis'
 import {
@@ -1783,6 +1784,21 @@ export default function DevisGestionnairePage() {
     }
   }
 
+  const handleAddFormulaireFiles = async (
+    currentPayload: Record<string, unknown>,
+    kind: 'photos' | 'documents',
+    files: Array<{ url: string; name: string }>,
+  ) => {
+    if (!selectedPatient) return
+    const key = kind === 'photos' ? 'photos' : 'documentsPDF'
+    const existing = Array.isArray(currentPayload[key]) ? (currentPayload[key] as unknown[]) : []
+    const r = await gestionnaireApi.updatePatientFiche(selectedPatient, {
+      formulairePayload: { ...currentPayload, [key]: [...existing, ...files.map((f) => f.url)] },
+    })
+    applyFichePatient(r.patient)
+    feedbackSuccess(kind === 'photos' ? 'Photos ajoutées' : 'Documents ajoutés')
+  }
+
   const pickEditableDevis = (list: Devis[] | null | undefined): Devis | null => {
     const editable = [...(list ?? [])].filter(
       (d) => d.statut === 'brouillon' || d.statut === 'envoye' || d.statut === 'accepte',
@@ -3216,6 +3232,7 @@ export default function DevisGestionnairePage() {
     const isAbstention = patientRow.status === 'abstention'
 
     const showSuiviSejour = patientHasPostDevisAccepte(patientRow.status, devisVersions)
+    const showPostOpSection = ['intervention', 'post_op', 'suivi_termine'].includes(patientRow.status)
     const logDocsDone = logistiqueDocumentsDoneCount(patientDetail?.logistique?.documents)
     const logEssentialsDone = logistiqueEssentialsDoneCount(patientDetail?.logistique)
     const logComplete = logistiqueIsComplete(patientDetail?.logistique)
@@ -3284,6 +3301,11 @@ export default function DevisGestionnairePage() {
         hidden: !showSuiviSejour,
         badge: planningFinalise ? 'OK' : undefined,
       },
+      {
+        id: 'dossier-postop',
+        label: 'Suivi post-op',
+        hidden: !showPostOpSection,
+      },
     ]
 
     const handleDossierAnchorClick = (sectionId: string) => {
@@ -3298,7 +3320,9 @@ export default function DevisGestionnairePage() {
                 ? 'logistique'
                 : sectionId === 'dossier-planning'
                   ? 'planning'
-                  : undefined
+                  : sectionId === 'dossier-postop'
+                    ? 'postop'
+                    : undefined
       if (openKey) setSectionOpen(openKey, true)
       scrollToDossierSection(sectionId, openKey)
     }
@@ -3785,6 +3809,9 @@ export default function DevisGestionnairePage() {
                                   createdAt={f.createdAt}
                                   payload={(f.payload ?? {}) as Record<string, unknown>}
                                   showStatusBanner={false}
+                                  onAddFiles={(kind, files) =>
+                                    handleAddFormulaireFiles((f.payload ?? {}) as Record<string, unknown>, kind, files)
+                                  }
                                 />
                                 {hiddenCount > 0 && (
                                   <p className="mt-3 text-xs text-slate-400">
@@ -4017,6 +4044,22 @@ export default function DevisGestionnairePage() {
                       />
                     </Section>
                   </>
+                )}
+
+                {showPostOpSection && (
+                  <Section
+                    id="dossier-postop"
+                    icon={<Stethoscope className="h-4 w-4" />}
+                    title="Suivi post-opératoire"
+                    open={sectionOpen('postop', false)}
+                    onOpenChange={(o) => setSectionOpen('postop', o)}
+                  >
+                    <PostOpDossierSection
+                      patientId={patientRow.id}
+                      patientName={patientRow.user.fullName}
+                      onStatusChange={() => void loadPatients({ silent: true })}
+                    />
+                  </Section>
                 )}
               </>
 

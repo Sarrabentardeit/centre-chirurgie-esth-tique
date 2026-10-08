@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import { CheckCircle2, Clock, ExternalLink, FileText, ImageOff } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { CheckCircle2, Clock, ExternalLink, FileText, ImageOff, Loader2, Upload } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { chatApi } from '@/lib/api'
 import { formatDate, formatIsoDateFrLong } from '@/lib/utils'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 
@@ -165,7 +167,12 @@ export interface FormulairePayloadViewProps {
   subtitle?: string
   /** Afficher la ligne brouillon / soumis (désactiver si un titre parent existe déjà) */
   showStatusBanner?: boolean
+  /** Si fourni, affiche « Ajouter » photos / documents : les fichiers sont envoyés puis transmis au parent pour enregistrement. */
+  onAddFiles?: (kind: 'photos' | 'documents', files: Array<{ url: string; name: string }>) => Promise<void>
 }
+
+const PHOTO_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif'
+const DOC_ACCEPT = `application/pdf,${PHOTO_ACCEPT}`
 
 export function FormulairePayloadView({
   status,
@@ -174,8 +181,38 @@ export function FormulairePayloadView({
   payload,
   subtitle,
   showStatusBanner = true,
+  onAddFiles,
 }: FormulairePayloadViewProps) {
   const p = payload
+  const [busy, setBusy] = useState<'photos' | 'documents' | null>(null)
+  const [addError, setAddError] = useState<string | null>(null)
+  const photosInputRef = useRef<HTMLInputElement | null>(null)
+  const docsInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleAdd = async (kind: 'photos' | 'documents', files: FileList | null) => {
+    if (!onAddFiles || !files?.length) return
+    setBusy(kind)
+    setAddError(null)
+    const uploaded: Array<{ url: string; name: string }> = []
+    const failed: string[] = []
+    for (const file of Array.from(files)) {
+      try {
+        const res = await chatApi.upload(file)
+        uploaded.push({ url: res.url, name: res.name || file.name })
+      } catch {
+        failed.push(file.name)
+      }
+    }
+    try {
+      if (uploaded.length > 0) await onAddFiles(kind, uploaded)
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Enregistrement impossible.')
+    }
+    if (failed.length > 0) {
+      setAddError(`Fichier(s) non envoyé(s) : ${failed.join(', ')}. Formats acceptés : JPG, PNG, WEBP, HEIC, PDF (12 Mo max).`)
+    }
+    setBusy(null)
+  }
 
   return (
     <div className="space-y-4">
@@ -283,8 +320,39 @@ export function FormulairePayloadView({
         <Card className="lg:col-span-2">
           <CardHeader><CardTitle className="text-sm">Documents et photos</CardTitle></CardHeader>
           <CardContent className="space-y-4">
+            {addError && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{addError}</p>
+            )}
             <div>
-              <p className="text-xs text-muted-foreground mb-2">Photos</p>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs text-muted-foreground">Photos</p>
+                {onAddFiles && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={busy !== null}
+                      onClick={() => photosInputRef.current?.click()}
+                    >
+                      {busy === 'photos' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      Ajouter des photos
+                    </Button>
+                    <input
+                      ref={photosInputRef}
+                      type="file"
+                      accept={PHOTO_ACCEPT}
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        void handleAdd('photos', e.target.files)
+                        e.target.value = ''
+                      }}
+                    />
+                  </>
+                )}
+              </div>
               {asFileEntries(p.photos).length === 0 ? (
                 <p className="text-sm text-muted-foreground">-</p>
               ) : (
@@ -299,7 +367,35 @@ export function FormulairePayloadView({
               )}
             </div>
             <div>
-              <p className="text-xs text-muted-foreground mb-2">Documents</p>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs text-muted-foreground">Documents</p>
+                {onAddFiles && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={busy !== null}
+                      onClick={() => docsInputRef.current?.click()}
+                    >
+                      {busy === 'documents' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      Ajouter des documents
+                    </Button>
+                    <input
+                      ref={docsInputRef}
+                      type="file"
+                      accept={DOC_ACCEPT}
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        void handleAdd('documents', e.target.files)
+                        e.target.value = ''
+                      }}
+                    />
+                  </>
+                )}
+              </div>
               {asFileEntries(p.documentsPDF).length === 0 ? (
                 <p className="text-sm text-muted-foreground">-</p>
               ) : (

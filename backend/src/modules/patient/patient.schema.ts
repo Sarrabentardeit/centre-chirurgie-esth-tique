@@ -30,3 +30,9 @@ export const repondreRendezVousSchema = z.object({
   message: z.string().max(500).optional(),
 })
 export type RepondreRendezVousInput = z.infer<typeof repondreRendezVousSchema>
+
+export const postOpDemandeSchema = z.object({
+  message: z.string().trim().min(2, 'Votre message est trop court.').max(2000),
+})
+export type PostOpDemandeInput = z.infer<typeof postOpDemandeSchema>
+

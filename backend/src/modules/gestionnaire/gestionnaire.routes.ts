@@ -22,11 +22,16 @@ import {
 import {
   createAgendaEventSchema,
   createPreDossierSchema,
+  postOpClotureSchema,
+  postOpNoteSchema,
+  postOpReponseSchema,
+  postOpRetourSchema,
   updateAgendaEventSchema,
   updatePatientStatusSchema,
 } from '../medecin/medecin.schema.js'
 import * as gestionnaireService from './gestionnaire.service.js'
 import * as medecinService from '../medecin/medecin.service.js'
+import * as postOpService from '../../lib/postOp.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { getTndEurRate } from '../../lib/exchangeRate.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
@@ -83,6 +88,114 @@ gestionnaireRouter.post(
     }
   },
 )
+
+gestionnaireRouter.get('/post-op/:patientId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await postOpService.getPostOpForStaff(pid(req.params.patientId))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+gestionnaireRouter.post(
+  '/post-op/:patientId/retour',
+  validate(postOpRetourSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.sendRetourMessage(
+        { id: req.auth!.sub, role: 'gestionnaire' },
+        pid(req.params.patientId),
+        req.body,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.get('/post-op/:patientId/whatsapp', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await postOpService.getRetourWhatsapp(pid(req.params.patientId))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+gestionnaireRouter.post(
+  '/post-op/:patientId/cloture',
+  validate(postOpClotureSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.cloturerSuivi(
+        { id: req.auth!.sub, role: 'gestionnaire' },
+        pid(req.params.patientId),
+        req.body,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.post('/post-op/:patientId/rouvrir', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await postOpService.rouvrirSuivi(
+      { id: req.auth!.sub, role: 'gestionnaire' },
+      pid(req.params.patientId),
+    )
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+gestionnaireRouter.post(
+  '/post-op/:patientId/demandes/:demandeId/reponse',
+  validate(postOpReponseSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.answerDemande(
+        { id: req.auth!.sub, role: 'gestionnaire' },
+        pid(req.params.patientId),
+        pid(req.params.demandeId),
+        req.body.reponse,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.post(
+  '/post-op/:patientId/notes',
+  validate(postOpNoteSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.addNoteInterne(
+        { id: req.auth!.sub, role: 'gestionnaire' },
+        pid(req.params.patientId),
+        req.body,
+      )
+      res.status(201).json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.delete('/post-op/:patientId/notes/:noteId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await postOpService.deleteNoteInterne(pid(req.params.patientId), pid(req.params.noteId))
+    res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
 
 gestionnaireRouter.get('/patients/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

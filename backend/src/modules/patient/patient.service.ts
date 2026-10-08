@@ -3,6 +3,7 @@ import { AppError } from '../../middleware/errorHandler.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
 import { dispatchFormulaireAck } from '../gestionnaire/gestionnaire.service.js'
+import { toPatientSuivi } from '../../lib/postOp.js'
 import type { FormulaireSubmitInput, UpdateProfilInput, RepondreDevisInput, RepondreRendezVousInput } from './patient.schema.js'
 
 const RDV_PATIENT_ACCEPTED_TAG = 'PATIENT_DECISION:ACCEPTE'
@@ -407,7 +408,7 @@ export async function getMyPostOp(userId: string) {
   if (suivi) {
     await syncPostOpReminders(patient.id, patient.userId, suivi.dateIntervention)
   }
-  return { suivi, patient: { id: patient.id, status: patient.status } }
+  return { suivi: toPatientSuivi(suivi), patient: { id: patient.id, status: patient.status } }
 }
 
 export async function submitQuestionnaire(userId: string, input: { note: number; commentaire?: string }) {
@@ -426,7 +427,7 @@ export async function submitQuestionnaire(userId: string, input: { note: number;
     where: { patientId: patient.id },
     data: { questionnaire },
   })
-  return { suivi: updated }
+  return { suivi: toPatientSuivi(updated) }
 }
 
 export async function addMyPostOpPhoto(userId: string, photo: { url: string; note?: string }) {
@@ -444,7 +445,7 @@ export async function addMyPostOpPhoto(userId: string, photo: { url: string; not
     where: { patientId: patient.id },
     data: { photos },
   })
-  return { suivi: updated }
+  return { suivi: toPatientSuivi(updated) }
 }
 
 // ─── Dossier complet ──────────────────────────────────────────────────────────

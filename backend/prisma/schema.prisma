@@ -325,6 +325,13 @@ model SuiviPostOp {
   compteRendu       String?  @map("compte_rendu")
   photos            Json     @default("[]")
   questionnaire     Json?
+  retourMessageAt       DateTime? @map("retour_message_at")
+  compteRenduDemandeAt  DateTime? @map("compte_rendu_demande_at")
+  demandes          Json     @default("[]")
+  notesInternes     Json     @default("[]") @map("notes_internes")
+  clotureAt         DateTime? @map("cloture_at")
+  clotureRemarques  String?   @map("cloture_remarques")
+  cloturePar        String?   @map("cloture_par")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 

@@ -15,8 +15,13 @@ import {
   updatePatientStatusSchema,
   updatePatientFormulaireSchema,
   createPreDossierSchema,
+  postOpRetourSchema,
+  postOpClotureSchema,
+  postOpReponseSchema,
+  postOpNoteSchema,
 } from './medecin.schema.js'
 import * as medecinService from './medecin.service.js'
+import * as postOpService from '../../lib/postOp.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { googleCalendarCallbackRouter } from '../google-calendar/google-calendar.routes.js'
 
@@ -338,6 +343,94 @@ medecinRouter.post('/post-op/:patientId', async (req: Request, res: Response, ne
 medecinRouter.post('/post-op/:patientId/photos', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await medecinService.addPostOpPhoto(paramToString(req.params.patientId), req.body)
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.post(
+  '/post-op/:patientId/retour',
+  validate(postOpRetourSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.sendRetourMessage(
+        { id: req.auth!.sub, role: 'medecin' },
+        paramToString(req.params.patientId),
+        req.body,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) { next(e) }
+  },
+)
+
+medecinRouter.get('/post-op/:patientId/whatsapp', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await postOpService.getRetourWhatsapp(paramToString(req.params.patientId))
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.post(
+  '/post-op/:patientId/cloture',
+  validate(postOpClotureSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.cloturerSuivi(
+        { id: req.auth!.sub, role: 'medecin' },
+        paramToString(req.params.patientId),
+        req.body,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) { next(e) }
+  },
+)
+
+medecinRouter.post('/post-op/:patientId/rouvrir', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await postOpService.rouvrirSuivi(
+      { id: req.auth!.sub, role: 'medecin' },
+      paramToString(req.params.patientId),
+    )
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.post(
+  '/post-op/:patientId/demandes/:demandeId/reponse',
+  validate(postOpReponseSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.answerDemande(
+        { id: req.auth!.sub, role: 'medecin' },
+        paramToString(req.params.patientId),
+        paramToString(req.params.demandeId),
+        req.body.reponse,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) { next(e) }
+  },
+)
+
+medecinRouter.post(
+  '/post-op/:patientId/notes',
+  validate(postOpNoteSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.addNoteInterne(
+        { id: req.auth!.sub, role: 'medecin' },
+        paramToString(req.params.patientId),
+        req.body,
+      )
+      res.status(201).json({ ok: true, ...result })
+    } catch (e) { next(e) }
+  },
+)
+
+medecinRouter.delete('/post-op/:patientId/notes/:noteId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await postOpService.deleteNoteInterne(
+      paramToString(req.params.patientId),
+      paramToString(req.params.noteId),
+    )
     res.json({ ok: true, ...result })
   } catch (e) { next(e) }
 })

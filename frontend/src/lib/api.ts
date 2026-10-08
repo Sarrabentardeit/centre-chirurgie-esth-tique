@@ -419,14 +419,65 @@ export interface PostOpQuestionnaire {
   reponduAt: string
 }
 
+export interface PostOpDemande {
+  id: string
+  message: string
+  createdAt: string
+  reponse?: string | null
+  reponseAt?: string | null
+  reponsePar?: string | null
+  reponseParRole?: 'medecin' | 'gestionnaire' | null
+}
+
+/** Visible uniquement du back-office (jamais renvoyée à la patiente). */
+export interface PostOpNoteInterne {
+  id: string
+  type: 'deroulement' | 'depense'
+  texte: string
+  /** Écart en TND : positif = dépense supplémentaire, négatif = économie. */
+  montant: number | null
+  auteur: string
+  auteurRole: 'medecin' | 'gestionnaire'
+  createdAt: string
+}
+
 export interface SuiviPostOp {
   patientId: string
   dateIntervention: string
   compteRendu: string | null
   photos: PostOpPhoto[]
   questionnaire: PostOpQuestionnaire | null
+  retourMessageAt?: string | null
+  compteRenduDemandeAt?: string | null
+  demandes?: PostOpDemande[]
+  notesInternes?: PostOpNoteInterne[]
+  clotureAt?: string | null
+  /** Interne : jamais renvoyé à la patiente. */
+  clotureRemarques?: string | null
+  cloturePar?: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface PostOpStaffApi {
+  sendRetour: (
+    patientId: string,
+    message?: string,
+    opts?: { markOnly?: boolean },
+  ) => Promise<{
+    suivi: SuiviPostOp
+    whatsappUrl: string | null
+    hasPhone: boolean
+  }>
+  getWhatsapp: (patientId: string) => Promise<{ whatsappUrl: string | null; hasPhone: boolean }>
+  cloturer: (patientId: string, remarques?: string) => Promise<{ suivi: SuiviPostOp; status: string }>
+  rouvrir: (patientId: string) => Promise<{ suivi: SuiviPostOp; status: string }>
+  answerDemande: (patientId: string, demandeId: string, reponse: string) => Promise<{ suivi: SuiviPostOp }>
+  addNote: (
+    patientId: string,
+    body: { type: 'deroulement' | 'depense'; texte: string; montant?: number | null },
+  ) => Promise<{ suivi: SuiviPostOp }>
+  deleteNote: (patientId: string, noteId: string) => Promise<{ suivi: SuiviPostOp }>
 }
 
 export interface PostOpPatient {
@@ -692,6 +743,17 @@ export const patientApi = {
     request<{ ok: true; suivi: SuiviPostOp }>('/patient/post-op/questionnaire', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  addPostOpDemande: (message: string) =>
+    request<{ ok: true; suivi: SuiviPostOp }>('/patient/post-op/demandes', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+
+  requestCompteRendu: () =>
+    request<{ ok: true; suivi: SuiviPostOp }>('/patient/post-op/compte-rendu/demande', {
+      method: 'POST',
     }),
 
   getMyPlanningSejour: () =>
@@ -1343,7 +1405,59 @@ export interface TndEurRateResponse {
   source: 'exchangerate-api' | 'fallback'
 }
 
+function makePostOpStaffApi(prefix: '/medecin' | '/gestionnaire'): PostOpStaffApi {
+  return {
+    sendRetour: (patientId, message, opts) =>
+      request<{ ok: true; suivi: SuiviPostOp; whatsappUrl: string | null; hasPhone: boolean }>(
+        `${prefix}/post-op/${patientId}/retour`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ...(message?.trim() ? { message } : {}),
+            ...(opts?.markOnly ? { markOnly: true } : {}),
+          }),
+        },
+      ),
+    getWhatsapp: (patientId) =>
+      request<{ ok: true; whatsappUrl: string | null; hasPhone: boolean }>(`${prefix}/post-op/${patientId}/whatsapp`),
+    cloturer: (patientId, remarques) =>
+      request<{ ok: true; suivi: SuiviPostOp; status: string }>(`${prefix}/post-op/${patientId}/cloture`, {
+        method: 'POST',
+        body: JSON.stringify(remarques?.trim() ? { remarques } : {}),
+      }),
+    rouvrir: (patientId) =>
+      request<{ ok: true; suivi: SuiviPostOp; status: string }>(`${prefix}/post-op/${patientId}/rouvrir`, {
+        method: 'POST',
+      }),
+    answerDemande: (patientId, demandeId, reponse) =>
+      request<{ ok: true; suivi: SuiviPostOp }>(
+        `${prefix}/post-op/${patientId}/demandes/${demandeId}/reponse`,
+        { method: 'POST', body: JSON.stringify({ reponse }) },
+      ),
+    addNote: (patientId, body) =>
+      request<{ ok: true; suivi: SuiviPostOp }>(`${prefix}/post-op/${patientId}/notes`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    deleteNote: (patientId, noteId) =>
+      request<{ ok: true; suivi: SuiviPostOp }>(`${prefix}/post-op/${patientId}/notes/${noteId}`, {
+        method: 'DELETE',
+      }),
+  }
+}
+
+export const medecinPostOpApi = makePostOpStaffApi('/medecin')
+export const gestionnairePostOpApi = makePostOpStaffApi('/gestionnaire')
+
 export const gestionnaireApi = {
+  getPostOp: (patientId: string) =>
+    request<{
+      ok: true
+      suivi: SuiviPostOp | null
+      patient: { id: string; status: string; fullName: string }
+      dateInterventionLogistique: string | null
+    }>(`/gestionnaire/post-op/${patientId}`),
+
   /** Taux TND → EUR (cache 24 h côté serveur, gestionnaire uniquement). */
   getTauxEur: () => request<TndEurRateResponse>('/gestionnaire/taux-eur'),
 

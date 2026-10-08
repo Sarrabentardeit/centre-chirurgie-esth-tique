@@ -695,6 +695,17 @@ export default function DossierPatientPage() {
                 submittedAt={formulaire.submittedAt}
                 createdAt={formulaire.createdAt}
                 payload={(formulaire.payload ?? {}) as Record<string, unknown>}
+                onAddFiles={async (kind, files) => {
+                  if (!id) return
+                  const current = (formulaire.payload ?? {}) as Record<string, unknown>
+                  const key = kind === 'photos' ? 'photos' : 'documentsPDF'
+                  const existing = Array.isArray(current[key]) ? (current[key] as unknown[]) : []
+                  const res = await medecinApi.updatePatientFormulaire(id, {
+                    ...current,
+                    [key]: [...existing, ...files.map((f) => f.url)],
+                  })
+                  setPatient(res.patient as PatientDetail)
+                }}
               />
             </div>
           )}

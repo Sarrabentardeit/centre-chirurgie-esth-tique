@@ -11,8 +11,11 @@ import {
   repondreDevisSchema,
   repondreRendezVousSchema,
   renderDevisPdfSchema,
+  postOpDemandeSchema,
 } from './patient.schema.js'
 import * as patientService from './patient.service.js'
+import * as postOpService from '../../lib/postOp.js'
+import { toPatientSuivi } from '../../lib/postOp.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 
 const storagePostOp = multer.diskStorage({
@@ -268,6 +271,33 @@ patientRouter.post(
     try {
       const result = await patientService.submitQuestionnaire(req.auth!.sub, req.body)
       res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+// POST /api/patient/post-op/demandes — poser une question / faire une demande à l'équipe
+patientRouter.post(
+  '/post-op/demandes',
+  validate(postOpDemandeSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.addPatientDemande(req.auth!.sub, req.body.message)
+      res.status(201).json({ ok: true, suivi: toPatientSuivi(result.suivi) })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+// POST /api/patient/post-op/compte-rendu/demande — demander son compte rendu opératoire
+patientRouter.post(
+  '/post-op/compte-rendu/demande',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.requestCompteRendu(req.auth!.sub)
+      res.json({ ok: true, suivi: toPatientSuivi(result.suivi) })
     } catch (e) {
       next(e)
     }

@@ -1,20 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  Camera, Download, Upload, Bell, CheckCircle2, Star, AlertCircle,
-  Clock, FileText, RefreshCw, Users, ChevronRight, ImageIcon, X,
-  Stethoscope, CalendarDays,
+  Download, Upload, CheckCircle2, Star, AlertCircle,
+  Clock, FileText, RefreshCw, Users, X,
+  Stethoscope, Send,
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Input } from '@/components/ui/input'
 import { useAuthStore } from '@/store/authStore'
-import { medecinApi, patientApi, uploadPostOpPhoto, uploadMedecinFile } from '@/lib/api'
+import { medecinApi, medecinPostOpApi, patientApi, uploadPostOpPhoto } from '@/lib/api'
 import type { SuiviPostOp, PostOpPatient } from '@/lib/api'
+import { PostOpSection } from '@/components/dossier/PostOpSection'
+import {
+  PostOpAvisSection,
+  PostOpDemandesSection,
+  PostOpPhotosGallery,
+} from '@/components/dossier/PostOpStaffSections'
+import { daysSinceDate, photoDayOffset } from '@/lib/postOpSteps'
 import { formatDate, formatRelative } from '@/lib/utils'
 import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
 import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
@@ -22,43 +25,21 @@ import { queryKeys } from '@/lib/queryKeys'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getInitials(name: string) {
-  return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
-}
-
-function daysSince(dateStr: string) {
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
+function displayName(name: string) {
+  const trimmed = name.trim()
+  const letters = trimmed.replace(/[^\p{L}]/gu, '')
+  if (!letters) return trimmed
+  const uniform = letters === letters.toUpperCase() || letters === letters.toLowerCase()
+  if (!uniform) return trimmed
+  return trimmed
+    .toLocaleLowerCase('fr')
+    .replace(/(^|[\s'-])(\p{L})/gu, (_, sep: string, c: string) => sep + c.toLocaleUpperCase('fr'))
 }
 
 function getBeforeAfterPhotos(suivi: SuiviPostOp | null) {
   if (!suivi || !suivi.photos || suivi.photos.length < 2) return null
   const sorted = [...suivi.photos].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   return { before: sorted[0], after: sorted[sorted.length - 1] }
-}
-
-function getRecoveryScore(suivi: SuiviPostOp | null): number {
-  if (!suivi) return 0
-  const days = Math.max(0, daysSince(suivi.dateIntervention))
-  const photos = suivi.photos ?? []
-  const questionnaire = suivi.questionnaire
-
-  const satisfactionScore = questionnaire ? Math.round((questionnaire.note / 5) * 40) : 10
-  const latestPhoto = photos
-    .map((p) => new Date(p.date))
-    .sort((a, b) => b.getTime() - a.getTime())[0]
-  const photoRecencyDays = latestPhoto ? Math.max(0, Math.floor((Date.now() - latestPhoto.getTime()) / 86400000)) : 999
-  const photoScore = photos.length === 0
-    ? 5
-    : photoRecencyDays <= 7
-      ? 30
-      : photoRecencyDays <= 14
-        ? 22
-        : 12
-
-  const adherenceScore = Math.min(15, photos.length * 3)
-  const timelineScore = days < 7 ? 10 : days < 30 ? 15 : days < 90 ? 20 : 15
-
-  return Math.max(0, Math.min(100, satisfactionScore + photoScore + adherenceScore + timelineScore))
 }
 
 // ─── Vue Médecin ─────────────────────────────────────────────────────────────
@@ -69,18 +50,13 @@ function MedecinView() {
   const [error, setError]       = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [page, setPage] = useState(1)
+  const [tab, setTab] = useState<'cours' | 'clotures'>('cours')
 
-  // Form création/édition suivi
   const [dateIntervention, setDateIntervention] = useState('')
   const [compteRendu, setCompteRendu]           = useState('')
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-
-  // Upload photo
-  const [uploading, setUploading] = useState(false)
-  const [photoNote, setPhotoNote] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async (opts?: { useCache?: boolean }) => {
     const key = queryKeys.postOpPatients()
@@ -92,7 +68,8 @@ function MedecinView() {
       const res = await cachedFetch(key, () => medecinApi.getPostOpPatients(), { force })
       setPatients(res.patients)
       if (res.patients.length > 0 && !selectedId) {
-        setSelectedId(res.patients[0].id)
+        const firstOpen = res.patients.find((p) => !p.suiviPostOp?.clotureAt && p.status !== 'suivi_termine')
+        setSelectedId((firstOpen ?? res.patients[0]).id)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -105,13 +82,38 @@ function MedecinView() {
 
   const selected = patients.find((p) => p.id === selectedId) ?? null
   const suivi    = selected?.suiviPostOp ?? null
-  const beforeAfter = getBeforeAfterPhotos(suivi)
-  const recoveryScore = getRecoveryScore(suivi)
+
+  const isClosed = (p: PostOpPatient) => Boolean(p.suiviPostOp?.clotureAt) || p.status === 'suivi_termine'
+  const closedCount = patients.filter(isClosed).length
+  const openCount = patients.length - closedCount
+  const tabPatients = useMemo(() => {
+    const needsAction = (p: PostOpPatient) => {
+      const pending = (p.suiviPostOp?.demandes ?? []).filter((d) => !d.reponse).length
+      const cr = Boolean(p.suiviPostOp?.compteRenduDemandeAt) && !p.suiviPostOp?.compteRendu
+      return (pending > 0 ? 2 : 0) + (cr ? 1 : 0)
+    }
+    return patients
+      .filter((p) => (tab === 'clotures' ? isClosed(p) : !isClosed(p)))
+      .sort((a, b) => {
+        const byAction = needsAction(b) - needsAction(a)
+        if (byAction !== 0) return byAction
+        const ja = a.suiviPostOp ? daysSinceDate(a.suiviPostOp.dateIntervention) : 9999
+        const jb = b.suiviPostOp ? daysSinceDate(b.suiviPostOp.dateIntervention) : 9999
+        return ja - jb
+      })
+  }, [patients, tab])
 
   const { slice: pagePatients, totalPages, page: safePage, total } = useMemo(
-    () => paginateSlice(patients, page, LIST_PAGE_SIZE),
-    [patients, page],
+    () => paginateSlice(tabPatients, page, LIST_PAGE_SIZE),
+    [tabPatients, page],
   )
+
+  const handleTabChange = (next: 'cours' | 'clotures') => {
+    setTab(next)
+    setPage(1)
+    const first = patients.find((p) => (next === 'clotures' ? isClosed(p) : !isClosed(p)))
+    if (first) handleSelectPatient(first.id)
+  }
 
   const handleSelectPatient = (id: string) => {
     setSelectedId(id)
@@ -149,26 +151,12 @@ function MedecinView() {
     }
   }
 
-  const handleUploadPhoto = async (file: File) => {
-    if (!selectedId) return
-    setUploading(true)
-    try {
-      // 1. Upload fichier
-      const uploaded = await uploadMedecinFile(file)
-      // 2. Enregistrer dans le suivi
-      const res = await medecinApi.addPostOpPhoto(selectedId, {
-        url: uploaded.url,
-        note: photoNote || undefined,
-      })
-      setPhotoNote('')
-      setPatients((prev) =>
-        prev.map((p) => p.id === selectedId ? { ...p, suiviPostOp: res.suivi } : p)
-      )
-    } catch {
-      setSaveError('Erreur lors de l\'upload de la photo.')
-    } finally {
-      setUploading(false)
-    }
+  const handleSuiviChange = (next: SuiviPostOp) => {
+    if (!selected) return
+    setPatients((prev) =>
+      prev.map((p) => (p.id === selected.id ? { ...p, suiviPostOp: next, status: p.status === 'intervention' ? 'post_op' : p.status } : p)),
+    )
+    if (!dateIntervention) setDateIntervention(next.dateIntervention.slice(0, 10))
   }
 
   if (loading) {
@@ -199,267 +187,170 @@ function MedecinView() {
           <Users className="h-8 w-8 text-muted-foreground" />
         </div>
         <p className="font-semibold">Aucun patient en suivi post-opératoire</p>
-        <p className="text-sm text-muted-foreground">Les patients passés en status "intervention" ou "post_op" apparaîtront ici.</p>
+        <p className="text-sm text-muted-foreground">Les patients passés en statut « intervention » ou « post-op » apparaîtront ici.</p>
       </div>
     )
   }
 
+  const jours = suivi ? daysSinceDate(suivi.dateIntervention) : null
+
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold">Suivi Post-Opératoire</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">{patients.length} patient(s) en suivi</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} className="gap-2">
+    <div className="max-w-6xl mx-auto">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Suivi post-opératoire</h2>
+        <Button variant="ghost" size="sm" onClick={() => void load()} className="gap-2 text-muted-foreground">
           <RefreshCw className="h-4 w-4" /> Actualiser
         </Button>
       </div>
 
-      {/* Sélection patient */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
-            <Users className="h-4 w-4" /> Patients en suivi
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap gap-2">
+      <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="rounded-xl border bg-white overflow-hidden lg:sticky lg:top-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5">
+          <p className="text-sm font-medium">Patientes</p>
+          <div className="inline-flex max-w-full rounded-md border bg-slate-50 p-0.5 text-xs">
+            {([
+              ['cours', `En cours ${openCount}`],
+              ['clotures', `Clôturés ${closedCount}`],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => handleTabChange(value)}
+                className={`whitespace-nowrap rounded px-2 py-1 ${
+                  tab === value ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-[1fr_auto] gap-2 border-b bg-slate-50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span>Patiente</span>
+          <span>Jour</span>
+        </div>
+        {pagePatients.length === 0 ? (
+          <p className="px-3 py-6 text-sm text-muted-foreground">
+            {tab === 'clotures' ? 'Aucun dossier clôturé.' : 'Aucun suivi en cours.'}
+          </p>
+        ) : (
+          <ul className="max-h-72 overflow-y-auto lg:max-h-[calc(100vh-8rem)]">
             {pagePatients.map((p) => {
-              const jours = p.suiviPostOp
-                ? daysSince(p.suiviPostOp.dateIntervention)
-                : null
-              const isSelected = p.id === selectedId
+              const j = p.suiviPostOp ? daysSinceDate(p.suiviPostOp.dateIntervention) : null
+              const pending = (p.suiviPostOp?.demandes ?? []).filter((d) => !d.reponse).length
+              const crAsked = Boolean(p.suiviPostOp?.compteRenduDemandeAt) && !p.suiviPostOp?.compteRendu
+              const selectedRow = p.id === selectedId
+              const todo = [
+                pending > 0 ? (pending > 1 ? `${pending} questions` : '1 question') : null,
+                crAsked ? 'Compte rendu' : null,
+              ].filter(Boolean).join(' · ')
               return (
-                <button
-                  key={p.id}
-                  onClick={() => handleSelectPatient(p.id)}
-                  className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 text-sm transition-all ${
-                    isSelected
-                      ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-sm'
-                      : 'border-border hover:bg-muted/60'
-                  }`}
-                >
-                  <Avatar className="h-7 w-7">
-                    <AvatarFallback className={`text-[10px] font-bold ${isSelected ? 'bg-brand-200 text-brand-800' : 'bg-muted text-muted-foreground'}`}>
-                      {getInitials(p.user.fullName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="font-medium">{p.user.fullName}</span>
-                  {jours !== null && (
-                    <Badge className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">J+{jours}</Badge>
-                  )}
-                  {!p.suiviPostOp && (
-                    <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200">À créer</Badge>
-                  )}
-                </button>
+                <li key={p.id} className="border-b last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectPatient(p.id)}
+                    className={`grid w-full grid-cols-[1fr_auto] items-start gap-2 px-3 py-2.5 text-left border-l-2 ${
+                      selectedRow
+                        ? 'border-l-brand-600 bg-brand-50/60'
+                        : 'border-l-transparent hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-slate-900">{displayName(p.user.fullName)}</span>
+                      <span className="block truncate font-mono text-[11px] text-muted-foreground">{p.dossierNumber}</span>
+                      {todo && <span className="mt-0.5 block text-[11px] text-amber-800">{todo}</span>}
+                    </span>
+                    <span className="pt-0.5 text-xs tabular-nums text-slate-600">{j !== null ? `J+${j}` : '—'}</span>
+                  </button>
+                </li>
               )
             })}
-          </div>
-          <PaginationBar
-            page={safePage}
-            totalPages={totalPages}
-            total={total}
-            pageSize={LIST_PAGE_SIZE}
-            onPageChange={setPage}
-            className="border-t-0 px-0 bg-transparent"
-          />
-        </CardContent>
-      </Card>
+          </ul>
+        )}
+        <PaginationBar
+          page={safePage}
+          totalPages={totalPages}
+          total={total}
+          pageSize={LIST_PAGE_SIZE}
+          onPageChange={setPage}
+        />
+      </div>
 
       {selected && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Panneau gauche : création/édition */}
-          <Card>
-            <CardHeader className="pb-3" style={{ background: 'linear-gradient(135deg, #062a30 0%, #0d3d45 100%)', borderRadius: '0.75rem 0.75rem 0 0' }}>
-              <div className="flex items-center gap-3">
-                <Avatar className="h-10 w-10 ring-2 ring-white/20">
-                  <AvatarFallback className="bg-white/15 text-white text-sm font-bold">
-                    {getInitials(selected.user.fullName)}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <CardTitle className="text-white text-base">{selected.user.fullName}</CardTitle>
-                  <p className="text-white/60 text-xs mt-0.5 font-mono">{selected.dossierNumber}</p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-4">
-              {saveError && (
-                <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive border border-destructive/20">
-                  <AlertCircle className="h-4 w-4 shrink-0" /> {saveError}
-                </div>
-              )}
+        <div className="rounded-xl border bg-white px-4 sm:px-5 divide-y">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 py-4">
+            <div>
+              <p className="font-medium">{displayName(selected.user.fullName)}</p>
+              <p className="text-xs text-muted-foreground">{selected.dossierNumber}</p>
+            </div>
+            {suivi && (
+              <p className="text-sm text-muted-foreground">
+                Intervention le {formatDate(suivi.dateIntervention)} · J+{jours}
+              </p>
+            )}
+          </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                  <CalendarDays className="h-3.5 w-3.5" /> Date d'intervention *
-                </label>
-                <Input
-                  type="date"
-                  value={dateIntervention}
-                  onChange={(e) => setDateIntervention(e.target.value)}
-                  className="h-9"
-                />
-              </div>
+          {saveError && (
+            <div className="flex items-center gap-2 py-3 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" /> {saveError}
+            </div>
+          )}
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                  <FileText className="h-3.5 w-3.5" /> Compte rendu opératoire
-                </label>
-                <Textarea
-                  rows={6}
-                  value={compteRendu}
-                  onChange={(e) => setCompteRendu(e.target.value)}
-                  placeholder="Détails de l'intervention, observations, recommandations post-opératoires..."
-                  className="resize-none text-sm leading-relaxed"
-                />
-              </div>
+          {!suivi ? (
+            <p className="py-4 text-sm text-muted-foreground">Pas encore de suivi pour cette patiente.</p>
+          ) : (
+          <>
+          <PostOpPhotosGallery suivi={suivi} />
 
+          <PostOpDemandesSection
+            patientId={selected.id}
+            suivi={suivi}
+            api={medecinPostOpApi}
+            onChange={handleSuiviChange}
+          />
+
+          <PostOpSection
+            title="Compte rendu"
+            note={
+              suivi?.compteRendu
+                ? 'Rédigé'
+                : suivi?.compteRenduDemandeAt
+                  ? 'Demandé par la patiente'
+                  : 'Uniquement sur demande'
+            }
+          >
+            {suivi?.compteRenduDemandeAt && !suivi.compteRendu && (
+              <p className="text-sm text-slate-700">
+                Demandé le {formatDate(suivi.compteRenduDemandeAt)}.
+              </p>
+            )}
+            <Textarea
+              rows={7}
+              value={compteRendu}
+              onChange={(e) => setCompteRendu(e.target.value)}
+              placeholder="Détails de l'intervention, observations, recommandations post-opératoires…"
+              className="resize-y text-sm leading-relaxed"
+            />
+            <div className="flex flex-wrap items-center gap-3">
               <Button
-                variant="brand" className="w-full gap-2"
+                variant="brand"
+                className="gap-2"
                 onClick={() => void handleSave()}
                 disabled={!dateIntervention || saving}
               >
                 {saved
-                  ? <><CheckCircle2 className="h-4 w-4" /> Sauvegardé</>
-                  : <>{saving ? 'Sauvegarde...' : suivi ? 'Mettre à jour' : 'Créer le suivi'}</>
-                }
+                  ? <><CheckCircle2 className="h-4 w-4" /> Enregistré</>
+                  : saving ? 'Enregistrement…' : 'Enregistrer le compte rendu'}
               </Button>
+            </div>
+          </PostOpSection>
 
-              {suivi && (
-                <p className="text-[11px] text-muted-foreground text-center">
-                  Créé {formatRelative(suivi.createdAt)} · Mis à jour {formatRelative(suivi.updatedAt)}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Panneau droit : photos */}
-          {suivi && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Camera className="h-4 w-4 text-brand-600" /> Photos de suivi
-                  <Badge className="ml-auto bg-muted text-muted-foreground border">{suivi.photos.length}</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-emerald-700">Score de récupération</p>
-                  <div className="flex items-center justify-between mt-1">
-                    <p className="text-lg font-bold text-emerald-700">{recoveryScore}/100</p>
-                    <p className="text-xs text-emerald-700">
-                      {recoveryScore >= 80 ? 'Excellente évolution' : recoveryScore >= 60 ? 'Évolution favorable' : 'Suivi à renforcer'}
-                    </p>
-                  </div>
-                </div>
-
-                {beforeAfter && (
-                  <div className="rounded-xl border border-border p-2.5">
-                    <p className="text-xs font-semibold mb-2">Comparaison avant / après</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <img src={beforeAfter.before.url} alt="Avant" className="w-full aspect-square object-cover rounded-lg border" />
-                        <p className="text-[10px] text-muted-foreground">Avant ({formatDate(beforeAfter.before.date)})</p>
-                      </div>
-                      <div className="space-y-1">
-                        <img src={beforeAfter.after.url} alt="Après" className="w-full aspect-square object-cover rounded-lg border" />
-                        <p className="text-[10px] text-muted-foreground">Après ({formatDate(beforeAfter.after.date)})</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {suivi.photos.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-8 text-center">
-                    <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
-                    <p className="text-sm text-muted-foreground">Aucune photo de suivi</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {suivi.photos.map((photo, i) => (
-                      <div key={i} className="relative rounded-xl overflow-hidden border bg-muted">
-                        <img src={photo.url} alt={`Photo suivi ${i + 1}`} className="w-full aspect-square object-cover" />
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                          <p className="text-white text-[10px] font-medium">J+{daysSince(suivi.dateIntervention) - daysSince(photo.date)}</p>
-                          {photo.note && <p className="text-white/80 text-[10px] truncate">{photo.note}</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Zone d'upload */}
-                <div className="space-y-2 pt-1">
-                  <Input
-                    placeholder="Note pour la photo (optionnel)"
-                    value={photoNote}
-                    onChange={(e) => setPhotoNote(e.target.value)}
-                    className="h-8 text-sm"
-                  />
-                  <label
-                    className={`block border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
-                      uploading ? 'border-brand-300 bg-brand-50' : 'border-border hover:border-brand-400'
-                    }`}
-                  >
-                    <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1.5" />
-                    <p className="text-xs font-medium">{uploading ? 'Upload en cours...' : 'Ajouter une photo'}</p>
-                    <input
-                      ref={fileInputRef}
-                      type="file" accept="image/*" multiple className="hidden"
-                      onChange={async (e) => {
-                        if (!e.target.files?.length) return
-                        for (const file of Array.from(e.target.files)) {
-                          await handleUploadPhoto(file)
-                        }
-                        e.currentTarget.value = ''
-                      }}
-                    />
-                  </label>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Questionnaire de satisfaction */}
-          {suivi && (
-            <Card className="lg:col-span-2">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Star className="h-4 w-4 text-amber-500" /> Questionnaire de satisfaction
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {suivi.questionnaire ? (
-                  <div className="flex items-center gap-4">
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star key={s} className={`h-5 w-5 ${s <= suivi.questionnaire!.note ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'}`} />
-                      ))}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold">{suivi.questionnaire.note}/5</p>
-                      {suivi.questionnaire.commentaire && (
-                        <p className="text-sm text-muted-foreground italic mt-0.5">"{suivi.questionnaire.commentaire}"</p>
-                      )}
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        Répondu {formatRelative(suivi.questionnaire.reponduAt)}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-800">
-                    <Clock className="h-4 w-4 shrink-0" />
-                    Le patient n'a pas encore rempli le questionnaire de satisfaction.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          <PostOpAvisSection suivi={suivi} />
+          </>
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }
@@ -467,21 +358,28 @@ function MedecinView() {
 // ─── Vue Patient ──────────────────────────────────────────────────────────────
 
 function PatientView() {
+  const navigate = useNavigate()
   const [suivi, setSuivi]   = useState<SuiviPostOp | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
 
-  // Questionnaire
   const [note, setNote]               = useState(0)
   const [commentaire, setCommentaire] = useState('')
   const [submitting, setSubmitting]   = useState(false)
   const [submitDone, setSubmitDone]   = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  // Upload
   const [uploading, setUploading]     = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const [demandeText, setDemandeText]     = useState('')
+  const [demandeSending, setDemandeSending] = useState(false)
+  const [demandeError, setDemandeError]   = useState<string | null>(null)
+
+  const [crRequesting, setCrRequesting] = useState(false)
+  const [crError, setCrError]           = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -500,7 +398,7 @@ function PatientView() {
 
   if (loading) {
     return (
-      <div className="max-w-xl mx-auto space-y-4">
+      <div className="max-w-3xl mx-auto space-y-4">
         <Skeleton className="h-32 rounded-2xl" />
         <Skeleton className="h-48 rounded-2xl" />
       </div>
@@ -509,7 +407,7 @@ function PatientView() {
 
   if (error) {
     return (
-      <div className="max-w-xl mx-auto flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+      <div className="max-w-3xl mx-auto flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
         <AlertCircle className="h-4 w-4 shrink-0" /> {error}
         <Button variant="ghost" size="sm" className="ml-auto text-destructive" onClick={() => void load()}>Réessayer</Button>
       </div>
@@ -525,19 +423,17 @@ function PatientView() {
         <h3 className="text-lg font-semibold mb-2">Suivi post-opératoire</h3>
         <p className="text-sm text-muted-foreground">
           {status === 'intervention'
-            ? 'Votre suivi sera disponible après votre intervention.'
-            : 'Cette section sera disponible après votre intervention.'}
+            ? 'Votre suivi sera ouvert par notre équipe dès votre retour à domicile. Vous pourrez alors nous envoyer vos photos et poser vos questions.'
+            : 'Cette rubrique sera disponible après votre intervention.'}
         </p>
       </div>
     )
   }
 
-  const jours = daysSince(suivi.dateIntervention)
-  const progress = Math.min(Math.round((jours / 180) * 100), 100)
+  const jours = daysSinceDate(suivi.dateIntervention)
   const daysLeft = 180 - jours
   const questionnaireAvailable = jours >= 1
   const beforeAfter = getBeforeAfterPhotos(suivi)
-  const recoveryScore = getRecoveryScore(suivi)
 
   const handleSubmitQuestionnaire = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -554,231 +450,276 @@ function PatientView() {
     }
   }
 
+  const handleSendDemande = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const message = demandeText.trim()
+    if (message.length < 2) return
+    setDemandeSending(true); setDemandeError(null)
+    try {
+      const res = await patientApi.addPostOpDemande(message)
+      setSuivi(res.suivi)
+      setDemandeText('')
+    } catch (err) {
+      setDemandeError(err instanceof Error ? err.message : 'Envoi impossible.')
+    } finally {
+      setDemandeSending(false)
+    }
+  }
+
+  const handleRequestCompteRendu = async () => {
+    setCrRequesting(true); setCrError(null)
+    try {
+      const res = await patientApi.requestCompteRendu()
+      setSuivi(res.suivi)
+    } catch (err) {
+      setCrError(err instanceof Error ? err.message : 'Demande impossible.')
+    } finally {
+      setCrRequesting(false)
+    }
+  }
+
   const handleUploadPhoto = async (file: File) => {
-    setUploading(true)
+    setUploading(true); setUploadError(null)
     try {
       const res = await uploadPostOpPhoto(file)
       if (res.suivi) setSuivi(res.suivi)
       setUploadedNames((p) => [...p, file.name])
-    } catch {
-      // silent — show fallback
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : `Envoi impossible pour « ${file.name} ».`)
     } finally {
       setUploading(false)
     }
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      {/* Carte progression */}
-      <div className="rounded-2xl border border-rose-200 overflow-hidden"
-        style={{ background: 'linear-gradient(135deg, #fff1f2 0%, #fce7f3 100%)' }}
-      >
-        <div className="px-4 sm:px-5 py-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-rose-800">Suivi Post-Opératoire</p>
-              <p className="text-xs text-rose-600 mt-0.5">Intervention le {formatDate(suivi.dateIntervention)}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="bg-rose-100 text-rose-700 border-rose-300 text-sm font-bold px-3">J+{jours}</Badge>
-              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-sm font-bold px-3">
-                Score {recoveryScore}/100
-              </Badge>
+    <div className="max-w-2xl mx-auto">
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold">Suivi post-opératoire</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Intervention le {formatDate(suivi.dateIntervention)} · J+{jours}
+          {daysLeft > 0 ? ` · ${daysLeft} jours de suivi restants` : ''}
+        </p>
+        {daysLeft <= 30 && daysLeft > 0 && (
+          <p className="text-sm text-slate-700 mt-2">Votre suivi offert se termine dans {daysLeft} jours.</p>
+        )}
+      </div>
+
+      <div className="rounded-xl border bg-white px-4 sm:px-5 divide-y">
+      <PostOpSection title="Photos" note={suivi.photos.length > 0 ? String(suivi.photos.length) : undefined}>
+        {beforeAfter && (
+          <div className="rounded-xl border border-border p-3">
+            <p className="text-xs font-semibold mb-2">Comparaison avant / après</p>
+            <div className="grid grid-cols-2 gap-3 max-w-md">
+              <div className="space-y-1">
+                <img src={beforeAfter.before.url} alt="Avant" className="w-full aspect-square object-cover rounded-lg border" />
+                <p className="text-[11px] text-muted-foreground">Première photo ({formatDate(beforeAfter.before.date)})</p>
+              </div>
+              <div className="space-y-1">
+                <img src={beforeAfter.after.url} alt="Après" className="w-full aspect-square object-cover rounded-lg border" />
+                <p className="text-[11px] text-muted-foreground">Dernière photo ({formatDate(beforeAfter.after.date)})</p>
+              </div>
             </div>
           </div>
-          <div className="space-y-1.5">
-            <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between text-xs text-rose-700">
-              <span>Suivi gratuit — 6 mois</span>
-              <span className="font-semibold">{progress}% ({Math.max(0, daysLeft)} jours restants)</span>
-            </div>
-            <Progress value={progress} className="h-2 bg-rose-200 [&>div]:bg-rose-500" />
+        )}
+
+        {suivi.photos.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {suivi.photos.map((photo, i) => (
+              <div key={i} className="relative rounded-xl overflow-hidden border bg-muted">
+                <img src={photo.url} alt={`Photo de suivi ${i + 1}`} className="w-full aspect-square object-cover" />
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                  <p className="text-white text-[11px] font-semibold">J+{photoDayOffset(suivi, photo)}</p>
+                  <p className="text-white/80 text-[10px]">{formatDate(photo.date)}</p>
+                </div>
+              </div>
+            ))}
           </div>
-          {daysLeft <= 30 && daysLeft > 0 && (
-            <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-100 border border-amber-300 p-3 text-xs text-amber-800">
-              <Bell className="h-4 w-4 shrink-0 mt-0.5" />
-              <p><strong>Attention :</strong> Votre suivi gratuit se termine dans {daysLeft} jours.</p>
+        )}
+
+        <label className={`block border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${uploading ? 'border-brand-300 bg-brand-50/50' : 'border-border hover:border-brand-400'}`}>
+          <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1.5" />
+          <p className="text-sm font-medium">{uploading ? 'Envoi en cours…' : 'Envoyer mes photos'}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">Une ou plusieurs images depuis votre téléphone ou votre ordinateur</p>
+          <input
+            type="file" accept="image/*" multiple className="hidden"
+            onChange={async (e) => {
+              const input = e.currentTarget
+              if (!input.files?.length) return
+              for (const file of Array.from(input.files)) {
+                await handleUploadPhoto(file)
+              }
+              input.value = ''
+            }}
+          />
+        </label>
+        {uploadError && (
+          <p className="text-xs text-destructive flex items-center gap-1">
+            <X className="h-3 w-3" /> {uploadError}
+          </p>
+        )}
+        {uploadedNames.map((f, i) => (
+          <p key={i} className="text-xs text-emerald-700 flex items-center gap-1">
+            <CheckCircle2 className="h-3.5 w-3.5" /> {f} — envoyée
+          </p>
+        ))}
+      </PostOpSection>
+
+      <PostOpSection title="Questions">
+        <form className="space-y-2" onSubmit={(e) => void handleSendDemande(e)}>
+          <Textarea
+            value={demandeText}
+            onChange={(e) => setDemandeText(e.target.value)}
+            placeholder="Écrivez votre question ou votre demande…"
+            className="min-h-[90px] resize-none"
+          />
+          {demandeError && (
+            <p className="text-xs text-destructive flex items-center gap-1">
+              <X className="h-3 w-3" /> {demandeError}
+            </p>
+          )}
+          <Button
+            variant="brand" type="submit" className="w-full sm:w-auto gap-2"
+            disabled={demandeSending || demandeText.trim().length < 2}
+          >
+            <Send className="h-4 w-4" />
+            {demandeSending ? 'Envoi…' : 'Envoyer ma demande'}
+          </Button>
+        </form>
+
+        {(suivi.demandes ?? []).length > 0 && (
+          <div className="space-y-3 pt-2 border-t">
+            {[...(suivi.demandes ?? [])].reverse().map((d) => (
+              <div key={d.id} className="rounded-xl border p-3 space-y-2">
+                <p className="text-[11px] text-muted-foreground">Vous · {formatRelative(d.createdAt)}</p>
+                <p className="text-sm whitespace-pre-wrap leading-relaxed">{d.message}</p>
+                {d.reponse ? (
+                  <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
+                    <p className="text-[11px] font-semibold text-emerald-700 mb-0.5">Réponse du cabinet</p>
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed text-emerald-900">{d.reponse}</p>
+                    {d.reponseAt && (
+                      <p className="text-[11px] text-emerald-700 mt-1">{formatRelative(d.reponseAt)}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-700 flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5" /> En attente de réponse
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </PostOpSection>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+        <PostOpSection title="Compte rendu">
+          {suivi.compteRendu ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground leading-relaxed line-clamp-4">{suivi.compteRendu}</p>
+              <Button
+                variant="brand" size="sm" className="w-full gap-2"
+                onClick={() => {
+                  const blob = new Blob([suivi.compteRendu!], { type: 'text/plain' })
+                  const a = document.createElement('a')
+                  a.href = URL.createObjectURL(blob)
+                  a.download = 'compte-rendu-operatoire.txt'
+                  a.click()
+                }}
+              >
+                <Download className="h-4 w-4" /> Télécharger
+              </Button>
+            </div>
+          ) : suivi.compteRenduDemandeAt ? (
+            <div className="flex items-start gap-2 rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2.5 text-sm text-indigo-800">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+              <p>
+                Demande envoyée le {formatDate(suivi.compteRenduDemandeAt)}. Le Dr vous le transmettra dès qu’il sera rédigé.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Vous en avez besoin (assurance, médecin traitant…) ? Faites-en la demande, le Dr le rédigera pour vous.
+              </p>
+              {crError && <p className="text-xs text-destructive">{crError}</p>}
+              <Button
+                variant="outline" size="sm" className="w-full gap-2"
+                disabled={crRequesting}
+                onClick={() => void handleRequestCompteRendu()}
+              >
+                <FileText className="h-4 w-4" />
+                {crRequesting ? 'Envoi…' : 'Demander mon compte rendu'}
+              </Button>
             </div>
           )}
-        </div>
-      </div>
+        </PostOpSection>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Photos */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Camera className="h-4 w-4 text-brand-600" /> Photos de suivi
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {beforeAfter && (
-              <div className="rounded-xl border border-border p-2.5">
-                <p className="text-xs font-semibold mb-2">Comparaison avant / après</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <img src={beforeAfter.before.url} alt="Avant" className="w-full aspect-square object-cover rounded-lg border" />
-                    <p className="text-[10px] text-muted-foreground">Avant ({formatDate(beforeAfter.before.date)})</p>
-                  </div>
-                  <div className="space-y-1">
-                    <img src={beforeAfter.after.url} alt="Après" className="w-full aspect-square object-cover rounded-lg border" />
-                    <p className="text-[10px] text-muted-foreground">Après ({formatDate(beforeAfter.after.date)})</p>
-                  </div>
-                </div>
+        <PostOpSection title="Votre avis">
+          {suivi.questionnaire ? (
+            <div className="space-y-2">
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <Star key={s} className={`h-5 w-5 ${s <= suivi.questionnaire!.note ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'}`} />
+                ))}
               </div>
-            )}
-
-            {suivi.photos.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                Envoyez vos premières photos de suivi.
+              {suivi.questionnaire.commentaire && (
+                <p className="text-sm text-muted-foreground italic">« {suivi.questionnaire.commentaire} »</p>
+              )}
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3 text-emerald-500" /> Réponse enregistrée, merci.
               </p>
-            )}
-            {suivi.photos.map((photo, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-xl border p-3">
-                <img
-                  src={photo.url} alt={`Photo suivi ${i + 1}`}
-                  className="h-14 w-14 rounded-lg object-cover shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">Photo J+{daysSince(suivi.dateIntervention) - daysSince(photo.date)}</p>
-                  <p className="text-xs text-muted-foreground">{formatDate(photo.date)}</p>
-                  {photo.note && <p className="text-xs text-emerald-700 mt-0.5">{photo.note}</p>}
-                </div>
-              </div>
-            ))}
-
-            <label className={`block border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${uploading ? 'border-brand-300 bg-brand-50/50' : 'border-border hover:border-brand-400'}`}>
-              <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1.5" />
-              <p className="text-xs font-medium">{uploading ? 'Upload en cours...' : 'Envoyer une photo'}</p>
-              <input
-                type="file" accept="image/*" multiple className="hidden"
-                onChange={async (e) => {
-                  if (!e.target.files?.length) return
-                  for (const file of Array.from(e.target.files)) {
-                    await handleUploadPhoto(file)
-                  }
-                  e.currentTarget.value = ''
-                }}
-              />
-            </label>
-            {uploadedNames.map((f, i) => (
-              <p key={i} className="text-xs text-emerald-700 flex items-center gap-1">
-                <CheckCircle2 className="h-3.5 w-3.5" /> {f} — envoyée
-              </p>
-            ))}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          {/* Compte rendu */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-4 w-4 text-brand-600" /> Compte rendu opératoire
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {suivi.compteRendu ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground leading-relaxed line-clamp-4">{suivi.compteRendu}</p>
-                  <Button
-                    variant="brand" size="sm" className="w-full gap-2"
-                    onClick={() => {
-                      const blob = new Blob([suivi.compteRendu!], { type: 'text/plain' })
-                      const a = document.createElement('a')
-                      a.href = URL.createObjectURL(blob)
-                      a.download = `compte-rendu-operatoire.txt`
-                      a.click()
-                    }}
-                  >
-                    <Download className="h-4 w-4" /> Télécharger
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground text-center py-3">
-                  Le compte rendu sera disponible prochainement.
+            </div>
+          ) : questionnaireAvailable ? (
+            <form className="space-y-3" onSubmit={(e) => void handleSubmitQuestionnaire(e)}>
+              {submitError && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <X className="h-3 w-3" /> {submitError}
                 </p>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Questionnaire */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Star className="h-4 w-4 text-amber-500" /> Votre avis
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {suivi.questionnaire ? (
-                <div className="space-y-2">
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star key={s} className={`h-5 w-5 ${s <= suivi.questionnaire!.note ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'}`} />
-                    ))}
-                  </div>
-                  {suivi.questionnaire.commentaire && (
-                    <p className="text-sm text-muted-foreground italic">"{suivi.questionnaire.commentaire}"</p>
-                  )}
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3 text-emerald-500" /> Réponse soumise
-                  </p>
-                </div>
-              ) : questionnaireAvailable ? (
-                <form className="space-y-3" onSubmit={(e) => void handleSubmitQuestionnaire(e)}>
-                  {submitError && (
-                    <p className="text-xs text-destructive flex items-center gap-1">
-                      <X className="h-3 w-3" /> {submitError}
-                    </p>
-                  )}
-                  {submitDone && (
-                    <p className="text-xs text-emerald-700 flex items-center gap-1">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Merci pour votre avis !
-                    </p>
-                  )}
-                  <div>
-                    <p className="text-sm font-medium mb-2">Note sur 5</p>
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <button type="button" key={s} onClick={() => setNote(s)} aria-label={`${s} étoiles`}>
-                          <Star className={`h-6 w-6 transition-colors ${s <= note ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground hover:text-amber-300'}`} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <Textarea
-                    value={commentaire}
-                    onChange={(e) => setCommentaire(e.target.value)}
-                    placeholder="Partagez votre expérience..."
-                    className="min-h-[80px] resize-none"
-                  />
-                  <Button variant="brand" className="w-full gap-2" type="submit" disabled={note < 1 || submitting}>
-                    <CheckCircle2 className="h-4 w-4" />
-                    {submitting ? 'Envoi...' : 'Envoyer mon avis'}
-                  </Button>
-                </form>
-              ) : (
-                <div className="text-center py-3 space-y-2">
-                  <p className="text-sm text-muted-foreground">Le questionnaire sera disponible 24h après votre intervention.</p>
-                  <div className="flex items-center justify-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    <Clock className="h-3.5 w-3.5" /> Disponible dès demain
-                  </div>
-                </div>
+              {submitDone && (
+                <p className="text-xs text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Merci pour votre avis !
+                </p>
               )}
-            </CardContent>
-          </Card>
-        </div>
+              <div>
+                <p className="text-sm font-medium mb-2">Note sur 5</p>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((s) => (
+                    <button type="button" key={s} onClick={() => setNote(s)} aria-label={`${s} étoiles`}>
+                      <Star className={`h-6 w-6 transition-colors ${s <= note ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground hover:text-amber-300'}`} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Textarea
+                value={commentaire}
+                onChange={(e) => setCommentaire(e.target.value)}
+                placeholder="Partagez votre expérience…"
+                className="min-h-[80px] resize-none"
+              />
+              <Button variant="brand" className="w-full gap-2" type="submit" disabled={note < 1 || submitting}>
+                <CheckCircle2 className="h-4 w-4" />
+                {submitting ? 'Envoi…' : 'Envoyer mon avis'}
+              </Button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <Clock className="h-3.5 w-3.5 shrink-0" /> Le questionnaire sera disponible dès demain.
+            </div>
+          )}
+        </PostOpSection>
+      </div>
       </div>
 
-      {/* Lien dossier */}
+      <p className="mt-4 text-sm text-muted-foreground">
+        En cas de fièvre, douleur inhabituelle, saignement ou rougeur, contactez le cabinet. Cette page n’est pas un service d’urgence.
+      </p>
       <button
-        onClick={() => window.location.href = '/patient/dossier'}
-        className="w-full flex items-center justify-between rounded-2xl border px-4 py-3 hover:bg-muted/40 transition-colors"
+        type="button"
+        onClick={() => navigate('/patient/dossier')}
+        className="mt-3 text-sm text-slate-700 underline underline-offset-2"
       >
-        <div className="flex items-center gap-3 text-sm">
-          <FileText className="h-4 w-4 text-brand-600" />
-          <span className="font-medium">Voir mon dossier complet</span>
-        </div>
-        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        Voir mon dossier
       </button>
     </div>
   )

@@ -72,3 +72,24 @@ export const createPreDossierSchema = z.object({
   noteMedicale: z.string().max(500).optional(),
 })
 export type CreatePreDossierInput = z.infer<typeof createPreDossierSchema>
+
+export const postOpRetourSchema = z.object({
+  message: z.string().trim().max(3000).optional(),
+  /** Message déjà envoyé hors application : on enregistre seulement l'étape, sans rien renvoyer à la patiente. */
+  markOnly: z.boolean().optional(),
+})
+
+export const postOpClotureSchema = z.object({
+  remarques: z.string().trim().max(5000).optional(),
+})
+
+export const postOpReponseSchema = z.object({
+  reponse: z.string().trim().min(1, 'Réponse requise.').max(3000),
+})
+
+export const postOpNoteSchema = z.object({
+  type: z.enum(['deroulement', 'depense']),
+  texte: z.string().trim().min(1, 'Texte requis.').max(2000),
+  montant: z.number().finite().min(-1000000).max(1000000).nullable().optional(),
+})
+

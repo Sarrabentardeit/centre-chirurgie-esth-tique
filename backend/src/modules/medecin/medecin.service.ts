@@ -312,6 +312,7 @@ export async function getDashboardAlertes(medecinId: string) {
       },
     }),
     prisma.suiviPostOp.findMany({
+      where: { clotureAt: null },
       include: {
         patient: { include: { user: { select: { fullName: true } } } },
       },

@@ -461,6 +461,8 @@ model Logistique {
   accompagnateur   String?
   notesClinique    String?  @map("notes_clinique")
   notesLogistiques String?  @map("notes_logistiques")
+  /** Email gestionnaire « envoyer le planning », une fois, à J-7 de l'arrivée. */
+  rappelPlanningJ7At DateTime? @map("rappel_planning_j7_at")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 

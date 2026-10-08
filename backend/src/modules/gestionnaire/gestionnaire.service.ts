@@ -1901,13 +1901,21 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
     notes: '',
   })
 
+  const previousLog = await prisma.logistique.findUnique({
+    where: { patientId },
+    select: { dateArrivee: true },
+  })
+  const nextArrivee = input.dateArrivee ? new Date(input.dateArrivee) : null
+  const arrivalChanged = (previousLog?.dateArrivee?.getTime() ?? null) !== (nextArrivee?.getTime() ?? null)
+
   const row = await prisma.logistique.upsert({
     where: { patientId },
     update: {
-      dateArrivee: input.dateArrivee ? new Date(input.dateArrivee) : null,
+      dateArrivee: nextArrivee,
       dateDepart: input.dateDepart ? new Date(input.dateDepart) : null,
       dateIntervention: input.dateIntervention ? new Date(input.dateIntervention) : null,
       notesLogistiques,
+      ...(arrivalChanged ? { rappelPlanningJ7At: null } : {}),
     },
     create: {
       patientId,

@@ -19,6 +19,7 @@ import { chatRouter } from './modules/chat/chat.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { startGoogleCalendarScheduler } from './modules/google-calendar/google-calendar.scheduler.js'
 import { startDevisRappelScheduler } from './modules/gestionnaire/devis-rappel.scheduler.js'
+import { startPlanningJ7RappelScheduler } from './modules/gestionnaire/planning-j7-rappel.scheduler.js'
 import { logMailerStatus } from './lib/mailer.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -155,6 +156,7 @@ const server = app.listen(env.PORT, () => {
   logMailerStatus()
   startGoogleCalendarScheduler()
   startDevisRappelScheduler()
+  startPlanningJ7RappelScheduler()
 })
 
 server.on('error', (err: NodeJS.ErrnoException) => {

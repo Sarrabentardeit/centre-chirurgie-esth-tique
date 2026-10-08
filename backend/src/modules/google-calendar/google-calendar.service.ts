@@ -32,6 +32,8 @@ export type GoogleCalendarListItem = {
   summary: string
   primary: boolean
   selected: boolean
+  /** owner | writer | reader | freeBusyReader */
+  accessRole: string
   backgroundColor?: string | null
 }
 
@@ -64,6 +66,7 @@ async function listCalendarEntries(calendar: calendar_v3.Calendar): Promise<Goog
         summary: item.summary ?? item.id,
         primary: !!item.primary,
         selected: item.selected !== false,
+        accessRole: item.accessRole ?? 'reader',
         backgroundColor: item.backgroundColor ?? null,
       })
     }
@@ -77,19 +80,81 @@ async function listSyncCalendarIds(calendar: calendar_v3.Calendar): Promise<stri
   return ids.length > 0 ? ids : ['primary']
 }
 
+function isWritableRole(role: string | null | undefined): boolean {
+  return role === 'owner' || role === 'writer'
+}
+
+/** Agenda sur lequel le téléphone affiche les rendez-vous : modifiable, et coché dans Google. */
 function pickDefaultPushCalendarId(
   entries: GoogleCalendarListItem[],
   syncIds: string[],
 ): string {
-  const primary = entries.find((e) => e.primary && syncIds.includes(e.id))
+  const inSync = (e: GoogleCalendarListItem) => syncIds.length === 0 || syncIds.includes(e.id)
+  const writable = entries.filter((e) => inSync(e) && isWritableRole(e.accessRole))
+  const visible = writable.filter((e) => e.selected)
+  const pool = visible.length > 0 ? visible : writable
+  const primary = pool.find((e) => e.primary)
   if (primary) return primary.id
-  const cabinet = entries.find(
-    (e) =>
-      syncIds.includes(e.id) &&
-      /intervention|cabinet/i.test(e.summary),
-  )
+  const cabinet = pool.find((e) => /intervention|cabinet|chennoufi/i.test(e.summary))
   if (cabinet) return cabinet.id
-  return syncIds[0] ?? 'primary'
+  return pool[0]?.id ?? 'primary'
+}
+
+function resolveCalendarAlias(calendarId: string, entries: GoogleCalendarListItem[]): string {
+  if (calendarId !== 'primary') return calendarId
+  return entries.find((e) => e.primary)?.id ?? calendarId
+}
+
+function isGoodPushCalendar(calendarId: string, entries: GoogleCalendarListItem[]): boolean {
+  const id = resolveCalendarAlias(calendarId, entries)
+  const entry = entries.find((e) => e.id === id)
+  if (!entry) return id === 'primary'
+  return isWritableRole(entry.accessRole) && entry.selected
+}
+
+async function ensureWritablePushCalendar(
+  medecinId: string,
+  currentId: string,
+  entries: GoogleCalendarListItem[],
+): Promise<string> {
+  const resolved = resolveCalendarAlias(currentId, entries)
+  if (isGoodPushCalendar(resolved, entries)) return resolved
+  const next = pickDefaultPushCalendarId(entries, entries.map((e) => e.id))
+  if (next !== currentId) {
+    await prisma.googleCalendarSync.update({
+      where: { medecinId },
+      data: { googleCalendarId: next },
+    })
+  }
+  return next
+}
+
+function googleHttpStatus(err: unknown): number | null {
+  if (!err || typeof err !== 'object') return null
+  const e = err as { code?: number | string; response?: { status?: number } }
+  if (typeof e.response?.status === 'number') return e.response.status
+  if (typeof e.code === 'number') return e.code
+  return null
+}
+
+/** Heure murale Tunisie, sans suffixe Z : Google rejette dateTime en UTC quand timeZone est aussi fourni. */
+function formatTunisDateTime(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Tunis',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '00'
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`
+}
+
+function isAppOwnedEvent(ev: { lastSyncedFrom: string | null; notes: string | null }): boolean {
+  return ev.lastSyncedFrom === 'app' || (ev.notes ?? '').includes('__src:logistique__')
 }
 
 async function getSyncCalendarIdsForMedecin(
@@ -108,10 +173,11 @@ export async function refreshSyncCalendarIds(medecinId: string): Promise<string[
   const entries = await listCalendarEntries(client.calendar)
   const ids = entries.map((e) => e.id)
   const syncIds = ids.length > 0 ? ids : ['primary']
+  const pushId = isGoodPushCalendar(client.sync.googleCalendarId, entries)
+    ? resolveCalendarAlias(client.sync.googleCalendarId, entries)
+    : pickDefaultPushCalendarId(entries, syncIds)
   const data: { syncCalendarIds: string[]; googleCalendarId?: string } = { syncCalendarIds: syncIds }
-  if (!syncIds.includes(client.sync.googleCalendarId)) {
-    data.googleCalendarId = pickDefaultPushCalendarId(entries, syncIds)
-  }
+  if (pushId !== client.sync.googleCalendarId) data.googleCalendarId = pushId
   await prisma.googleCalendarSync.update({ where: { medecinId }, data })
   return syncIds
 }
@@ -285,6 +351,10 @@ export async function setPushCalendar(medecinId: string, calendarId: string) {
   if (!syncIds.includes(calendarId)) {
     throw new AppError(400, 'INVALID_CALENDAR', 'Cet agenda n’est pas dans votre liste synchronisée.')
   }
+  const entry = (await listCalendarEntries(client.calendar)).find((c) => c.id === calendarId)
+  if (entry && !isWritableRole(entry.accessRole)) {
+    throw new AppError(400, 'CALENDAR_READ_ONLY', 'Cet agenda Google est en lecture seule. Choisissez l’agenda principal du téléphone.')
+  }
   await prisma.googleCalendarSync.update({
     where: { medecinId },
     data: { googleCalendarId: calendarId },
@@ -380,9 +450,10 @@ function toGoogleEventBody(ev: AgendaEventWithPatient): calendar_v3.Schema$Event
   }
 
   if (ev.allDay || ev.type === 'vacances') {
-    const startDate = ev.dateDebut.toISOString().slice(0, 10)
-    const endDate = new Date(ev.dateFin)
-    endDate.setDate(endDate.getDate() + 1)
+    const startDate = formatTunisDateTime(ev.dateDebut).slice(0, 10)
+    const endBase = formatTunisDateTime(ev.dateFin).slice(0, 10)
+    const endDate = new Date(`${endBase}T12:00:00Z`)
+    endDate.setUTCDate(endDate.getUTCDate() + 1)
     return {
       summary: eventTitle(ev),
       description: eventDescription(ev),
@@ -396,8 +467,8 @@ function toGoogleEventBody(ev: AgendaEventWithPatient): calendar_v3.Schema$Event
     summary: eventTitle(ev),
     description: eventDescription(ev),
     extendedProperties: { private: privateProps },
-    start: { dateTime: ev.dateDebut.toISOString(), timeZone: tz },
-    end: { dateTime: ev.dateFin.toISOString(), timeZone: tz },
+    start: { dateTime: formatTunisDateTime(ev.dateDebut), timeZone: tz },
+    end: { dateTime: formatTunisDateTime(ev.dateFin), timeZone: tz },
   }
 }
 
@@ -468,7 +539,7 @@ async function upsertImportedGoogleEvent(
         dateDebut,
         dateFin,
         allDay,
-        lastSyncedFrom: 'google',
+        lastSyncedFrom: isAppOwnedEvent(existing) ? 'app' : 'google',
         notes: g.description ?? existing.notes,
         ...(type === 'rdv' && !existing.statut ? { statut: 'confirme' } : {}),
       },
@@ -512,7 +583,7 @@ async function upsertImportedGoogleEvent(
         dateDebut,
         dateFin,
         allDay,
-        lastSyncedFrom: 'google',
+        lastSyncedFrom: isAppOwnedEvent(dup) ? 'app' : 'google',
       },
     })
     stats.updated++
@@ -528,6 +599,19 @@ async function loadEventWithPatient(eventId: string): Promise<AgendaEventWithPat
   })
 }
 
+const calendarEntryCache = new Map<string, { at: number; entries: GoogleCalendarListItem[] }>()
+
+async function listCalendarEntriesCached(
+  medecinId: string,
+  calendar: calendar_v3.Calendar,
+): Promise<GoogleCalendarListItem[]> {
+  const hit = calendarEntryCache.get(medecinId)
+  if (hit && Date.now() - hit.at < 20_000) return hit.entries
+  const entries = await listCalendarEntries(calendar)
+  calendarEntryCache.set(medecinId, { at: Date.now(), entries })
+  return entries
+}
+
 export async function pushEventToGoogle(eventId: string): Promise<boolean> {
   if (!isGoogleCalendarConfigured()) return false
 
@@ -537,68 +621,103 @@ export async function pushEventToGoogle(eventId: string): Promise<boolean> {
   const client = await getCalendarClient(ev.medecinId)
   if (!client) return false
 
+  const entries = await listCalendarEntriesCached(ev.medecinId, client.calendar)
+  const pushCalendarId = await ensureWritablePushCalendar(ev.medecinId, client.sync.googleCalendarId, entries)
   const body = toGoogleEventBody(ev)
 
-  const pushCalendarId = client.sync.googleCalendarId
-
-  try {
-    if (ev.googleEventId) {
-      const parsed = parseGoogleEventKey(ev.googleEventId, pushCalendarId)
-      if (!parsed) return false
-      await client.calendar.events.update({
-        calendarId: parsed.calendarId,
-        eventId: parsed.eventId,
-        requestBody: body,
-      })
-      await prisma.agendaEvent.update({
-        where: { id: ev.id },
-        data: { lastSyncedFrom: 'app' },
-      })
-      return true
-    }
-
+  const insertOnPushCalendar = async (): Promise<boolean> => {
     const created = await client.calendar.events.insert({
       calendarId: pushCalendarId,
       requestBody: body,
     })
-
-    if (created.data.id) {
-      await prisma.agendaEvent.update({
-        where: { id: ev.id },
-        data: {
-          googleEventId: makeGoogleEventKey(pushCalendarId, created.data.id),
-          lastSyncedFrom: 'app',
-        },
-      })
-      return true
+    if (!created.data.id) return false
+    if (ev.googleEventId) {
+      const previous = parseGoogleEventKey(ev.googleEventId, pushCalendarId)
+      const previousId = previous ? resolveCalendarAlias(previous.calendarId, entries) : ''
+      if (previous && previousId !== pushCalendarId) {
+        try {
+          await client.calendar.events.delete({
+            calendarId: previous.calendarId,
+            eventId: previous.eventId,
+          })
+        } catch {
+          /* ancienne copie déjà absente ou agenda en lecture seule */
+        }
+      }
     }
-    return false
+    await prisma.agendaEvent.update({
+      where: { id: ev.id },
+      data: {
+        googleEventId: makeGoogleEventKey(pushCalendarId, created.data.id),
+        lastSyncedFrom: 'app',
+      },
+    })
+    return true
+  }
+
+  try {
+    if (ev.googleEventId) {
+      const parsed = parseGoogleEventKey(ev.googleEventId, pushCalendarId)
+      if (parsed) {
+        const target = resolveCalendarAlias(parsed.calendarId, entries)
+        if (target === pushCalendarId) {
+          try {
+            await client.calendar.events.update({
+              calendarId: target,
+              eventId: parsed.eventId,
+              requestBody: body,
+            })
+            await prisma.agendaEvent.update({
+              where: { id: ev.id },
+              data: { lastSyncedFrom: 'app' },
+            })
+            return true
+          } catch (err) {
+            const status = googleHttpStatus(err)
+            if (status !== 404 && status !== 410 && status !== 403) throw err
+          }
+        }
+      }
+    }
+
+    return await insertOnPushCalendar()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    logger.error({ err, eventId, medecinId: ev.medecinId }, `[google-calendar] push failed: ${msg}`)
+    logger.error({ err, eventId, medecinId: ev.medecinId, pushCalendarId }, `[google-calendar] push failed: ${msg}`)
     return false
   }
 }
 
-/** Envoie vers Google tous les événements locaux sans googleEventId (RDV/blocages déjà créés avant la liaison). */
+/** Envoie vers Google les RDV créés dans la plateforme et encore absents de l’agenda du téléphone. */
 export async function pushAllEventsToGoogle(medecinId: string): Promise<{ pushed: number; failed: number }> {
   if (!isGoogleCalendarConfigured()) return { pushed: 0, failed: 0 }
 
+  const client = await getCalendarClient(medecinId)
+  if (!client) return { pushed: 0, failed: 0 }
+  const entries = await listCalendarEntriesCached(medecinId, client.calendar)
+  const pushCalendarId = await ensureWritablePushCalendar(medecinId, client.sync.googleCalendarId, entries)
+
   const events = await prisma.agendaEvent.findMany({
-    where: { medecinId, googleEventId: null },
-    include: {
-      patient: { include: { user: { select: { fullName: true } } } },
-    },
+    where: { medecinId },
+    select: { id: true, googleEventId: true, lastSyncedFrom: true, notes: true },
   })
 
   let pushed = 0
   let failed = 0
   for (const ev of events) {
+    const appOwned = isAppOwnedEvent(ev)
+    let needsPush = !ev.googleEventId
+    if (!needsPush && appOwned && ev.googleEventId) {
+      const parsed = parseGoogleEventKey(ev.googleEventId, pushCalendarId)
+      const target = parsed ? resolveCalendarAlias(parsed.calendarId, entries) : ''
+      needsPush = target !== pushCalendarId
+    }
+    if (!needsPush) continue
     const ok = await pushEventToGoogle(ev.id)
     if (ok) pushed++
     else failed++
   }
-  logger.info({ medecinId, pushed, failed }, '[google-calendar] push all done')
+  logger.info({ medecinId, pushed, failed, pushCalendarId }, '[google-calendar] push all done')
   return { pushed, failed }
 }
 
@@ -677,7 +796,7 @@ export async function pullFromGoogle(medecinId: string): Promise<{ imported: num
                 dateDebut,
                 dateFin,
                 allDay,
-                lastSyncedFrom: 'google',
+                lastSyncedFrom: isAppOwnedEvent(existing) ? 'app' : 'google',
               },
             })
             stats.updated++
@@ -709,10 +828,7 @@ export async function pullFromGoogle(medecinId: string): Promise<{ imported: num
       ? [local.googleEventId, parsed.eventId, makeGoogleEventKey(parsed.calendarId, parsed.eventId)]
       : [local.googleEventId]
     if (keys.some((k) => googleIds.has(k))) continue
-    if (local.lastSyncedFrom === 'app') {
-      const age = Date.now() - local.updatedAt.getTime()
-      if (age < 8000) continue
-    }
+    if (isAppOwnedEvent(local)) continue
     await prisma.agendaEvent.delete({ where: { id: local.id } })
     stats.removed++
   }

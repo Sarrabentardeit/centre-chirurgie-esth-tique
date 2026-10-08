@@ -74,7 +74,7 @@ export const createPreDossierSchema = z.object({
 export type CreatePreDossierInput = z.infer<typeof createPreDossierSchema>
 
 export const postOpRetourSchema = z.object({
-  message: z.string().trim().max(3000).optional(),
+  message: z.string().trim().max(8000).optional(),
   /** Message déjà envoyé hors application : on enregistre seulement l'étape, sans rien renvoyer à la patiente. */
   markOnly: z.boolean().optional(),
 })

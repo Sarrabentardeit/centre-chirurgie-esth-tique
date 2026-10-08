@@ -59,27 +59,54 @@ export async function getRetourWhatsapp(patientId: string, message?: string) {
   return { whatsappUrl, hasPhone: Boolean(whatsappUrl) }
 }
 
-function prenomFromFullName(fullName: string): string {
-  return fullName.trim().split(/\s+/)[0] || 'Madame'
-}
-
-export function buildPostOpRetourMessage(patientFullName: string): string {
-  const prenom = prenomFromFullName(patientFullName)
+export function buildPostOpRetourMessage(_patientFullName: string): string {
   return [
-    `Bonjour Madame ${prenom},`,
+    'Bonjour Madame,',
     '',
-    `Nous espérons que votre retour à la maison s'est bien passé et que vous vous reposez bien.`,
+    'J’espère que vous êtes bien rentrée chez vous et que votre retour s’est déroulé dans les meilleures conditions.',
     '',
-    `Depuis votre espace patiente, rubrique « Suivi post-opératoire », vous pouvez dès maintenant :`,
-    `- nous envoyer vos photos post-opératoires ;`,
-    `- nous poser toutes vos questions ou vos demandes : l'équipe du Dr CHENNOUFI vous répondra directement dans cette même rubrique ;`,
-    `- demander votre compte rendu opératoire si vous le souhaitez.`,
+    'Ce fut un réel plaisir de vous accueillir en Tunisie pour votre séjour médical avec le Dr CHENNOUFI. Toute l’équipe et moi-même vous remercions sincèrement pour votre confiance.',
     '',
-    `N'hésitez pas à nous solliciter au moindre doute.`,
+    'Afin de poursuivre notre accompagnement après votre retour, nous souhaitons vous rappeler que vous bénéficiez d’un suivi post-opératoire à distance, entièrement gratuit pendant 6 mois.',
     '',
-    `Bien à vous,`,
-    `Cabinet du Dr Mehdi Chennoufi`,
-    `Chirurgie Esthétique, Plastique et Réparatrice`,
+    '1. Votre suivi post-opératoire',
+    '',
+    'Ce suivi nous permet de rester à vos côtés tout au long de votre convalescence et de suivre l’évolution de votre résultat, en lien avec les recommandations du Dr CHENNOUFI.',
+    '',
+    'Nous vous invitons notamment à nous transmettre des photos de votre évolution à J+15 et J+30, puis selon les besoins et les indications qui vous seront communiqués.',
+    '',
+    'N’hésitez pas également à nous contacter durant cette période si vous avez des questions.',
+    '',
+    '2. Votre avis sur votre expérience',
+    '',
+    'Nous aimerions également prendre quelques instants pour recueillir votre retour d’expérience.',
+    '',
+    'Au-delà du résultat de votre intervention, nous serions heureux de connaître votre ressenti sur l’ensemble de votre parcours : la préparation de votre séjour, votre accueil en Tunisie, l’accompagnement et la coordination, votre prise en charge médicale, votre séjour ainsi que la qualité des prestations proposées.',
+    '',
+    'Votre retour nous permet de mieux comprendre l’expérience vécue par nos patientes et de continuer à faire évoluer notre accompagnement.',
+    '',
+    '3. Votre témoignage',
+    '',
+    'Si vous souhaitez aller plus loin et partager votre expérience, plusieurs possibilités s’offrent à vous, selon ce qui vous correspond le mieux.',
+    '',
+    '⭐ Vous pouvez laisser un avis Google afin de partager publiquement votre expérience avec le Dr CHENNOUFI et notre équipe.',
+    '',
+    '🎥 Vous pouvez également participer, si vous le souhaitez, à notre rubrique « Témoignages patients », publiée sur le compte Instagram du Dr CHENNOUFI.',
+    '',
+    'Le témoignage peut prendre différentes formes : vidéo, photo, texte écrit ou témoignage anonyme. Vous êtes naturellement libre de choisir le format avec lequel vous êtes le plus à l’aise.',
+    '',
+    'Que vous choisissiez simplement de nous faire part de votre retour en privé ou de partager votre expérience publiquement, nous vous remercions par avance pour le temps que vous nous accorderez.',
+    '',
+    'Nous restons bien entendu à votre disposition pendant toute la durée de votre suivi.',
+    '',
+    'Prenez bien soin de vous et nous vous souhaitons une excellente convalescence.',
+    '',
+    'Bien cordialement,',
+    'Houda Chennoufi',
+    'Conciergerie & Coordination Patients',
+    'Cabinet du Dr Mehdi Chennoufi',
+    'Chirurgie Esthétique, Plastique et Réparatrice',
+    'SCULPTURE, SMOOTH & SMILE',
   ].join('\n')
 }
 

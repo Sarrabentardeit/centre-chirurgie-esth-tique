@@ -3256,6 +3256,7 @@ export default function DevisGestionnairePage() {
         : null,
     )
 
+    const dossierClos = patientRow.status === 'suivi_termine'
     const parcoursSteps: DossierParcoursStep[] = (() => {
       const steps = [
         { key: 'form', label: 'Formulaire', done: hasSubmittedForm },
@@ -3265,9 +3266,15 @@ export default function DevisGestionnairePage() {
       ]
       if (showSuiviSejour) {
         steps.push(
-          { key: 'logistique', label: 'Logistique', done: logComplete },
-          { key: 'planning', label: 'Planning', done: planningFinalise },
+          { key: 'logistique', label: 'Logistique', done: dossierClos || logComplete },
+          { key: 'planning', label: 'Planning', done: dossierClos || planningFinalise },
         )
+      }
+      if (showPostOpSection) {
+        steps.push({ key: 'postop', label: 'Post-op', done: dossierClos })
+      }
+      if (dossierClos) {
+        return steps.map((s) => ({ ...s, done: true, current: false }))
       }
       const pendingIdx = steps.findIndex((s) => !s.done)
       const currentIdx = pendingIdx === -1 ? steps.length - 1 : pendingIdx
@@ -3299,12 +3306,13 @@ export default function DevisGestionnairePage() {
         id: 'dossier-planning',
         label: 'Planning séjour',
         hidden: !showSuiviSejour,
-        badge: planningFinalise ? 'OK' : undefined,
+        badge: dossierClos || planningFinalise ? 'OK' : undefined,
       },
       {
         id: 'dossier-postop',
         label: 'Suivi post-op',
         hidden: !showPostOpSection,
+        badge: dossierClos ? 'Terminé' : undefined,
       },
     ]
 
@@ -3353,7 +3361,9 @@ export default function DevisGestionnairePage() {
             })()
         : { label: 'Créer le devis', intent: 'create' }
 
-    const workStatusLabel = isAbstention
+    const workStatusLabel = dossierClos
+      ? 'Suivi terminé'
+      : isAbstention
       ? 'Abstention'
       : needsNewDevisFromRapport
         ? latestRapportNumero > 1
@@ -3561,7 +3571,7 @@ export default function DevisGestionnairePage() {
                 </div>
               </div>
 
-              {needsNewDevisFromRapport && latestRapportNumero > 0 ? (
+              {!dossierClos && needsNewDevisFromRapport && latestRapportNumero > 0 ? (
                 <div className="border-t border-amber-100 bg-amber-50/90 px-4 sm:px-6 py-3">
                   <p className="text-sm font-semibold text-amber-950">
                     Rapport R{latestRapportNumero} généré
@@ -4057,7 +4067,17 @@ export default function DevisGestionnairePage() {
                     <PostOpDossierSection
                       patientId={patientRow.id}
                       patientName={patientRow.user.fullName}
-                      onStatusChange={() => void loadPatients({ silent: true })}
+                      onStatusChange={(status) => {
+                        setPatientDetail((prev) =>
+                          prev && prev.id === patientRow.id
+                            ? { ...prev, status: status as DossierStatus }
+                            : prev,
+                        )
+                        setPatients((prev) =>
+                          prev.map((p) => (p.id === patientRow.id ? { ...p, status: status as DossierStatus } : p)),
+                        )
+                        void loadPatients({ silent: true })
+                      }}
                     />
                   </Section>
                 )}

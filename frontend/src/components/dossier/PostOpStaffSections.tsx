@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { PostOpSection } from '@/components/dossier/PostOpSection'
 import type { PostOpNoteInterne, PostOpStaffApi, SuiviPostOp } from '@/lib/api'
 import { buildPostOpRetourMessage } from '@/lib/postOpMessage'
@@ -61,8 +62,6 @@ export function PostOpRetourSection({
   const [whatsappUrl, setWhatsappUrl] = useState<string | null>(null)
   const [hasPhone, setHasPhone] = useState<boolean | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
-  const [marking, setMarking] = useState(false)
-  const [sectionError, setSectionError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -149,20 +148,6 @@ export function PostOpRetourSection({
       setError(errMessage(e, 'Ouverture de WhatsApp impossible.'))
     } finally {
       setSending(null)
-    }
-  }
-
-  const handleMarkSent = async () => {
-    setMarking(true)
-    setSectionError(null)
-    try {
-      const res = await api.sendRetour(patientId, undefined, { markOnly: true })
-      onChange(res.suivi)
-      setFeedback('Étape enregistrée : le message est considéré comme déjà envoyé (rien n’a été renvoyé à la patiente).')
-    } catch (e) {
-      setSectionError(errMessage(e, 'Enregistrement impossible.'))
-    } finally {
-      setMarking(false)
     }
   }
 
@@ -264,15 +249,6 @@ export function PostOpRetourSection({
             )}
           </div>
         </div>
-        {sectionError && <InlineError message={sectionError} />}
-        {!sentAt && (
-          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-            <p className="text-xs text-muted-foreground">Message déjà envoyé en dehors de l’application ?</p>
-            <Button type="button" variant="ghost" size="sm" disabled={marking} onClick={() => void handleMarkSent()}>
-              {marking ? 'Enregistrement…' : 'Marquer comme déjà envoyé'}
-            </Button>
-          </div>
-        )}
       </PostOpSection>
     </>
   )
@@ -458,6 +434,7 @@ export function PostOpClotureSection({
   const [remarques, setRemarques] = useState(suivi?.clotureRemarques ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   useEffect(() => {
     setRemarques(suivi?.clotureRemarques ?? '')
@@ -476,9 +453,9 @@ export function PostOpClotureSection({
   const crPending = Boolean(suivi.compteRenduDemandeAt) && !suivi.compteRendu
 
   const warnings: string[] = []
-  if (!suivi.retourMessageAt) warnings.push('le message de retour n’est pas marqué comme envoyé')
-  if (pending > 0) warnings.push(`${pending} demande(s) de la patiente sans réponse`)
-  if (crPending) warnings.push('le compte rendu demandé n’est pas encore rédigé')
+  if (!suivi.retourMessageAt) warnings.push('Le message de retour n’a pas encore été envoyé.')
+  if (pending > 0) warnings.push(pending > 1 ? `${pending} demandes de la patiente sont sans réponse.` : 'Une demande de la patiente est sans réponse.')
+  if (crPending) warnings.push('Le compte rendu demandé n’est pas encore rédigé.')
 
   const run = async (action: () => Promise<{ suivi: SuiviPostOp; status: string }>) => {
     setBusy(true)
@@ -495,11 +472,27 @@ export function PostOpClotureSection({
   }
 
   const handleCloturer = () => {
+    setError(null)
     if (warnings.length > 0) {
-      const ok = window.confirm(`Clôturer quand même ?\n\nAttention : ${warnings.join(' ; ')}.`)
-      if (!ok) return
+      setConfirmOpen(true)
+      return
     }
     void run(() => api.cloturer(patientId, remarques))
+  }
+
+  const confirmCloture = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.cloturer(patientId, remarques)
+      onChange(res.suivi)
+      onStatusChange?.(res.status)
+      setConfirmOpen(false)
+    } catch (e) {
+      setError(errMessage(e, 'Action impossible.'))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -542,7 +535,7 @@ export function PostOpClotureSection({
           {warnings.length > 0 && (
             <p className="text-xs text-amber-800 flex items-start gap-1.5">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              À vérifier avant de clôturer : {warnings.join(' ; ')}.
+              À vérifier avant de clôturer : {warnings.join(' ')}
             </p>
           )}
           <Button type="button" variant="brand" className="gap-2" disabled={busy} onClick={handleCloturer}>
@@ -551,6 +544,36 @@ export function PostOpClotureSection({
           </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => {
+          if (busy) return
+          setConfirmOpen(false)
+        }}
+        title="Clôturer ce dossier ?"
+        description="Quelques points ne sont pas terminés. Vous pouvez clôturer quand même : le dossier pourra être rouvert."
+        confirmLabel="Clôturer quand même"
+        cancelLabel="Annuler"
+        confirmVariant="brand"
+        loading={busy}
+        error={error}
+        onConfirm={() => void confirmCloture()}
+        icon={
+          <div className="flex h-11 w-11 items-center justify-center rounded-full border border-amber-200 bg-amber-50">
+            <AlertCircle className="h-5 w-5 text-amber-700" />
+          </div>
+        }
+      >
+        <ul className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+          {warnings.map((item) => (
+            <li key={item} className="flex items-start gap-2">
+              <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-600" />
+              {item}
+            </li>
+          ))}
+        </ul>
+      </ConfirmDialog>
     </PostOpSection>
   )
 }

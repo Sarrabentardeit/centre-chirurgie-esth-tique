@@ -1,7 +1,7 @@
 /** Clés React Query partagées (Navbar + pages listes). */
 export const queryKeys = {
-  patients: (role: 'medecin' | 'gestionnaire', search = '', status?: string) =>
-    ['patients', role, search, status ?? ''] as const,
+  patients: (role: 'medecin' | 'gestionnaire', search = '', status?: string, creePar?: string) =>
+    ['patients', role, search, status ?? '', creePar ?? ''] as const,
 
   medecinPatientsAll: () => ['patients', 'medecin', '', ''] as const,
 

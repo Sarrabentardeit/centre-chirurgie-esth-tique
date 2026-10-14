@@ -12,6 +12,7 @@ import { useAuthStore } from '@/store/authStore'
 export default function NouveauPatientPage() {
   const navigate = useNavigate()
   const isGestionnaire = useAuthStore((s) => s.user?.role) === 'gestionnaire'
+  const listPath = isGestionnaire ? '/gestionnaire/patients' : '/medecin/patients'
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -71,7 +72,7 @@ export default function NouveauPatientPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigate(isGestionnaire ? '/gestionnaire/patients' : '/medecin/patients')}
+          onClick={() => navigate(listPath)}
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Retour

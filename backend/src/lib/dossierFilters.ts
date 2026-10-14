@@ -56,6 +56,13 @@ const ALL_ACTIVE_STATUSES = [
 
 export type DossierListRole = 'medecin' | 'gestionnaire'
 
+export type CompteCreeParFilter = 'patiente' | 'medecin' | 'gestionnaire'
+
+export function parseCreePar(value: unknown): CompteCreeParFilter | undefined {
+  if (value === 'patiente' || value === 'medecin' || value === 'gestionnaire') return value
+  return undefined
+}
+
 export function buildPatientStatusWhere(
   status: string | undefined,
   role: DossierListRole,
@@ -67,7 +74,8 @@ export function buildPatientStatusWhere(
     const vals = role === 'medecin'
       ? (MEDECIN_NON_TRAITES as unknown as never[])
       : (GESTIONNAIRE_NON_TRAITES as unknown as never[])
-    return { status: { in: vals } }
+    // Les dossiers créés par le Dr ne sont pas une file « à traiter ».
+    return { status: { in: vals }, creePar: { not: 'medecin' as const } }
   }
   if (status === 'traites') {
     const vals = role === 'medecin'
@@ -81,26 +89,45 @@ export function buildPatientStatusWhere(
   return { status: status as never }
 }
 
-export async function countDossierBuckets(role: DossierListRole) {
+export async function countDossierBuckets(
+  role: DossierListRole,
+  creePar?: 'patiente' | 'medecin' | 'gestionnaire',
+) {
   const nonTraites = role === 'medecin'
     ? (MEDECIN_NON_TRAITES as unknown as never[])
     : (GESTIONNAIRE_NON_TRAITES as unknown as never[])
   const traites = role === 'medecin'
     ? (MEDECIN_TRAITES as unknown as never[])
     : (GESTIONNAIRE_TRAITES as unknown as never[])
+  const origin = creePar ? { creePar } : {}
 
-  const [nonTraitesCount, traitesCount, actifsCount] = await Promise.all([
-    prisma.patient.count({ where: { status: { in: nonTraites } } }),
-    prisma.patient.count({ where: { status: { in: traites } } }),
-    prisma.patient.count({ where: { status: { in: ALL_ACTIVE_STATUSES as unknown as never[] } } }),
+  const [nonTraitesCount, traitesCount, actifsCount, cabinetCount] = await Promise.all([
+    prisma.patient.count({
+      where: {
+        status: { in: nonTraites },
+        creePar: creePar && creePar !== 'medecin' ? creePar : { not: 'medecin' as const },
+      },
+    }),
+    prisma.patient.count({ where: { status: { in: traites }, ...origin } }),
+    prisma.patient.count({ where: { status: { in: ALL_ACTIVE_STATUSES as unknown as never[] }, ...origin } }),
+    prisma.patient.count({
+      where: {
+        creePar: 'medecin',
+        status: { in: ALL_ACTIVE_STATUSES as unknown as never[] },
+      },
+    }),
   ])
 
   // Compte les dossiers en abstention via SQL brut (enum non encore dans le client généré)
   let abstentionCount = 0
   try {
-    const res = await prisma.$queryRaw<[{ count: bigint }]>`
-      SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention'
-    `
+    const res = creePar
+      ? await prisma.$queryRaw<[{ count: bigint }]>`
+          SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text = ${creePar}
+        `
+      : await prisma.$queryRaw<[{ count: bigint }]>`
+          SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention'
+        `
     abstentionCount = Number(res[0]?.count ?? 0)
   } catch {
     // Avant migration : ignore silencieusement
@@ -111,5 +138,6 @@ export async function countDossierBuckets(role: DossierListRole) {
     traites: traitesCount,
     abstention: abstentionCount,
     actifs: actifsCount,
+    cabinet: cabinetCount,
   }
 }

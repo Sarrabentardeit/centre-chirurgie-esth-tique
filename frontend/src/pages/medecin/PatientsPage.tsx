@@ -383,6 +383,7 @@ export default function PatientsPage() {
 
   const [search, setSearch]             = useState('')
   const [statusFilter, setStatusFilter] = useState<ListFilter>(initialStatus)
+  const [drOnly, setDrOnly] = useState(false)
   const [page, setPage]                 = useState(1)
   const [patients, setPatients]         = useState<PatientListItem[]>([])
   const [counts, setCounts]             = useState<DossierBucketCounts | null>(null)
@@ -397,7 +398,7 @@ export default function PatientsPage() {
 
   const load = useCallback(async (opts?: { silent?: boolean; useCache?: boolean }) => {
     const role = isGestionnaire ? 'gestionnaire' as const : 'medecin' as const
-    const key = queryKeys.patients(role, search, statusFilter)
+    const key = queryKeys.patients(role, search, statusFilter, drOnly ? 'medecin' : undefined)
     const force = !opts?.useCache
     if (!opts?.silent) {
       if (opts?.useCache && hasCachedData(key)) setLoading(false)
@@ -408,6 +409,7 @@ export default function PatientsPage() {
       const params = {
         search: search || undefined,
         status: statusFilter,
+        creePar: drOnly ? 'medecin' as const : undefined,
       }
       const res = await cachedFetch(
         key,
@@ -421,7 +423,7 @@ export default function PatientsPage() {
     } finally {
       if (!opts?.silent) setLoading(false)
     }
-  }, [search, statusFilter, isGestionnaire])
+  }, [search, statusFilter, isGestionnaire, drOnly])
 
   useEffect(() => {
     const t = setTimeout(() => { void load({ useCache: true }) }, search ? 400 : 0)
@@ -430,7 +432,7 @@ export default function PatientsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, statusFilter])
+  }, [search, statusFilter, drOnly])
 
   const { slice: pagePatients, totalPages, page: safePage, total } = useMemo(
     () => paginateSlice(patients, page, LIST_PAGE_SIZE),
@@ -461,10 +463,15 @@ export default function PatientsPage() {
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               <span className="ml-2 hidden sm:inline">Actualiser</span>
             </Button>
-            <Button variant="brand" size="sm" className="gap-2" onClick={() => navigate(newPatientPath)}>
+            <Button
+              variant="brand"
+              size="sm"
+              className="gap-2"
+              onClick={() => navigate(newPatientPath)}
+            >
               <UserPlus className="h-4 w-4" />
               <span className="hidden sm:inline">Nouveau patient</span>
-              <span className="sm:hidden">Nouveau</span>
+              <span className="sm:hidden">Ajouter</span>
             </Button>
           </>
         }
@@ -472,10 +479,23 @@ export default function PatientsPage() {
 
       <KpiStrip
         items={[
-          { key: 'non_traites', label: 'Non traités', value: loading ? '—' : stats.nonTraites, tone: 'amber', active: statusFilter === 'non_traites', onClick: () => setStatusFilter('non_traites') },
-          { key: 'traites', label: 'Traités', value: loading ? '—' : stats.traites, tone: 'emerald', active: statusFilter === 'traites', onClick: () => setStatusFilter('traites') },
-          { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'slate', active: statusFilter === 'abstention', onClick: () => setStatusFilter('abstention') },
-          { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'sky', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
+          { key: 'non_traites', label: 'Non traités', value: loading ? '—' : stats.nonTraites, tone: 'amber', active: statusFilter === 'non_traites' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('non_traites') } },
+          { key: 'traites', label: 'Traités', value: loading ? '—' : stats.traites, tone: 'emerald', active: statusFilter === 'traites' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('traites') } },
+          { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'slate', active: statusFilter === 'abstention' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('abstention') } },
+          { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'sky', active: statusFilter === 'all' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('all') } },
+          {
+            key: 'cabinet',
+            label: 'Créé par Dr',
+            value: loading ? '—' : (counts?.cabinet ?? 0),
+            tone: 'brand' as const,
+            active: drOnly,
+            onClick: () => {
+              setDrOnly((on) => {
+                if (!on) setStatusFilter('all')
+                return !on
+              })
+            },
+          },
         ]}
       />
 
@@ -523,7 +543,10 @@ export default function PatientsPage() {
                 <button
                   key={f.key}
                   type="button"
-                  onClick={() => setStatusFilter(f.key)}
+                  onClick={() => {
+                    if (f.key === 'non_traites') setDrOnly(false)
+                    setStatusFilter(f.key)
+                  }}
                   className={`shrink-0 py-2 sm:py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
                     isActive
                       ? 'bg-white shadow-sm text-foreground'
@@ -552,7 +575,11 @@ export default function PatientsPage() {
                   <button
                     key={f.key}
                     type="button"
-                    onClick={() => setStatusFilter(isActive ? 'non_traites' : f.key)}
+                    onClick={() => {
+                      const next = isActive ? 'non_traites' : f.key
+                      if (next === 'non_traites') setDrOnly(false)
+                      setStatusFilter(next)
+                    }}
                     className={`shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold border transition-all duration-150 ${
                       isActive
                         ? f.color + ' shadow-sm'
@@ -615,7 +642,8 @@ export default function PatientsPage() {
               return (
                 <div
                   key={p.id}
-                  className={`group flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer transition-all duration-150
+                  className={`group relative flex items-center gap-2 sm:gap-4 overflow-hidden px-3 sm:px-5 py-3 sm:py-4 cursor-pointer transition-all duration-150
+                    ${p.creePar === 'medecin' ? 'pr-16 sm:pr-20' : ''}
                     ${isAbstention ? 'bg-slate-50/80 hover:bg-slate-100/80 opacity-90' : isUrgent ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-muted/40'}
                     ${idx === 0 ? '' : ''}`}
                   onClick={() =>
@@ -666,7 +694,17 @@ export default function PatientsPage() {
                     </div>
                   </div>
 
-                  <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
+                  {p.creePar === 'medecin' && (
+                    <div className="pointer-events-none absolute right-0 top-0 h-24 w-24 overflow-hidden" title="Créé par Dr">
+                      <span className="absolute right-[-42px] top-[22px] w-[148px] rotate-45 bg-brand-950 py-1 text-center text-[10px] font-bold leading-tight text-white shadow-md">
+                        Créé par
+                        <br />
+                        Dr
+                      </span>
+                    </div>
+                  )}
+                  <div className="relative z-10 shrink-0 flex items-center gap-2">
+                    <div className="flex items-center gap-0.5 sm:gap-1">
                     <button
                         type="button"
                         className="h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-xl sm:rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -712,6 +750,7 @@ export default function PatientsPage() {
                       <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                     </button>
                     <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors hidden sm:block" />
+                    </div>
                   </div>
                 </div>
               )

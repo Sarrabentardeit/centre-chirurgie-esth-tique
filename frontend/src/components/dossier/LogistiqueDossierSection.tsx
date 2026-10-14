@@ -12,6 +12,7 @@ import { cn, datetimeLocalToIso } from '@/lib/utils'
 import { downloadAttachment, isPdfUrl, resolveAttachmentUrl } from '@/lib/chatAttachments'
 import {
   LOGISTIQUE_DOCUMENT_SLOTS,
+  LOGISTIQUE_DOCUMENT_TOTAL,
   LOGISTIQUE_ESSENTIAL_TOTAL,
   logistiqueEssentialsDoneCount,
   logistiqueFromPatientRow,
@@ -256,7 +257,7 @@ export function LogistiqueDossierSection({
       feedbackSuccess(
         isComplete ? 'Logistique complète' : 'Dates enregistrées',
         isComplete
-          ? 'Les 3 documents et les 3 dates sont renseignés.'
+          ? `Les ${LOGISTIQUE_DOCUMENT_TOTAL} documents et les 3 dates sont renseignés.`
           : `${essentialsDone}/${LOGISTIQUE_ESSENTIAL_TOTAL} élément(s) complété(s).`,
       )
     } catch (e) {
@@ -329,7 +330,7 @@ export function LogistiqueDossierSection({
           <div>
             <p className="text-sm font-semibold text-emerald-950">Documents et dates du séjour</p>
             <p className="text-xs text-emerald-900/80 mt-0.5">
-              3 pièces jointes + 3 dates/heures — {essentialsDone} sur {LOGISTIQUE_ESSENTIAL_TOTAL} complété
+              {LOGISTIQUE_DOCUMENT_TOTAL} pièces jointes + 3 dates/heures — {essentialsDone} sur {LOGISTIQUE_ESSENTIAL_TOTAL} complété
             </p>
           </div>
           <div className="flex items-center gap-2 min-w-[140px]">
@@ -346,7 +347,7 @@ export function LogistiqueDossierSection({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {LOGISTIQUE_DOCUMENT_SLOTS.map(({ key, label, hint }) => (
           <DocumentSlot
             key={key}

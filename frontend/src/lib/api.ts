@@ -776,6 +776,7 @@ export interface DossierBucketCounts {
   traites: number
   abstention: number
   actifs: number
+  cabinet?: number
 }
 
 export interface PatientListItem {
@@ -789,6 +790,7 @@ export interface PatientListItem {
   pays: string | null
   nationalite: string | null
   sourceContact: string | null
+  creePar?: 'patiente' | 'medecin' | 'gestionnaire'
   /** Interne Houda/Dr — jamais envoyé à la patiente. */
   pendingRapportChangeNote?: string | null
   createdAt: string
@@ -898,10 +900,11 @@ export const medecinApi = {
   getDashboardAlertes: () =>
     request<{ ok: true; alertes: DashboardAlerte[] }>('/medecin/dashboard/alertes'),
 
-  getPatients: (params?: { search?: string; status?: string }) => {
+  getPatients: (params?: { search?: string; status?: string; creePar?: 'patiente' | 'medecin' | 'gestionnaire' }) => {
     const q = new URLSearchParams()
     if (params?.search) q.set('search', params.search)
     if (params?.status) q.set('status', params.status)
+    if (params?.creePar) q.set('creePar', params.creePar)
     const qs = q.toString()
     return request<{
       ok: true
@@ -1280,6 +1283,7 @@ export type GestionnaireLogistiqueDocuments = {
   passport: GestionnaireLogistiqueDocument[]
   billet: GestionnaireLogistiqueDocument[]
   devisAccepte: GestionnaireLogistiqueDocument[]
+  bilansPreop: GestionnaireLogistiqueDocument[]
 }
 
 /** @deprecated Ancienne checklist — conservé pour compatibilité types */
@@ -1474,10 +1478,11 @@ export const gestionnaireApi = {
       interventionsRealisees: DashboardInterventionItem[]
     }>('/gestionnaire/dashboard'),
 
-  getPatients: (params?: { search?: string; status?: string }) => {
+  getPatients: (params?: { search?: string; status?: string; creePar?: 'patiente' | 'medecin' | 'gestionnaire' }) => {
     const q = new URLSearchParams()
     if (params?.search) q.set('search', params.search)
     if (params?.status) q.set('status', params.status)
+    if (params?.creePar) q.set('creePar', params.creePar)
     const qs = q.toString()
     return request<{
       ok: true

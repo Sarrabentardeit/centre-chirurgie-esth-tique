@@ -24,6 +24,7 @@ import * as medecinService from './medecin.service.js'
 import * as postOpService from '../../lib/postOp.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { googleCalendarCallbackRouter } from '../google-calendar/google-calendar.routes.js'
+import { parseCreePar } from '../../lib/dossierFilters.js'
 
 const renderDevisPdfSchema = z.object({
   html: z.string().min(1),
@@ -158,7 +159,8 @@ medecinRouter.get('/patients', async (req: Request, res: Response, next: NextFun
   try {
     const search = req.query.search as string | undefined
     const status = req.query.status as string | undefined
-    const result = await medecinService.getPatients(search, status)
+    const creePar = parseCreePar(req.query.creePar)
+    const result = await medecinService.getPatients(search, status, creePar)
     res.json({ ok: true, ...result })
   } catch (e) { next(e) }
 })

@@ -1,7 +1,7 @@
 import type { GestionnaireLogistiqueDocuments, GestionnaireLogistiqueRow } from '@/lib/api'
 import { toDatetimeLocalInput } from '@/lib/utils'
 import type { LucideIcon } from 'lucide-react'
-import { FileText, Plane, Receipt } from 'lucide-react'
+import { FileText, FlaskConical, Plane, Receipt } from 'lucide-react'
 
 export type LogistiqueDocumentKey = keyof GestionnaireLogistiqueDocuments
 
@@ -9,6 +9,12 @@ export const LOGISTIQUE_DOCUMENT_SLOTS = [
   { key: 'passport', label: 'Passeport', hint: 'Plusieurs images ou PDF', icon: FileText },
   { key: 'billet', label: "Billet d'avion", hint: 'Plusieurs images ou PDF', icon: Plane },
   { key: 'devisAccepte', label: 'Devis accepté', hint: 'Plusieurs images ou PDF', icon: Receipt },
+  {
+    key: 'bilansPreop',
+    label: 'Bilans et examens préopératoires',
+    hint: 'Envoyés par la patiente — images ou PDF',
+    icon: FlaskConical,
+  },
 ] as const satisfies ReadonlyArray<{
   key: LogistiqueDocumentKey
   label: string
@@ -20,7 +26,7 @@ export const LOGISTIQUE_DOCUMENT_TOTAL = LOGISTIQUE_DOCUMENT_SLOTS.length
 export const LOGISTIQUE_ESSENTIAL_TOTAL = LOGISTIQUE_DOCUMENT_TOTAL + 3
 
 export function emptyLogistiqueDocuments(): GestionnaireLogistiqueDocuments {
-  return { passport: [], billet: [], devisAccepte: [] }
+  return { passport: [], billet: [], devisAccepte: [], bilansPreop: [] }
 }
 
 function normalizeSlotFiles(value: unknown): GestionnaireLogistiqueDocuments['passport'] {
@@ -64,6 +70,7 @@ export function logistiqueFromPatientRow(
       passport: normalizeSlotFiles(row?.documents?.passport),
       billet: normalizeSlotFiles(row?.documents?.billet),
       devisAccepte: normalizeSlotFiles(row?.documents?.devisAccepte),
+      bilansPreop: normalizeSlotFiles(row?.documents?.bilansPreop),
     },
     notes: row?.notes ?? '',
   }

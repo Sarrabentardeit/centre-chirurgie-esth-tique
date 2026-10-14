@@ -181,7 +181,7 @@ function NavItemLink({
   const Icon = item.icon
   const isActive =
     location.pathname === item.href ||
-    (item.href !== '/' && location.pathname.startsWith(item.href))
+    (item.href !== '/' && location.pathname.startsWith(`${item.href}/`))
   const badgeCount = item.badgeKey ? badges[item.badgeKey] : 0
 
   return (

@@ -104,6 +104,7 @@ export async function register(
           ville: input.ville ?? null,
           pays: input.pays ?? null,
           sourceContact: input.sourceContact ?? null,
+          creePar: 'patiente',
         },
       })
       patientCreated = true

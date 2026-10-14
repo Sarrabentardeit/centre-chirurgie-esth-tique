@@ -177,6 +177,7 @@ function parseLogistiqueMeta(raw?: string | null) {
     passport: [] as Array<{ url: string; name: string }>,
     billet: [] as Array<{ url: string; name: string }>,
     devisAccepte: [] as Array<{ url: string; name: string }>,
+    bilansPreop: [] as Array<{ url: string; name: string }>,
   })
   const toFiles = (value: unknown): Array<{ url: string; name: string }> => {
     if (!value) return []
@@ -195,12 +196,12 @@ function parseLogistiqueMeta(raw?: string | null) {
   }
   try {
     const parsed = JSON.parse(raw) as {
-      documents?: Partial<Record<'passport' | 'billet' | 'devisAccepte', unknown>>
+      documents?: Partial<Record<'passport' | 'billet' | 'devisAccepte' | 'bilansPreop', unknown>>
       dateIntervention?: string | null
       notes?: string
     }
     const documents = emptyDocs()
-    for (const key of ['passport', 'billet', 'devisAccepte'] as const) {
+    for (const key of ['passport', 'billet', 'devisAccepte', 'bilansPreop'] as const) {
       documents[key] = toFiles(parsed.documents?.[key])
     }
     const dateIntervention =
@@ -428,12 +429,17 @@ export async function getDashboard(gestionnaireUserId: string) {
   }
 }
 
-export async function getPatients(search?: string, status?: string) {
+export async function getPatients(
+  search?: string,
+  status?: string,
+  creePar?: 'patiente' | 'medecin' | 'gestionnaire',
+) {
   const statusWhere = buildPatientStatusWhere(status, 'gestionnaire')
   const [patients, counts] = await Promise.all([
     prisma.patient.findMany({
       where: {
         ...statusWhere,
+        ...(creePar && status !== 'non_traites' ? { creePar } : {}),
         ...(search
           ? {
               OR: [
@@ -449,7 +455,7 @@ export async function getPatients(search?: string, status?: string) {
       include: patientListInclude,
       orderBy: { updatedAt: 'desc' },
     }),
-    countDossierBuckets('gestionnaire'),
+    countDossierBuckets('gestionnaire', creePar),
   ])
 
   await Promise.all(
@@ -1945,6 +1951,7 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
     input.documents.passport.length > 0
     && input.documents.billet.length > 0
     && input.documents.devisAccepte.length > 0
+    && input.documents.bilansPreop.length > 0
     && Boolean(input.dateArrivee)
     && Boolean(input.dateDepart)
     && Boolean(input.dateIntervention)

@@ -34,6 +34,7 @@ import * as medecinService from '../medecin/medecin.service.js'
 import * as postOpService from '../../lib/postOp.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { getTndEurRate } from '../../lib/exchangeRate.js'
+import { parseCreePar } from '../../lib/dossierFilters.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 
 function pid(v: string | string[] | undefined): string {
@@ -69,7 +70,8 @@ gestionnaireRouter.get('/patients', async (req: Request, res: Response, next: Ne
   try {
     const search = typeof req.query.search === 'string' ? req.query.search : undefined
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
-    const result = await gestionnaireService.getPatients(search, status)
+    const creePar = parseCreePar(req.query.creePar)
+    const result = await gestionnaireService.getPatients(search, status, creePar)
     res.json({ ok: true, ...result })
   } catch (e) {
     next(e)

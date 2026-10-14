@@ -53,6 +53,7 @@ export const logistiqueSchema = z.object({
     passport: logistiqueSlotSchema,
     billet: logistiqueSlotSchema,
     devisAccepte: logistiqueSlotSchema,
+    bilansPreop: logistiqueSlotSchema.default([]),
   }),
   dateArrivee: z.string().optional().nullable(),
   dateDepart: z.string().optional().nullable(),

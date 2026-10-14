@@ -370,11 +370,19 @@ export async function getDashboardAlertes(medecinId: string) {
 
 // ─── Patients ─────────────────────────────────────────────────────────────────
 
-export async function getPatients(search?: string, status?: string) {
+export async function getPatients(
+  search?: string,
+  status?: string,
+  creePar?: 'patiente' | 'medecin' | 'gestionnaire',
+) {
   const statusWhere = buildPatientStatusWhere(status, 'medecin')
+  const where = {
+    ...statusWhere,
+    ...(creePar && status !== 'non_traites' ? { creePar } : {}),
+  }
   const [patients, counts] = await Promise.all([
     prisma.patient.findMany({
-      where: statusWhere,
+      where,
       include: {
         user: { select: { fullName: true, email: true, createdAt: true } },
         formulaires: { orderBy: { createdAt: 'desc' }, take: 1 },
@@ -384,7 +392,7 @@ export async function getPatients(search?: string, status?: string) {
       },
       orderBy: { updatedAt: 'desc' },
     }),
-    countDossierBuckets('medecin'),
+    countDossierBuckets('medecin', creePar),
   ])
   await Promise.all(
     patients
@@ -484,6 +492,7 @@ export async function createPreDossier(
             pays: input.pays?.trim() || null,
             nationalite: input.nationalite?.trim() || null,
             sourceContact: input.sourceContact?.trim() || actorRole,
+            creePar: actorRole,
             status: 'nouveau',
           },
           include: { user: { select: { fullName: true, email: true } } },

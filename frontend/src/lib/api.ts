@@ -1676,6 +1676,12 @@ export const gestionnaireApi = {
       method: 'POST',
     }),
 
+  /** Annule une acceptation saisie par erreur → devis « envoyé » à nouveau. */
+  cancelAcceptDevis: (devisId: string) =>
+    request<{ ok: true; devis: Devis }>(`/gestionnaire/devis/${devisId}/annuler-acceptation`, {
+      method: 'POST',
+    }),
+
   deleteDevis: (devisId: string) =>
     request<{ ok: true; deleted: true; softDeleted?: true }>(`/gestionnaire/devis/${devisId}`, {
       method: 'DELETE',

@@ -1353,6 +1353,7 @@ export default function DevisGestionnairePage() {
   const [autoSaving, setAutoSaving]           = useState(false)
   const [actionLoading, setActionLoading]     = useState(false)
   const [acceptDevisId, setAcceptDevisId]     = useState<string | null>(null)
+  const [cancelAcceptDevisId, setCancelAcceptDevisId] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<
     | { kind: 'devis'; devisIds: string[] }
     | { kind: 'dossier'; patientId: string; patientName: string }
@@ -2442,6 +2443,29 @@ export default function DevisGestionnairePage() {
     }
   }
 
+  const handleCancelAcceptDevis = async () => {
+    const id = cancelAcceptDevisId
+    if (!id) return
+    setActionLoading(true)
+    setPageError(null)
+    try {
+      await gestionnaireApi.cancelAcceptDevis(id)
+      setCancelAcceptDevisId(null)
+      await invalidateCache(queryKeys.planningSejour())
+      await invalidateCache(queryKeys.logistique())
+      await loadPatientDetail(selectedPatient)
+      await loadPatients()
+      feedbackSuccess(
+        'Acceptation annulée',
+        'Le devis est de nouveau « Envoyé ». Vous pouvez le marquer accepté plus tard.',
+      )
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Impossible d’annuler l’acceptation.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleCustomize = async () => {
     if (!selectedPatient) return
     if (tableReadOnly && modalDevis) {
@@ -3494,6 +3518,18 @@ export default function DevisGestionnairePage() {
                             Nouvelle version
                           </Button>
                         )}
+                        {existingDevis && existingDevis.statut === 'accepte' && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-1.5 h-10 text-sm border-amber-200 text-amber-800 hover:bg-amber-50 bg-white"
+                            disabled={detailLoading || actionLoading}
+                            onClick={() => setCancelAcceptDevisId(existingDevis.id)}
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Annuler l’acceptation
+                          </Button>
+                        )}
                         {existingDevis && existingDevis.statut === 'envoye' && (
                           <Button
                             type="button"
@@ -3993,6 +4029,17 @@ export default function DevisGestionnairePage() {
                                   </button>
                                 </>
                               )}
+                              {d.statut === 'accepte' && (
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 flex items-center justify-center rounded-md text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors disabled:opacity-40"
+                                  title="Annuler l’acceptation (erreur)"
+                                  onClick={() => setCancelAcceptDevisId(d.id)}
+                                  disabled={actionLoading}
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                               {d.statut !== 'accepte' && (
                                 <button
                                   type="button"
@@ -4201,6 +4248,25 @@ export default function DevisGestionnairePage() {
         icon={
           <div className="h-11 w-11 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center">
             <CheckCircle2 className="h-5 w-5 text-emerald-700" />
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={cancelAcceptDevisId !== null}
+        onClose={() => {
+          if (actionLoading) return
+          setCancelAcceptDevisId(null)
+        }}
+        title="Annuler l’acceptation de ce devis ?"
+        description="À utiliser en cas d’erreur. Le devis repasse en « Envoyé » et le dossier en « Devis envoyé » (si le séjour n’a pas encore avancé)."
+        confirmLabel="Annuler l’acceptation"
+        confirmVariant="default"
+        loading={actionLoading}
+        onConfirm={() => void handleCancelAcceptDevis()}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-amber-50 border border-amber-100 flex items-center justify-center">
+            <RotateCcw className="h-5 w-5 text-amber-700" />
           </div>
         }
       />

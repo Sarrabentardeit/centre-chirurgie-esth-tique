@@ -276,7 +276,24 @@ const EXAMENS_END = '<!-- /DEVIS_EXAMENS -->'
 
 type SejourPdfValues = ReturnType<typeof sejourPdfFromContext>
 
+/** Hôtel « Aucun » (séjour géré par la patiente). */
+export function isHotelAucun(hotelNom: string | null | undefined): boolean {
+  const n = (hotelNom ?? '').trim()
+  if (!n || n === '—') return false
+  return /^aucun\b/i.test(n) || /sans\s*h[oô]tel/i.test(n) || /g[eé]r[eé]\s+par\s+la\s+patiente/i.test(n)
+}
+
+/** Phrase unique quand aucun hôtel cabinet n’est retenu. */
+export const HOTEL_AUCUN_CONVALESCENCE_PHRASE =
+  "A la charge de la patiente. Prévoyez néanmoins un minimum de 2/3 nuits de convalescence sur place à la sortie de la clinique avant de reprendre l'avion."
+
 export function buildSejourConvalescenceHtml(sv: SejourPdfValues): string {
+  if (isHotelAucun(sv.hotelSejour)) {
+    return `${SEJOUR_CONV_START}
+${devisSectionHeading('Détails de votre séjour de convalescence :')}
+<p>${HOTEL_AUCUN_CONVALESCENCE_PHRASE}</p>
+${SEJOUR_CONV_END}`
+  }
   return `${SEJOUR_CONV_START}
 ${devisSectionHeading('Détails de votre séjour de convalescence :')}
 ${devisFieldRow('Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)}
@@ -292,14 +309,31 @@ function refreshConvalescenceInTopHtml(html: string, ctx: DevisLetterContext): s
   const sv = sejourPdfFromContext(ctx)
   const fresh = buildSejourConvalescenceHtml(sv)
   const blockRe = new RegExp(`${SEJOUR_CONV_START}[\\s\\S]*?${SEJOUR_CONV_END}`)
-  let out = blockRe.test(html) ? html.replace(blockRe, fresh) : html
-  out = out.replace(/<p>[^<]*Nbr Bébés[^<]*<\/p>\s*/gi, '')
-  if (!blockRe.test(html) && sv.hotelSejour !== '—') {
-    out = out.replace(
-      /(Hôtel de séjour sélectionné\s*:\s*<\/span>\s*<span[^>]*>)([^<]*)(<\/span>)/i,
-      `$1${sv.hotelSejour}$3`,
-    )
+  let out = html
+  if (blockRe.test(out)) {
+    out = out.replace(blockRe, fresh)
+  } else {
+    // Anciennes lettres sans marqueurs : remplacer toute la section convalescence.
+    const startRe = /<p\b[^>]*>[\s\S]*?D[ée]tails de votre s[ée]jour de convalescence\s*:[\s\S]*?<\/p>/i
+    const startMatch = startRe.exec(out)
+    if (startMatch && startMatch.index != null) {
+      const start = startMatch.index
+      const after = out.slice(start + startMatch[0].length)
+      const nextStop = after.search(
+        /À titre de traitement pr[ée]ventif|Examens m[ée]dicaux n[ée]cessaires|Offre de prix\s*:/i,
+      )
+      const end = nextStop >= 0 ? start + startMatch[0].length + nextStop : out.length
+      out = `${out.slice(0, start)}${fresh}${out.slice(end)}`
+    } else if (isHotelAucun(sv.hotelSejour)) {
+      // Pas de section : rien à patcher champ par champ
+    } else if (sv.hotelSejour !== '—') {
+      out = out.replace(
+        /(Hôtel de séjour sélectionné\s*:\s*<\/span>\s*<span[^>]*>)([^<]*)(<\/span>)/i,
+        `$1${sv.hotelSejour}$3`,
+      )
+    }
   }
+  out = out.replace(/<p>[^<]*Nbr Bébés[^<]*<\/p>\s*/gi, '')
   return out
 }
 
@@ -1439,11 +1473,13 @@ export function syncDevisLetterDataOnlyTopHtml(
   }
   out = refreshDevisFieldByLabel(out, "Durée d'Hospitalisation :", sv.dureeHosp)
   out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
-  out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
-  out = refreshDevisFieldByLabel(out, 'Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)
-  out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
-  out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
-  out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
+  if (!isHotelAucun(sv.hotelSejour)) {
+    out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
+    out = refreshDevisFieldByLabel(out, 'Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)
+    out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
+    out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
+    out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
+  }
   out = normalizeSejourJoursToNuits(out)
   out = ensureOffrePrixSectionHeading(out)
   return out
@@ -1564,11 +1600,13 @@ export function refreshDevisLetterTopHtml(
   }
   out = refreshDevisFieldByLabel(out, "Durée d'Hospitalisation :", sv.dureeHosp)
   out = refreshDevisFieldByLabel(out, 'Clinique retenue :', sv.cliniqueRetenue)
-  out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
-  out = refreshDevisFieldByLabel(out, 'Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)
-  out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
-  out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
-  out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
+  if (!isHotelAucun(sv.hotelSejour)) {
+    out = refreshDevisFieldByLabel(out, 'Hôtel de séjour sélectionné :', sv.hotelSejour)
+    out = refreshDevisFieldByLabel(out, 'Durée de séjour post hospitalisation en Tunisie :', sv.postHospLabel)
+    out = refreshDevisFieldByLabel(out, "Nombre d'adultes :", sv.nbAdultes)
+    out = refreshDevisFieldByLabel(out, 'Nbr Enfants (2 – 12 ans) :', sv.nbEnfants)
+    out = refreshDevisFieldByLabel(out, 'Type de chambre :', sv.typeChambre)
+  }
   out = normalizeSejourJoursToNuits(out)
   out = normalizeGapBeforeDetailsIntervention(out)
   out = normalizeHeadingRhythmInHtml(out)

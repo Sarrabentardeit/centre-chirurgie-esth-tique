@@ -376,6 +376,18 @@ gestionnaireRouter.post(
   },
 )
 
+gestionnaireRouter.post(
+  '/devis/:devisId/annuler-acceptation',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await gestionnaireService.cancelAcceptDevis(req.auth!.sub, pid(req.params.devisId))
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
 gestionnaireRouter.get('/devis/supprimes', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await gestionnaireService.listDeletedDevis()

@@ -1512,6 +1512,78 @@ export async function acceptDevis(gestionnaireId: string, devisId: string) {
   return { devis: updated }
 }
 
+/**
+ * Annule une acceptation saisie par erreur : devis → « envoyé »,
+ * dossier → « devis envoyé » si encore au stade accepté.
+ */
+export async function cancelAcceptDevis(gestionnaireId: string, devisId: string) {
+  const devis = await prisma.devis.findFirst({
+    where: { id: devisId, deletedAt: null },
+    include: { patient: { include: { user: { select: { fullName: true } } } } },
+  })
+  if (!devis) throw new AppError(404, 'DEVIS_NOT_FOUND', 'Devis introuvable.')
+  if (devis.gestionnaireId !== gestionnaireId) {
+    throw new AppError(403, 'FORBIDDEN', 'Ce devis ne vous appartient pas.')
+  }
+  if (devis.statut !== 'accepte') {
+    throw new AppError(400, 'DEVIS_NOT_ACCEPTED', 'Seul un devis accepté peut être remis en « envoyé ».')
+  }
+
+  const blockedStatuses = [
+    'date_reservee',
+    'logistique',
+    'intervention',
+    'post_op',
+    'suivi_termine',
+  ] as const
+  if (blockedStatuses.includes(devis.patient.status as (typeof blockedStatuses)[number])) {
+    throw new AppError(
+      400,
+      'DOSSIER_TOO_FAR',
+      'Le dossier a déjà avancé (date / logistique / intervention). Impossible d’annuler l’acceptation.',
+    )
+  }
+
+  const updated = await prisma.devis.update({
+    where: { id: devisId },
+    data: { statut: 'envoye' },
+  })
+
+  let patientStatusAfter = devis.patient.status
+  if (devis.patient.status === 'devis_accepte') {
+    await prisma.patient.update({
+      where: { id: devis.patientId },
+      data: { status: 'devis_envoye' },
+    })
+    patientStatusAfter = 'devis_envoye'
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: gestionnaireId,
+      actorRole: 'gestionnaire',
+      action: 'status_change',
+      entity: 'devis',
+      entityId: devisId,
+      before: {
+        statut: devis.statut,
+        patientId: devis.patientId,
+        patientStatus: devis.patient.status,
+        numeroDevis: devis.numeroDevis,
+      } as never,
+      after: {
+        statut: updated.statut,
+        patientId: devis.patientId,
+        patientStatus: patientStatusAfter,
+        numeroDevis: devis.numeroDevis,
+        source: 'gestionnaire_annulation_acceptation',
+      } as never,
+    },
+  }).catch(() => undefined)
+
+  return { devis: updated }
+}
+
 export async function deleteDevis(gestionnaireId: string, devisId: string) {
   const devis = await prisma.devis.findFirst({
     where: { id: devisId, deletedAt: null },

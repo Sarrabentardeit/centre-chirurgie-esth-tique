@@ -16,7 +16,7 @@ import {
 } from '../../lib/devisNumber.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
-import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
+import { buildPatientStatusWhere, countDossierBuckets, creeParWhere } from '../../lib/dossierFilters.js'
 import { formatAgendaSlot } from '../../lib/agendaTime.js'
 import { getDashboardInterventions } from '../../lib/interventionsDashboard.js'
 import { sendStaffOnlyMessage } from '../chat/chat.service.js'
@@ -373,13 +373,12 @@ export async function getDashboardAlertes(medecinId: string) {
 export async function getPatients(
   search?: string,
   status?: string,
-  creePar?: 'patiente' | 'medecin' | 'gestionnaire',
+  creePar?: 'patiente' | 'medecin' | 'gestionnaire' | 'cabinet',
 ) {
   const statusWhere = buildPatientStatusWhere(status, 'medecin')
   const where = {
     ...statusWhere,
-    // Patients = hors dossiers Dr ; Patients cabinet = creePar medecin uniquement.
-    ...(creePar ? { creePar } : { creePar: { not: 'medecin' as const } }),
+    ...creeParWhere(creePar),
   }
   const [patients, counts] = await Promise.all([
     prisma.patient.findMany({
@@ -463,6 +462,8 @@ export async function createPreDossier(
   if (existing) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
 
   const passwordHash = await bcrypt.hash(`pre-dossier-${Date.now()}-${Math.random()}`, 12)
+  const espace = input.espace === 'patients' ? 'patients' : 'cabinet'
+  const creePar = espace === 'patients' ? ('patiente' as const) : actorRole
 
   let createdPatient:
     | null
@@ -493,7 +494,7 @@ export async function createPreDossier(
             pays: input.pays?.trim() || null,
             nationalite: input.nationalite?.trim() || null,
             sourceContact: input.sourceContact?.trim() || actorRole,
-            creePar: actorRole,
+            creePar,
             status: 'nouveau',
           },
           include: { user: { select: { fullName: true, email: true } } },

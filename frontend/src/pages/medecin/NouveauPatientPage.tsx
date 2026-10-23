@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Save, UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,8 +11,14 @@ import { useAuthStore } from '@/store/authStore'
 
 export default function NouveauPatientPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const from = searchParams.get('from')
+  const fromCabinet = from === 'cabinet'
+  const espace = fromCabinet ? ('cabinet' as const) : ('patients' as const)
   const isGestionnaire = useAuthStore((s) => s.user?.role) === 'gestionnaire'
-  const listPath = isGestionnaire ? '/gestionnaire/patients' : '/medecin/patients'
+  const listPath = fromCabinet
+    ? (isGestionnaire ? '/gestionnaire/patients-cabinet' : '/medecin/patients-cabinet')
+    : (isGestionnaire ? '/gestionnaire/patients' : '/medecin/patients')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -47,11 +53,18 @@ export default function NouveauPatientPage() {
         nationalite: form.nationalite.trim() || undefined,
         sourceContact: form.sourceContact.trim() || undefined,
         noteMedicale: form.noteMedicale.trim() || undefined,
+        espace,
       })
-      setSuccess(`Pré-dossier créé: ${res.patient.dossierNumber}`)
-      const target = isGestionnaire
-        ? `/gestionnaire/devis/${res.patient.id}?saisie=1`
-        : `/medecin/patients/${res.patient.id}?tab=formulaire&saisie=1`
+      setSuccess(
+        fromCabinet
+          ? `Pré-dossier cabinet créé : ${res.patient.dossierNumber}`
+          : `Patient créé dans Patients : ${res.patient.dossierNumber}`,
+      )
+      const target = fromCabinet
+        ? (isGestionnaire
+            ? `/gestionnaire/devis/${res.patient.id}?saisie=1`
+            : `/medecin/patients/${res.patient.id}?tab=formulaire&saisie=1`)
+        : listPath
       setTimeout(() => navigate(target), 600)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de création.')
@@ -64,9 +77,13 @@ export default function NouveauPatientPage() {
     <div className="max-w-3xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <h2 className="text-lg sm:text-xl font-bold">Nouveau pré-dossier patient</h2>
+          <h2 className="text-lg sm:text-xl font-bold">
+            {fromCabinet ? 'Nouveau patient cabinet' : 'Nouveau patient'}
+          </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Création rapide par {isGestionnaire ? 'la gestionnaire' : 'le médecin'}, sans compte patient actif.
+            {fromCabinet
+              ? `Pré-dossier cabinet — apparaîtra dans « Patients cabinet » (créé par ${isGestionnaire ? 'la gestionnaire' : 'le médecin'}).`
+              : 'Dossier Patients — apparaîtra dans la liste « Patients » (non traités / actifs), pas dans le cabinet.'}
           </p>
         </div>
         <Button

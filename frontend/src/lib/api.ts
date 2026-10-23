@@ -900,7 +900,7 @@ export const medecinApi = {
   getDashboardAlertes: () =>
     request<{ ok: true; alertes: DashboardAlerte[] }>('/medecin/dashboard/alertes'),
 
-  getPatients: (params?: { search?: string; status?: string; creePar?: 'patiente' | 'medecin' | 'gestionnaire' }) => {
+  getPatients: (params?: { search?: string; status?: string; creePar?: 'patiente' | 'medecin' | 'gestionnaire' | 'cabinet' }) => {
     const q = new URLSearchParams()
     if (params?.search) q.set('search', params.search)
     if (params?.status) q.set('status', params.status)
@@ -922,6 +922,8 @@ export const medecinApi = {
     nationalite?: string
     sourceContact?: string
     noteMedicale?: string
+    /** cabinet → Patients cabinet ; patients → liste Patients */
+    espace?: 'cabinet' | 'patients'
   }) =>
     request<{ ok: true; patient: { id: string; dossierNumber: string; user: { fullName: string; email: string } } }>(
       '/medecin/patients',
@@ -1478,7 +1480,7 @@ export const gestionnaireApi = {
       interventionsRealisees: DashboardInterventionItem[]
     }>('/gestionnaire/dashboard'),
 
-  getPatients: (params?: { search?: string; status?: string; creePar?: 'patiente' | 'medecin' | 'gestionnaire' }) => {
+  getPatients: (params?: { search?: string; status?: string; creePar?: 'patiente' | 'medecin' | 'gestionnaire' | 'cabinet' }) => {
     const q = new URLSearchParams()
     if (params?.search) q.set('search', params.search)
     if (params?.status) q.set('status', params.status)
@@ -1500,6 +1502,8 @@ export const gestionnaireApi = {
     nationalite?: string
     sourceContact?: string
     noteMedicale?: string
+    /** cabinet → Patients cabinet ; patients → liste Patients */
+    espace?: 'cabinet' | 'patients'
   }) =>
     request<{ ok: true; patient: { id: string; dossierNumber: string; user: { fullName: string; email: string } } }>(
       '/gestionnaire/patients',

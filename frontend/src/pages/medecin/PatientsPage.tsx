@@ -379,7 +379,9 @@ export default function PatientsPage() {
   const { user }      = useAuthStore()
   const isGestionnaire = user?.role === 'gestionnaire'
   const isCabinetSpace = location.pathname.includes('patients-cabinet')
-  const newPatientPath = isGestionnaire ? '/gestionnaire/patients/nouveau' : '/medecin/patients/nouveau'
+  const newPatientPath = isCabinetSpace
+    ? (isGestionnaire ? '/gestionnaire/patients/nouveau?from=cabinet' : '/medecin/patients/nouveau?from=cabinet')
+    : (isGestionnaire ? '/gestionnaire/patients/nouveau?from=patients' : '/medecin/patients/nouveau?from=patients')
   const [searchParams] = useSearchParams()
   const initialStatus  = parseInitialFilter(searchParams.get('status'))
 
@@ -405,7 +407,7 @@ export default function PatientsPage() {
 
   const load = useCallback(async (opts?: { silent?: boolean; useCache?: boolean }) => {
     const role = isGestionnaire ? 'gestionnaire' as const : 'medecin' as const
-    const creePar = isCabinetSpace ? ('medecin' as const) : undefined
+    const creePar = isCabinetSpace ? ('cabinet' as const) : undefined
     const key = queryKeys.patients(role, search, statusFilter, creePar)
     const force = !opts?.useCache
     if (!opts?.silent) {
@@ -464,7 +466,7 @@ export default function PatientsPage() {
           loading
             ? 'Chargement des dossiers…'
             : isCabinetSpace
-              ? `${counts?.cabinet ?? patients.length} dossier${(counts?.cabinet ?? patients.length) > 1 ? 's' : ''} créé${(counts?.cabinet ?? patients.length) > 1 ? 's' : ''} par le Dr`
+              ? `${stats.actifs} pré-dossier${stats.actifs > 1 ? 's' : ''} cabinet (créés par le Dr ou la gestionnaire)`
               : `${stats.actifs} dossier${stats.actifs > 1 ? 's' : ''} actif${stats.actifs > 1 ? 's' : ''}${stats.abstention > 0 ? ` · ${stats.abstention} en abstention` : ''}`
         }
         actions={
@@ -480,8 +482,12 @@ export default function PatientsPage() {
               onClick={() => navigate(newPatientPath)}
             >
               <UserPlus className="h-4 w-4" />
-              <span className="hidden sm:inline">Nouveau patient</span>
-              <span className="sm:hidden">Ajouter</span>
+              <span className="hidden sm:inline">
+                {isCabinetSpace ? 'Nouveau patient cabinet' : 'Nouveau patient'}
+              </span>
+              <span className="sm:hidden">
+                {isCabinetSpace ? 'Cabinet' : 'Ajouter'}
+              </span>
             </Button>
           </>
         }
@@ -621,9 +627,13 @@ export default function PatientsPage() {
                     ? 'Aucun dossier à traiter pour le moment'
                     : 'Modifiez le filtre ou ajoutez un nouveau patient'
             }
-            actionLabel={!search ? 'Nouveau patient' : 'Voir les non traités'}
+            actionLabel={
+              !search
+                ? (isCabinetSpace ? 'Nouveau patient cabinet' : 'Nouveau patient')
+                : 'Voir les non traités'
+            }
             onAction={() => {
-              if (!search && statusFilter === 'all') navigate(newPatientPath)
+              if (!search && (statusFilter === 'all' || isCabinetSpace)) navigate(newPatientPath)
               else { setSearch(''); setStatusFilter('non_traites') }
             }}
           />

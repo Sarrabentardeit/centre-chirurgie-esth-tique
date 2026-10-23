@@ -30,7 +30,7 @@ import {
 import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
 import { buildPlanningSejourHtml, moisLabelFromDate } from '../../lib/planningSejourHtml.js'
-import { buildPatientStatusWhere, countDossierBuckets } from '../../lib/dossierFilters.js'
+import { buildPatientStatusWhere, countDossierBuckets, creeParWhere } from '../../lib/dossierFilters.js'
 import { sendDevisReadyEmail, sendDevisRappelEmail, sendNotificationEmail } from '../../lib/mailer.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
 import { planningPdfDiskPath, planningPdfFileName, publicPlanningPdfUrl } from '../../lib/planningPdfPublic.js'
@@ -432,15 +432,14 @@ export async function getDashboard(gestionnaireUserId: string) {
 export async function getPatients(
   search?: string,
   status?: string,
-  creePar?: 'patiente' | 'medecin' | 'gestionnaire',
+  creePar?: 'patiente' | 'medecin' | 'gestionnaire' | 'cabinet',
 ) {
   const statusWhere = buildPatientStatusWhere(status, 'gestionnaire')
   const [patients, counts] = await Promise.all([
     prisma.patient.findMany({
       where: {
         ...statusWhere,
-        // Patients = hors dossiers Dr ; Patients cabinet = creePar medecin uniquement.
-        ...(creePar ? { creePar } : { creePar: { not: 'medecin' as const } }),
+        ...creeParWhere(creePar),
         ...(search
           ? {
               OR: [

@@ -70,6 +70,11 @@ export const createPreDossierSchema = z.object({
   nationalite: z.string().min(2).max(60).optional(),
   sourceContact: z.string().min(2).max(80).optional(),
   noteMedicale: z.string().max(500).optional(),
+  /**
+   * cabinet → pré-dossier staff (créé par Dr / gestionnaire) → Patients cabinet
+   * patients → dossier file Patients (comme une inscription) → liste Patients
+   */
+  espace: z.enum(['cabinet', 'patients']).optional().default('cabinet'),
 })
 export type CreatePreDossierInput = z.infer<typeof createPreDossierSchema>
 

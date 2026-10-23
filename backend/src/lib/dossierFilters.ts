@@ -56,11 +56,22 @@ const ALL_ACTIVE_STATUSES = [
 
 export type DossierListRole = 'medecin' | 'gestionnaire'
 
-export type CompteCreeParFilter = 'patiente' | 'medecin' | 'gestionnaire'
+export type CompteCreeParFilter = 'patiente' | 'medecin' | 'gestionnaire' | 'cabinet'
 
 export function parseCreePar(value: unknown): CompteCreeParFilter | undefined {
-  if (value === 'patiente' || value === 'medecin' || value === 'gestionnaire') return value
+  if (value === 'patiente' || value === 'medecin' || value === 'gestionnaire' || value === 'cabinet') {
+    return value
+  }
   return undefined
+}
+
+/** Patients = inscriptions / formulaires (patiente). Cabinet = pré-dossiers staff. */
+export function creeParWhere(creePar?: CompteCreeParFilter) {
+  if (creePar === 'cabinet') {
+    return { creePar: { in: ['medecin', 'gestionnaire'] as const } }
+  }
+  if (creePar) return { creePar }
+  return { creePar: 'patiente' as const }
 }
 
 export function buildPatientStatusWhere(
@@ -90,7 +101,7 @@ export function buildPatientStatusWhere(
 
 export async function countDossierBuckets(
   role: DossierListRole,
-  creePar?: 'patiente' | 'medecin' | 'gestionnaire',
+  creePar?: CompteCreeParFilter,
 ) {
   const nonTraites = role === 'medecin'
     ? (MEDECIN_NON_TRAITES as unknown as never[])
@@ -98,10 +109,7 @@ export async function countDossierBuckets(
   const traites = role === 'medecin'
     ? (MEDECIN_TRAITES as unknown as never[])
     : (GESTIONNAIRE_TRAITES as unknown as never[])
-  // Liste Patients : hors cabinet Dr. Patients cabinet : uniquement creePar=medecin.
-  const origin = creePar
-    ? { creePar }
-    : { creePar: { not: 'medecin' as const } }
+  const origin = creeParWhere(creePar)
 
   const [nonTraitesCount, traitesCount, actifsCount, cabinetCount] = await Promise.all([
     prisma.patient.count({
@@ -114,7 +122,7 @@ export async function countDossierBuckets(
     prisma.patient.count({ where: { status: { in: ALL_ACTIVE_STATUSES as unknown as never[] }, ...origin } }),
     prisma.patient.count({
       where: {
-        creePar: 'medecin',
+        creePar: { in: ['medecin', 'gestionnaire'] },
         status: { in: ALL_ACTIVE_STATUSES as unknown as never[] },
       },
     }),
@@ -122,19 +130,20 @@ export async function countDossierBuckets(
 
   let abstentionCount = 0
   try {
-    if (creePar === 'medecin') {
+    if (creePar === 'cabinet') {
       const res = await prisma.$queryRaw<[{ count: bigint }]>`
-        SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text = 'medecin'
+        SELECT COUNT(*) AS count FROM patients
+        WHERE status = 'abstention' AND cree_par::text IN ('medecin', 'gestionnaire')
       `
       abstentionCount = Number(res[0]?.count ?? 0)
-    } else if (creePar) {
+    } else if (creePar === 'medecin' || creePar === 'gestionnaire' || creePar === 'patiente') {
       const res = await prisma.$queryRaw<[{ count: bigint }]>`
         SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text = ${creePar}
       `
       abstentionCount = Number(res[0]?.count ?? 0)
     } else {
       const res = await prisma.$queryRaw<[{ count: bigint }]>`
-        SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text <> 'medecin'
+        SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text = 'patiente'
       `
       abstentionCount = Number(res[0]?.count ?? 0)
     }

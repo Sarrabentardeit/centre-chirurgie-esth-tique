@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { PageHeader, KpiStrip } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/lib/statusUi'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getPatientDisplayReference } from '@/lib/utils'
 import type { DossierStatus } from '@/types'
 import { medecinApi, gestionnaireApi } from '@/lib/api'
@@ -375,15 +375,18 @@ function AbstentionModal({ patient, asGestionnaire, mode, onClose, onDone }: {
 
 export default function PatientsPage() {
   const navigate      = useNavigate()
+  const location      = useLocation()
   const { user }      = useAuthStore()
   const isGestionnaire = user?.role === 'gestionnaire'
+  const isCabinetSpace = location.pathname.includes('patients-cabinet')
   const newPatientPath = isGestionnaire ? '/gestionnaire/patients/nouveau' : '/medecin/patients/nouveau'
   const [searchParams] = useSearchParams()
   const initialStatus  = parseInitialFilter(searchParams.get('status'))
 
   const [search, setSearch]             = useState('')
-  const [statusFilter, setStatusFilter] = useState<ListFilter>(initialStatus)
-  const [drOnly, setDrOnly] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<ListFilter>(
+    isCabinetSpace ? 'all' : initialStatus,
+  )
   const [page, setPage]                 = useState(1)
   const [patients, setPatients]         = useState<PatientListItem[]>([])
   const [counts, setCounts]             = useState<DossierBucketCounts | null>(null)
@@ -396,9 +399,14 @@ export default function PatientsPage() {
     mode: 'classer' | 'reouvrir'
   } | null>(null)
 
+  useEffect(() => {
+    if (isCabinetSpace) setStatusFilter('all')
+  }, [isCabinetSpace])
+
   const load = useCallback(async (opts?: { silent?: boolean; useCache?: boolean }) => {
     const role = isGestionnaire ? 'gestionnaire' as const : 'medecin' as const
-    const key = queryKeys.patients(role, search, statusFilter, drOnly ? 'medecin' : undefined)
+    const creePar = isCabinetSpace ? ('medecin' as const) : undefined
+    const key = queryKeys.patients(role, search, statusFilter, creePar)
     const force = !opts?.useCache
     if (!opts?.silent) {
       if (opts?.useCache && hasCachedData(key)) setLoading(false)
@@ -409,7 +417,7 @@ export default function PatientsPage() {
       const params = {
         search: search || undefined,
         status: statusFilter,
-        creePar: drOnly ? 'medecin' as const : undefined,
+        creePar,
       }
       const res = await cachedFetch(
         key,
@@ -423,7 +431,7 @@ export default function PatientsPage() {
     } finally {
       if (!opts?.silent) setLoading(false)
     }
-  }, [search, statusFilter, isGestionnaire, drOnly])
+  }, [search, statusFilter, isGestionnaire, isCabinetSpace])
 
   useEffect(() => {
     const t = setTimeout(() => { void load({ useCache: true }) }, search ? 400 : 0)
@@ -432,7 +440,7 @@ export default function PatientsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, statusFilter, drOnly])
+  }, [search, statusFilter, isCabinetSpace])
 
   const { slice: pagePatients, totalPages, page: safePage, total } = useMemo(
     () => paginateSlice(patients, page, LIST_PAGE_SIZE),
@@ -451,11 +459,13 @@ export default function PatientsPage() {
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-5">
 
       <PageHeader
-        title="Patients"
+        title={isCabinetSpace ? 'Patients cabinet' : 'Patients'}
         description={
           loading
             ? 'Chargement des dossiers…'
-            : `${stats.actifs} dossier${stats.actifs > 1 ? 's' : ''} actif${stats.actifs > 1 ? 's' : ''}${stats.abstention > 0 ? ` · ${stats.abstention} en abstention` : ''}`
+            : isCabinetSpace
+              ? `${counts?.cabinet ?? patients.length} dossier${(counts?.cabinet ?? patients.length) > 1 ? 's' : ''} créé${(counts?.cabinet ?? patients.length) > 1 ? 's' : ''} par le Dr`
+              : `${stats.actifs} dossier${stats.actifs > 1 ? 's' : ''} actif${stats.actifs > 1 ? 's' : ''}${stats.abstention > 0 ? ` · ${stats.abstention} en abstention` : ''}`
         }
         actions={
           <>
@@ -478,25 +488,20 @@ export default function PatientsPage() {
       />
 
       <KpiStrip
-        items={[
-          { key: 'non_traites', label: 'Non traités', value: loading ? '—' : stats.nonTraites, tone: 'amber', active: statusFilter === 'non_traites' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('non_traites') } },
-          { key: 'traites', label: 'Traités', value: loading ? '—' : stats.traites, tone: 'emerald', active: statusFilter === 'traites' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('traites') } },
-          { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'slate', active: statusFilter === 'abstention' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('abstention') } },
-          { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'sky', active: statusFilter === 'all' && !drOnly, onClick: () => { setDrOnly(false); setStatusFilter('all') } },
-          {
-            key: 'cabinet',
-            label: 'Créé par Dr',
-            value: loading ? '—' : (counts?.cabinet ?? 0),
-            tone: 'brand' as const,
-            active: drOnly,
-            onClick: () => {
-              setDrOnly((on) => {
-                if (!on) setStatusFilter('all')
-                return !on
-              })
-            },
-          },
-        ]}
+        items={
+          isCabinetSpace
+            ? [
+                { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'sky', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
+                { key: 'traites', label: 'Traités', value: loading ? '—' : stats.traites, tone: 'emerald', active: statusFilter === 'traites', onClick: () => setStatusFilter('traites') },
+                { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'slate', active: statusFilter === 'abstention', onClick: () => setStatusFilter('abstention') },
+              ]
+            : [
+                { key: 'non_traites', label: 'Non traités', value: loading ? '—' : stats.nonTraites, tone: 'amber', active: statusFilter === 'non_traites', onClick: () => setStatusFilter('non_traites') },
+                { key: 'traites', label: 'Traités', value: loading ? '—' : stats.traites, tone: 'emerald', active: statusFilter === 'traites', onClick: () => setStatusFilter('traites') },
+                { key: 'abstention', label: 'Abstention', value: loading ? '—' : stats.abstention, tone: 'slate', active: statusFilter === 'abstention', onClick: () => setStatusFilter('abstention') },
+                { key: 'all', label: 'Tous actifs', value: loading ? '—' : stats.actifs, tone: 'sky', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
+              ]
+        }
       />
 
       <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
@@ -526,7 +531,10 @@ export default function PatientsPage() {
 
           {/* Ligne 2 : Filtres bucket (tabs) — scroll horizontal sur mobile */}
           <div className="flex bg-muted/50 rounded-xl p-1 gap-0.5 overflow-x-auto scrollbar-none">
-            {BUCKET_FILTERS.map((f) => {
+            {(isCabinetSpace
+              ? BUCKET_FILTERS.filter((f) => f.key !== 'non_traites')
+              : BUCKET_FILTERS
+            ).map((f) => {
               const count = !loading && counts
                 ? f.key === 'non_traites' ? counts.non_traites
                   : f.key === 'traites' ? counts.traites
@@ -543,10 +551,7 @@ export default function PatientsPage() {
                 <button
                   key={f.key}
                   type="button"
-                  onClick={() => {
-                    if (f.key === 'non_traites') setDrOnly(false)
-                    setStatusFilter(f.key)
-                  }}
+                  onClick={() => setStatusFilter(f.key)}
                   className={`shrink-0 py-2 sm:py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
                     isActive
                       ? 'bg-white shadow-sm text-foreground'
@@ -576,8 +581,7 @@ export default function PatientsPage() {
                     key={f.key}
                     type="button"
                     onClick={() => {
-                      const next = isActive ? 'non_traites' : f.key
-                      if (next === 'non_traites') setDrOnly(false)
+                      const next = isActive ? (isCabinetSpace ? 'all' : 'non_traites') : f.key
                       setStatusFilter(next)
                     }}
                     className={`shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold border transition-all duration-150 ${

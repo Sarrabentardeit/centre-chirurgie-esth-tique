@@ -74,8 +74,7 @@ export function buildPatientStatusWhere(
     const vals = role === 'medecin'
       ? (MEDECIN_NON_TRAITES as unknown as never[])
       : (GESTIONNAIRE_NON_TRAITES as unknown as never[])
-    // Les dossiers créés par le Dr ne sont pas une file « à traiter ».
-    return { status: { in: vals }, creePar: { not: 'medecin' as const } }
+    return { status: { in: vals } }
   }
   if (status === 'traites') {
     const vals = role === 'medecin'
@@ -99,13 +98,16 @@ export async function countDossierBuckets(
   const traites = role === 'medecin'
     ? (MEDECIN_TRAITES as unknown as never[])
     : (GESTIONNAIRE_TRAITES as unknown as never[])
-  const origin = creePar ? { creePar } : {}
+  // Liste Patients : hors cabinet Dr. Patients cabinet : uniquement creePar=medecin.
+  const origin = creePar
+    ? { creePar }
+    : { creePar: { not: 'medecin' as const } }
 
   const [nonTraitesCount, traitesCount, actifsCount, cabinetCount] = await Promise.all([
     prisma.patient.count({
       where: {
         status: { in: nonTraites },
-        creePar: creePar && creePar !== 'medecin' ? creePar : { not: 'medecin' as const },
+        ...origin,
       },
     }),
     prisma.patient.count({ where: { status: { in: traites }, ...origin } }),
@@ -118,17 +120,24 @@ export async function countDossierBuckets(
     }),
   ])
 
-  // Compte les dossiers en abstention via SQL brut (enum non encore dans le client généré)
   let abstentionCount = 0
   try {
-    const res = creePar
-      ? await prisma.$queryRaw<[{ count: bigint }]>`
-          SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text = ${creePar}
-        `
-      : await prisma.$queryRaw<[{ count: bigint }]>`
-          SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention'
-        `
-    abstentionCount = Number(res[0]?.count ?? 0)
+    if (creePar === 'medecin') {
+      const res = await prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text = 'medecin'
+      `
+      abstentionCount = Number(res[0]?.count ?? 0)
+    } else if (creePar) {
+      const res = await prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text = ${creePar}
+      `
+      abstentionCount = Number(res[0]?.count ?? 0)
+    } else {
+      const res = await prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*) AS count FROM patients WHERE status = 'abstention' AND cree_par::text <> 'medecin'
+      `
+      abstentionCount = Number(res[0]?.count ?? 0)
+    }
   } catch {
     // Avant migration : ignore silencieusement
   }

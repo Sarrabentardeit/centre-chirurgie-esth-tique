@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, FileText, Calendar, MessageSquare,
   Bell, LogOut, Heart, ClipboardList, FileCheck,
   Package, TrendingUp, Camera, X, UserPlus, CalendarDays,
-  ChevronDown, History,
+  ChevronDown, History, Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
@@ -56,6 +56,7 @@ const MEDECIN_GROUPS: NavGroup[] = [
     label: 'Clinique',
     items: [
       { label: 'Patients', href: '/medecin/patients', icon: Users },
+      { label: 'Patients cabinet', href: '/medecin/patients-cabinet', icon: Building2 },
       { label: 'Rapports Médicaux', href: '/medecin/rapports', icon: FileText },
       { label: 'Devis', href: '/medecin/devis', icon: FileCheck },
       { label: 'Agenda', href: '/medecin/agenda', icon: Calendar },
@@ -82,6 +83,7 @@ const GESTIONNAIRE_GROUPS: NavGroup[] = [
     label: 'Opérations',
     items: [
       { label: 'Patients', href: '/gestionnaire/patients', icon: Users },
+      { label: 'Patients cabinet', href: '/gestionnaire/patients-cabinet', icon: Building2 },
       { label: 'Devis', href: '/gestionnaire/devis', icon: FileCheck },
       { label: 'Agenda', href: '/gestionnaire/agenda', icon: Calendar },
       { label: 'Planning séjour', href: '/gestionnaire/planning-sejour', icon: CalendarDays },

@@ -378,7 +378,8 @@ export async function getPatients(
   const statusWhere = buildPatientStatusWhere(status, 'medecin')
   const where = {
     ...statusWhere,
-    ...(creePar && status !== 'non_traites' ? { creePar } : {}),
+    // Patients = hors dossiers Dr ; Patients cabinet = creePar medecin uniquement.
+    ...(creePar ? { creePar } : { creePar: { not: 'medecin' as const } }),
   }
   const [patients, counts] = await Promise.all([
     prisma.patient.findMany({

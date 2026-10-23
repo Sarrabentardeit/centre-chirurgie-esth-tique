@@ -1081,7 +1081,10 @@ export default function DevisEditorPage() {
   const handleReset = () => {
     if (!patient) return
     if (!window.confirm(
-      'Réinitialiser ce document avec le diagnostic actuel du rapport lié à ce devis (une correction du même rapport est reprise, pas un rapport plus récent) ?',
+      'Utilisez ce bouton lorsque le devis paraît écrasé ou que le contenu est incomplet / incorrect.\n\n'
+      + 'La lettre sera reconstruite depuis le rapport lié (diagnostic, séjour, examens, offre). '
+      + 'Les phrases et la mise en forme ajoutées à la main seront effacées.\n\n'
+      + 'Continuer ?',
     )) return
     const dvReset =
       (devisId ? patient.devis?.find((d) => d.id === devisId) : null)
@@ -1281,7 +1284,9 @@ export default function DevisEditorPage() {
 
         <div className="flex flex-wrap gap-2 shrink-0">
           <button
+            type="button"
             onClick={handleReset}
+            title="À utiliser si le devis est écrasé ou si le contenu pose problème"
             className="flex items-center gap-1.5 h-10 sm:h-8 px-3 text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
             <RotateCcw className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Réinitialiser</span>

@@ -439,7 +439,8 @@ export async function getPatients(
     prisma.patient.findMany({
       where: {
         ...statusWhere,
-        ...(creePar && status !== 'non_traites' ? { creePar } : {}),
+        // Patients = hors dossiers Dr ; Patients cabinet = creePar medecin uniquement.
+        ...(creePar ? { creePar } : { creePar: { not: 'medecin' as const } }),
         ...(search
           ? {
               OR: [

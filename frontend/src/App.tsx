@@ -155,6 +155,14 @@ export default function App() {
                 }
               />
               <Route
+                path="/medecin/patients-cabinet"
+                element={
+                  <ProtectedRoute allowedRoles={['medecin']}>
+                    <PatientsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/medecin/patients/nouveau"
                 element={
                   <ProtectedRoute allowedRoles={['medecin']}>
@@ -230,6 +238,14 @@ export default function App() {
               />
               <Route
                 path="/gestionnaire/patients"
+                element={
+                  <ProtectedRoute allowedRoles={['gestionnaire']}>
+                    <PatientsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/gestionnaire/patients-cabinet"
                 element={
                   <ProtectedRoute allowedRoles={['gestionnaire']}>
                     <PatientsPage />

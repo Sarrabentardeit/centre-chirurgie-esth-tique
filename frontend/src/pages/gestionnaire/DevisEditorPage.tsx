@@ -101,6 +101,23 @@ const DevisHighlight = Highlight.extend({
 })
 
 /** StarterKit v3 inclut déjà underline — on le désactive pour n’en garder qu’un. */
+/**
+ * Charge du HTML dans l'éditeur SANS l'ajouter à l'historique d'annulation.
+ * Sinon Ctrl+Z / « Annuler » défait le chargement initial → document vide → l'autosave écrase le devis.
+ */
+function setDocNoHistory(ed: Editor | null | undefined, html: string) {
+  if (!ed) return
+  ed.chain().setMeta('addToHistory', false).setContent(html, { emitUpdate: false }).run()
+}
+
+/** Vrai si la lettre actuelle est presque vide alors qu'une longue lettre avait été chargée. */
+function editorLooksWipedOut(hydratedHtml: string, currentHtml: string): boolean {
+  const plain = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length
+  const before = plain(hydratedHtml)
+  if (before < 800) return false
+  return plain(currentHtml) < before * 0.2
+}
+
 const STARTER_KIT_DOC = StarterKit.configure({
   heading: { levels: [1, 2, 3] },
   horizontalRule: {},
@@ -797,7 +814,7 @@ export default function DevisEditorPage() {
     const repairedTop = repairDevisEditorTopHtml(fromEditor)
     // Remettre l’écran d’aplomb si TipTap a tout mis en liste 1. 2. 3.
     if (editorTopRef.current && repairedTop !== fromEditor) {
-      editorTopRef.current.commands.setContent(repairedTop, { emitUpdate: false })
+      setDocNoHistory(editorTopRef.current, repairedTop)
       hydratedRef.current.top = repairedTop
     }
     const rawTop = markDevisSpacerParagraphs(repairedTop)
@@ -813,6 +830,10 @@ export default function DevisEditorPage() {
       headPrice: editorOfferHeadPriceRef.current?.getHTML()?.trim() || defaultOfferHeadPriceHtml(),
     }
     if (!topHtml.trim() && !botHtml.trim()) return false
+    if (!opts?.force && editorLooksWipedOut(hydratedRef.current.top, topHtml)) {
+      console.warn('[DevisEditor] sauvegarde ignorée : la lettre semble avoir été vidée')
+      return false
+    }
     setSaving(true)
     try {
       await gestionnaireApi.saveDevisCustomContent(
@@ -841,6 +862,7 @@ export default function DevisEditorPage() {
     const { topHtml, subtitleHtml } = stripOfferMeilleureHeadingForExport(rawTop)
     const botHtml = markDevisSpacerParagraphs(editorBotRef.current?.getHTML() ?? '')
     if (!topHtml.trim() && !botHtml.trim()) return null
+    if (editorLooksWipedOut(hydratedRef.current.top, topHtml)) return null
     const offerTitle = editorOfferRef.current?.getHTML()?.trim()
       || readOfferTitle(editorOfferRef.current, 'Séjour médical personnalisé')
     const offerTotal = editorOfferTotalRef.current?.getHTML()?.trim()
@@ -865,7 +887,7 @@ export default function DevisEditorPage() {
     const display = fmtNum(amount)
     const next = offerTotalEditorHtml(display)
     if (ed.getText().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim() !== display) {
-      ed.commands.setContent(next, { emitUpdate: false })
+      setDocNoHistory(ed, next)
     }
   }, [])
 
@@ -966,41 +988,41 @@ export default function DevisEditorPage() {
     if (!editorTop || !initialTopHtml || loading) return
     if (hydratedRef.current.top === initialTopHtml) return
     // Pas de restoreCanonical ici : déjà fait au rebuild ; sur lettre sauvée ça chevauche.
-    editorTop.commands.setContent(initialTopHtml, { emitUpdate: false })
+    setDocNoHistory(editorTop, initialTopHtml)
     hydratedRef.current.top = initialTopHtml
   }, [editorTop, initialTopHtml, loading])
   useEffect(() => {
     if (!editorBot || !initialBottomHtml || loading) return
     if (hydratedRef.current.bot === initialBottomHtml) return
-    editorBot.commands.setContent(initialBottomHtml, { emitUpdate: false })
+    setDocNoHistory(editorBot, initialBottomHtml)
     hydratedRef.current.bot = initialBottomHtml
   }, [editorBot, initialBottomHtml, loading])
   useEffect(() => {
     if (!editorOffer || loading) return
     const next = loadOfferEditorHtml(initialOfferTitle, 'Séjour médical personnalisé')
     if (hydratedRef.current.offer === next) return
-    editorOffer.commands.setContent(next, { emitUpdate: false })
+    setDocNoHistory(editorOffer, next)
     hydratedRef.current.offer = next
   }, [editorOffer, initialOfferTitle, loading])
   useEffect(() => {
     if (!editorOfferTotal || loading) return
     const next = loadOfferTotalEditorHtml(initialOfferTotal, '0')
     if (hydratedRef.current.total === next) return
-    editorOfferTotal.commands.setContent(next, { emitUpdate: false })
+    setDocNoHistory(editorOfferTotal, next)
     hydratedRef.current.total = next
   }, [editorOfferTotal, initialOfferTotal, loading])
   useEffect(() => {
     if (!editorOfferHeadDesc || loading) return
     const next = initialOfferHeadDesc || defaultOfferHeadDescHtml()
     if (hydratedRef.current.headDesc === next) return
-    editorOfferHeadDesc.commands.setContent(next, { emitUpdate: false })
+    setDocNoHistory(editorOfferHeadDesc, next)
     hydratedRef.current.headDesc = next
   }, [editorOfferHeadDesc, initialOfferHeadDesc, loading])
   useEffect(() => {
     if (!editorOfferHeadPrice || loading) return
     const next = ensureTarifHintSalmonHtml(initialOfferHeadPrice || defaultOfferHeadPriceHtml())
     if (hydratedRef.current.headPrice === next) return
-    editorOfferHeadPrice.commands.setContent(next, { emitUpdate: false })
+    setDocNoHistory(editorOfferHeadPrice, next)
     hydratedRef.current.headPrice = next
   }, [editorOfferHeadPrice, initialOfferHeadPrice, loading])
   /* Auto-save seulement après hydrate lettre (évite d’écraser la DB avec un éditeur encore vide). */
@@ -1152,12 +1174,12 @@ export default function DevisEditorPage() {
     const totalHtmlReset = offerTotalEditorHtml(fmtNum(totalReset))
     const headDescReset = defaultOfferHeadDescHtml()
     const headPriceReset = defaultOfferHeadPriceHtml()
-    editorTop?.commands.setContent(topReset, { emitUpdate: false })
-    editorBot?.commands.setContent(botReset, { emitUpdate: false })
-    editorOffer?.commands.setContent(offerReset, { emitUpdate: false })
-    editorOfferTotal?.commands.setContent(totalHtmlReset, { emitUpdate: false })
-    editorOfferHeadDesc?.commands.setContent(headDescReset, { emitUpdate: false })
-    editorOfferHeadPrice?.commands.setContent(headPriceReset, { emitUpdate: false })
+    setDocNoHistory(editorTop, topReset)
+    setDocNoHistory(editorBot, botReset)
+    setDocNoHistory(editorOffer, offerReset)
+    setDocNoHistory(editorOfferTotal, totalHtmlReset)
+    setDocNoHistory(editorOfferHeadDesc, headDescReset)
+    setDocNoHistory(editorOfferHeadPrice, headPriceReset)
     setInitialTopHtml(topReset)
     setInitialBottomHtml(botReset)
     setInitialOfferTitle(offerReset)
@@ -1206,7 +1228,7 @@ export default function DevisEditorPage() {
     if (bot) {
       const current = bot.getHTML()
       const next = replaceDevisAmountPlaceholders(current, total, tndPerEurRef.current)
-      if (next !== current) bot.commands.setContent(next, { emitUpdate: false })
+      if (next !== current) setDocNoHistory(bot, next)
     }
   }, [total, loading, syncOfferTotalFromLignes])
 

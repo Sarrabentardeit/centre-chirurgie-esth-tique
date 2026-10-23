@@ -230,7 +230,13 @@ export function loadDevisCustomContentForEditor(input: {
   // Lettre déjà en base : renvoyer le HTML tel quel (aucun refresh / layout / couleurs).
   // Ces passes (restoreCanonical, applyDiagnosticLayout, salmon…) mélangent TipTap à chaque load.
   if (hasSavedLetter && !letterRebuilt) {
-    const repaired = repairDevisEditorTopHtml(topRaw)
+    // Bloc « Votre devis inclut / Notre forfait exclut » perdu (anciennes versions) :
+    // le remettre depuis les cases du devis, sans toucher au reste de la lettre.
+    let savedTop = topRaw
+    if (letterCtx && !hasOffreInclutExclutHeadings(savedTop)) {
+      savedTop = refreshOffreInclutExclutInTopHtml(savedTop, letterCtx)
+    }
+    const repaired = repairDevisEditorTopHtml(savedTop)
     const wasRepaired = repaired !== topRaw
     return {
       topHtml: repaired,
@@ -451,7 +457,10 @@ export function refreshDevisCustomContentParts(input: {
     preserveManualLayout: input.preserveManualLayout === true,
     preserveManualDiagnostic,
   })
-  if (input.syncInclutExclut === false && typeof input.previousNotesSejour === 'string') {
+  // Bloc inclut / exclut absent de la lettre enregistrée : le remettre depuis les cases.
+  if (!hasOffreInclutExclutHeadings(topHtml)) {
+    topHtml = refreshOffreInclutExclutInTopHtml(topHtml, ctx)
+  } else if (input.syncInclutExclut === false && typeof input.previousNotesSejour === 'string') {
     topHtml = applyModalInclutExclutDeltaToTopHtml(
       topHtml,
       { ...ctx, activeDevis: { ...input.devis, notesSejour: input.previousNotesSejour } },

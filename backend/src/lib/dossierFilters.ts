@@ -65,13 +65,19 @@ export function parseCreePar(value: unknown): CompteCreeParFilter | undefined {
   return undefined
 }
 
+const CABINET_CREE_PAR: Array<'medecin' | 'gestionnaire'> = ['medecin', 'gestionnaire']
+
 /** Patients = inscriptions / formulaires (patiente). Cabinet = pré-dossiers staff. */
-export function creeParWhere(creePar?: CompteCreeParFilter) {
+export function creeParWhere(creePar?: CompteCreeParFilter): {
+  creePar: 'patiente' | 'medecin' | 'gestionnaire' | { in: Array<'medecin' | 'gestionnaire'> }
+} {
   if (creePar === 'cabinet') {
-    return { creePar: { in: ['medecin', 'gestionnaire'] as const } }
+    return { creePar: { in: CABINET_CREE_PAR } }
   }
-  if (creePar) return { creePar }
-  return { creePar: 'patiente' as const }
+  if (creePar === 'medecin' || creePar === 'gestionnaire' || creePar === 'patiente') {
+    return { creePar }
+  }
+  return { creePar: 'patiente' }
 }
 
 export function buildPatientStatusWhere(
@@ -122,7 +128,7 @@ export async function countDossierBuckets(
     prisma.patient.count({ where: { status: { in: ALL_ACTIVE_STATUSES as unknown as never[] }, ...origin } }),
     prisma.patient.count({
       where: {
-        creePar: { in: ['medecin', 'gestionnaire'] },
+        creePar: { in: CABINET_CREE_PAR },
         status: { in: ALL_ACTIVE_STATUSES as unknown as never[] },
       },
     }),

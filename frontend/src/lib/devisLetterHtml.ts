@@ -314,7 +314,8 @@ function refreshConvalescenceInTopHtml(html: string, ctx: DevisLetterContext): s
     out = out.replace(blockRe, fresh)
   } else {
     // Anciennes lettres sans marqueurs : remplacer toute la section convalescence.
-    const startRe = /<p\b[^>]*>[\s\S]*?D[ée]tails de votre s[ée]jour de convalescence\s*:[\s\S]*?<\/p>/i
+    // Tempered : rester DANS le même <p> (sinon le match part du 1er paragraphe de la lettre).
+    const startRe = /<p\b[^>]*>(?:(?!<\/p>)[\s\S])*?D[ée]tails de votre s[ée]jour de convalescence\s*:(?:(?!<\/p>)[\s\S])*?<\/p>/i
     const startMatch = startRe.exec(out)
     if (startMatch && startMatch.index != null) {
       const start = startMatch.index
@@ -322,7 +323,14 @@ function refreshConvalescenceInTopHtml(html: string, ctx: DevisLetterContext): s
       const nextStop = after.search(
         /À titre de traitement pr[ée]ventif|Examens m[ée]dicaux n[ée]cessaires|Offre de prix\s*:/i,
       )
-      const end = nextStop >= 0 ? start + startMatch[0].length + nextStop : out.length
+      // Reculer au <p> qui contient le texte d’arrêt (sinon on coupe APRÈS sa balise ouvrante :
+      // le titre perd son style devis-heading et laisse un <p></p> vide).
+      let stopAt = nextStop
+      if (stopAt >= 0) {
+        const open = after.lastIndexOf('<p', stopAt)
+        if (open >= 0 && after.indexOf('</p>', open) >= stopAt) stopAt = open
+      }
+      const end = stopAt >= 0 ? start + startMatch[0].length + stopAt : out.length
       out = `${out.slice(0, start)}${fresh}${out.slice(end)}`
     } else if (isHotelAucun(sv.hotelSejour)) {
       // Pas de section : rien à patcher champ par champ
@@ -555,34 +563,42 @@ export function buildExamensMedicauxHtml(ctx: DevisLetterContext): string {
   const ink = DEVIS_CHARTE.charcoal
   const examTitle = (label: string) =>
     `<span class="devis-examen-item" style="color:${ink}">${label}</span>`
-  const examSubItem = (label: string) =>
-    `<li class="devis-examen-item"><span style="color:${ink}">${label}</span></li>`
 
   let body = paraExamensSalmonHi(
     "Les examens doivent avoir une validité maximum de 3 mois — À envoyer à J-10 de la date d'intervention",
   )
-  const examItems: string[] = []
+  // Pas de <ol>/<ul> imbriqués : TipTap avale toute la suite de la lettre en liste 1. 2. 3.
+  const examBlocks: string[] = []
+  let examNum = 1
   if (hasBilan) {
-    examItems.push(
-      `${examTitle('Bilan sanguin préopératoire complet')} — à effectuer avant la date d'intervention, afin de s'assurer de la faisabilité de l'intervention, qui comprend :
-<ul style="padding-left:22px;list-style-type:disc">
-${examSubItem('Bilan biologique (groupe sanguin, NFS, plaquettes, TP, TCA, CRP)')}
-${examSubItem('Bilan virologique HIV, Hépatite B et C.')}
-${examSubItem('URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT')}
-</ul>`,
+    examBlocks.push(
+      `<p class="devis-examen-item" style="color:${ink};margin:0 0 6px"><strong>${examNum}.</strong> ${examTitle('Bilan sanguin préopératoire complet')} — à effectuer avant la date d'intervention, afin de s'assurer de la faisabilité de l'intervention, qui comprend :</p>`,
     )
+    examNum += 1
+    for (const sub of [
+      'Bilan biologique (groupe sanguin, NFS, plaquettes, TP, TCA, CRP)',
+      'Bilan virologique HIV, Hépatite B et C.',
+      'URÉE CRÉÂT GLYCÉMIE. IONO ASAT ALAT',
+    ]) {
+      examBlocks.push(
+        `<p class="devis-examen-item devis-examen-sub" style="color:${ink};margin:0 0 4px;padding-left:22px">• ${sub}</p>`,
+      )
+    }
   }
   for (const e of otherExamens) {
     const label = e.trim()
     if (!label) continue
-    examItems.push(examTitle(label))
+    examBlocks.push(
+      `<p class="devis-examen-item" style="color:${ink};margin:0 0 6px"><strong>${examNum}.</strong> ${examTitle(label)}</p>`,
+    )
+    examNum += 1
   }
-  if (examItems.length === 0) {
-    examItems.push(examTitle('À compléter par le médecin'))
+  if (examBlocks.length === 0) {
+    examBlocks.push(
+      `<p class="devis-examen-item" style="color:${ink};margin:0 0 6px"><strong>1.</strong> ${examTitle('À compléter par le médecin')}</p>`,
+    )
   }
-  body += `<ol class="devis-examens-list" style="padding-left:22px;list-style-type:decimal">
-${examItems.map((item) => `<li class="devis-examen-item" style="color:${ink}">${item}</li>`).join('\n')}
-</ol>`
+  body += `<div class="devis-examens-list">\n${examBlocks.join('\n')}\n</div>`
   body += paraExamensSalmonHi(
     "Prévoir une copie papier des rapports médicaux pour la constitution de votre dossier médical à l'entrée de la clinique.",
   )
@@ -651,12 +667,23 @@ function stripTags(html: string): string {
 
 /** Zone HTML « Examens… » → juste avant « Offre de prix ». */
 function sliceExamensRegion(html: string): string {
-  const m = html.match(
-    /Examens médicaux nécessaires[\s\S]*?(?=<p\b[^>]*>[\s\S]*?Offre de prix\s*:)/i,
-  )
-  if (m) return m[0]
   const marked = html.match(new RegExp(`${EXAMENS_START}[\\s\\S]*?${EXAMENS_END}`, 'i'))
-  return marked?.[0] ?? ''
+  if (marked) return marked[0]
+
+  const startIdx = html.search(/Examens médicaux nécessaires/i)
+  if (startIdx < 0) return ''
+  const tail = html.slice(startIdx)
+
+  // Fin de zone = paragraphe « Prévoir une copie papier… » (dernier élément du bloc).
+  const copyIdx = tail.search(/copie papier des rapports/i)
+  if (copyIdx >= 0) {
+    const closeIdx = tail.indexOf('</p>', copyIdx)
+    return closeIdx >= 0 ? tail.slice(0, closeIdx + 4) : tail.slice(0, copyIdx)
+  }
+  // Sinon : jusqu’au paragraphe « Offre de prix » ou « Votre devis inclut ».
+  const endM = tail.match(/<p\b[^>]*>(?:(?!<\/p>)[\s\S])*?(?:Offre de prix|Votre devis inclut)\s*:/i)
+  if (endM && endM.index != null && endM.index > 0) return tail.slice(0, endM.index)
+  return ''
 }
 
 /** Extrait tous les libellés d’examens (dédupliqués) depuis le HTML sauvegardé. */
@@ -677,14 +704,20 @@ function extractExamensLabelsFromHtml(html: string): string[] {
     if (!labels.some((x) => x.toLowerCase() === t.toLowerCase())) labels.push(t)
   }
 
-  const region = sliceExamensRegion(html) || html
+  // JAMAIS toute la lettre : sinon chaque paragraphe devient un « examen » numéroté.
+  const region = sliceExamensRegion(html)
+  if (!region) return labels
 
-  // Toutes les listes numérotées de la zone (évite de ne lire que le 1er <ol> dupliqué)
+  // Ancien format <ol> + nouveau format <p class="devis-examen-item">
   for (const ol of region.matchAll(/<ol\b[^>]*>([\s\S]*?)<\/ol>/gi)) {
     for (const m of ol[1].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
       const head = m[1].split(/<ul\b/i)[0] ?? m[1]
       push(head)
     }
+  }
+  for (const m of region.matchAll(/<p\b[^>]*\bdevis-examen-item\b[^>]*>([\s\S]*?)<\/p>/gi)) {
+    if (/\bdevis-examen-sub\b/i.test(m[0])) continue
+    push(m[1])
   }
 
   if (labels.length === 0) {
@@ -696,7 +729,33 @@ function extractExamensLabelsFromHtml(html: string): string[] {
     }
   }
 
+  // Garde-fou : une vraie liste d’examens ne dépasse jamais ~15 lignes.
+  if (labels.length > 15) return []
   return labels
+}
+
+/**
+ * Lettre enregistrée par l’ancien bug : tout le texte recopié en « examens » numérotés
+ * (dizaines de `devis-examen-item` ou `<ol>` géant). Irrécupérable → à reconstruire.
+ */
+export function letterExamensAreCorrupted(html: string | null | undefined): boolean {
+  if (!html) return false
+  // Début de lettre perdu (ancien bug de troncature) : plus de « Bonjour » ni de récapitulatif
+  // alors que la suite (séjour / offre) existe → irrécupérable, on reconstruit.
+  const plain = html.replace(/<[^>]+>/g, ' ')
+  if (
+    /D[ée]tails de votre s[ée]jour|Offre de prix\s*:/i.test(plain)
+    && !/Bonjour/i.test(plain)
+    && !/R[ée]capitulatif de votre demande/i.test(plain)
+  ) {
+    return true
+  }
+  const items = (html.match(/<p\b[^>]*\bdevis-examen-item\b/gi) ?? []).length
+  if (items > 15) return true
+  for (const ol of html.matchAll(/<ol\b[^>]*>([\s\S]*?)<\/ol>/gi)) {
+    if ((ol[1].match(/<li\b/gi) ?? []).length > 15) return true
+  }
+  return false
 }
 
 const PREVENTIF_HEADING_RE = /traitement préventif,\s*prenez 2 semaines avant/i
@@ -1119,6 +1178,196 @@ export function hasDiagnosticBodyInTopHtml(html: string): boolean {
   return false
 }
 
+/**
+ * True seulement si le rapport a un diagnostic réel et que la lettre
+ * n’en montre pas encore le corps — pas un rebuild à chaque ouverture.
+ */
+export function letterDiagnosticIsStale(
+  topHtml: string,
+  diagnostic: string | null | undefined,
+): boolean {
+  const diag = (diagnostic ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!diag || diag === '—') return false
+  return !hasDiagnosticBodyInTopHtml(topHtml)
+}
+
+const LETTER_BODY_TRAPPED_IN_OL_RE =
+  /Tunis\s+le\s+|Bonjour,?|R[ée]capitulatif de votre demande|D[ée]tails de l['’]intervention|Votre devis inclut|Notre forfait exclut|Offre de prix|Devis\s+MC-/i
+
+/**
+ * Lettre « mélangée » (Offre avant Tunis, ou corps entier en liste 1. 2. 3…).
+ */
+export function letterStructureIsBroken(html: string): boolean {
+  if (!html?.trim()) return false
+
+  const offreIdx = html.search(/Offre de prix\s*:/i)
+  const tunisIdx = html.search(/Tunis\s+le\s+/i)
+  const bonjourIdx = html.search(/Bonjour\s*,/i)
+  const recapIdx = html.search(/R[ée]capitulatif de votre demande/i)
+  const examensPhraseIdx = html.search(/Les examens doivent avoir une validit/i)
+  const introIdx = [tunisIdx, bonjourIdx].filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? -1
+
+  if (offreIdx >= 0 && introIdx >= 0 && offreIdx < introIdx) return true
+  if (
+    offreIdx >= 0
+    && examensPhraseIdx > offreIdx
+    && introIdx > examensPhraseIdx
+  ) {
+    return true
+  }
+  if (offreIdx >= 0 && recapIdx > offreIdx && introIdx > offreIdx) return true
+
+  if (typeof DOMParser !== 'undefined' && LETTER_BODY_TRAPPED_IN_OL_RE.test(html)) {
+    const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+    const root = doc.getElementById('__root')
+    if (root) {
+      for (const ol of Array.from(root.querySelectorAll('ol'))) {
+        const n = ol.querySelectorAll(':scope > li').length
+        const t = ol.textContent ?? ''
+        if (n >= 4 && LETTER_BODY_TRAPPED_IN_OL_RE.test(t)) return true
+      }
+    }
+  }
+
+  return false
+}
+
+/**
+ * Si la lettre s’est retrouvée dans un &lt;ol&gt; (TipTap / examens), ressort les &lt;li&gt; en blocs.
+ */
+export function unwrapAccidentalDevisOrderedLists(html: string): string {
+  if (!html?.trim()) return html
+  if (typeof DOMParser === 'undefined') return html
+  if (!LETTER_BODY_TRAPPED_IN_OL_RE.test(html) && !/<ol\b/i.test(html)) return html
+
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+
+  const ols = Array.from(root.querySelectorAll('ol'))
+  let changed = false
+  for (const ol of ols) {
+    const text = (ol.textContent ?? '').replace(/\s+/g, ' ')
+    const n = ol.querySelectorAll(':scope > li').length
+    const trapsLetter = LETTER_BODY_TRAPPED_IN_OL_RE.test(text)
+    // Toute grosse liste qui contient de la lettre / offre → unwrap (même class examens).
+    if (!trapsLetter && n < 4) continue
+    if (!trapsLetter) continue
+
+    const frag = doc.createDocumentFragment()
+    for (const li of Array.from(ol.querySelectorAll(':scope > li'))) {
+      const kids = Array.from(li.childNodes)
+      const onlyBlock = kids.length === 1 && kids[0].nodeType === 1
+        && /^(P|H[1-6]|UL|OL|DIV|TABLE)$/i.test((kids[0] as Element).tagName)
+      if (onlyBlock) {
+        frag.appendChild(kids[0])
+      } else if (kids.length > 0) {
+        const p = doc.createElement('p')
+        while (li.firstChild) p.appendChild(li.firstChild)
+        frag.appendChild(p)
+      }
+    }
+    ol.replaceWith(frag)
+    changed = true
+  }
+  return changed ? root.innerHTML : html
+}
+
+/** Garde un seul couple inclut/exclut (supprime les doublons après unwrap). */
+function dedupeOffreInclutExclutBlocks(html: string): string {
+  if (!html?.trim() || typeof DOMParser === 'undefined') return html
+  const text = html.replace(/<[^>]+>/g, ' ')
+  const inclutCount = (text.match(/Votre devis inclut\s*:/gi) ?? []).length
+  const exclutCount = (text.match(/Notre forfait exclut\s*:/gi) ?? []).length
+  if (inclutCount <= 1 && exclutCount <= 1) return html
+
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+
+  const children = Array.from(root.children)
+  type Seg = { start: number; end: number; score: number }
+  const segs: Seg[] = []
+  for (let i = 0; i < children.length; i++) {
+    const t = (children[i].textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!/votre devis inclut\s*:/i.test(t)) continue
+    let end = i
+    let score = 0
+    for (let j = i; j < children.length; j++) {
+      const tj = (children[j].textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (j > i && (/offre de prix\s*:/i.test(tj) || /notre meilleure offre\s*:/i.test(tj) || /tunis\s+le\s+/i.test(tj))) {
+        break
+      }
+      end = j
+      if (children[j].tagName === 'UL' || children[j].tagName === 'OL') {
+        score += children[j].querySelectorAll(':scope > li').length
+      } else if (tj && !/votre devis inclut|notre forfait exclut/i.test(tj)) {
+        score += 1
+      }
+      if (/notre forfait exclut\s*:/i.test(tj) && j > i) {
+        // continue to absorb following list
+      }
+    }
+    segs.push({ start: i, end, score })
+  }
+  if (segs.length <= 1) return html
+
+  // Garder le segment avec le plus d’items (souvent celui édité), sinon le dernier.
+  segs.sort((a, b) => b.score - a.score || b.start - a.start)
+  const keep = segs[0]
+  const remove = segs.slice(1).sort((a, b) => b.start - a.start)
+  for (const seg of remove) {
+    if (seg.start === keep.start) continue
+    for (let i = seg.end; i >= seg.start; i--) {
+      children[i]?.remove()
+    }
+  }
+  return root.innerHTML
+}
+
+/**
+ * Répare le HTML éditeur : liste 1.2.3. parasite + doublons inclut/exclut.
+ * À appeler au chargement et avant chaque sauvegarde / PDF.
+ */
+export function repairDevisEditorTopHtml(html: string): string {
+  if (!html?.trim()) return html
+  let out = unwrapAccidentalDevisOrderedLists(html)
+  out = dedupeOffreInclutExclutBlocks(out)
+  out = restorePreventifHeadingStyle(out)
+  return out
+}
+
+/**
+ * Ancien bug : le titre « À titre de traitement préventif… » perdait son style de titre
+ * (texte simple + paragraphe vide). On ne touche QUE ce cas précis.
+ */
+function restorePreventifHeadingStyle(html: string): string {
+  if (!PREVENTIF_HEADING_RE.test(html) || typeof DOMParser === 'undefined') return html
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+  let changed = false
+  for (const p of Array.from(root.querySelectorAll('p'))) {
+    if (p.classList.contains('devis-heading')) continue
+    const text = norm(p.textContent ?? '')
+    if (!/^À titre de traitement préventif,\s*prenez 2 semaines avant/i.test(text)) continue
+    // Titre déjà stylé à la main (gras / souligné / couleur) : on respecte.
+    if (p.querySelector('strong, b, u, span[style]')) continue
+    const tmp = doc.createElement('div')
+    tmp.innerHTML = devisSectionHeading(text)
+    const fresh = tmp.firstElementChild
+    if (!fresh) continue
+    p.replaceWith(fresh)
+    const next = fresh.nextElementSibling
+    if (next && next.tagName === 'P' && norm(next.textContent ?? '') === '' && !next.classList.contains('devis-spacer')) {
+      next.remove()
+    }
+    changed = true
+  }
+  return changed ? root.innerHTML : html
+}
+
 /** Détecte une couleur bronze (hex ou rgb TipTap). */
 const DEVIS_BRONZE_COLOR_RE = /#81572d|rgb\(\s*129\s*,\s*87\s*,\s*45\s*\)/i
 
@@ -1453,7 +1702,9 @@ export function syncDevisLetterDataOnlyTopHtml(
   out = ensureOffrePrixSectionHeading(out)
   out = refreshExamensInTopHtml(out, ctx)
   out = refreshExamensSalmonPhrasesInTopHtml(out)
-  if (syncInclutExclut) out = refreshOffreInclutExclutInTopHtml(out, ctx)
+  if (syncInclutExclut) {
+    out = refreshOffreInclutExclutInTopHtml(out, ctx, { preserveManualItems: true })
+  }
   out = refreshDevisTitleInTopHtml(out, devisTitle)
   out = refreshHighlightByLabel(out, DUREE_TOTALE_SEJOUR_LABEL, sv.dureeTotale)
   {
@@ -1567,7 +1818,9 @@ export function refreshDevisLetterTopHtml(
   out = refreshExamensInTopHtml(out, ctx)
   out = refreshExamensSalmonPhrasesInTopHtml(out)
   out = normalizeInclutExclutLabels(out)
-  if (syncInclutExclut) out = refreshOffreInclutExclutInTopHtml(out, ctx)
+  if (syncInclutExclut) {
+    out = refreshOffreInclutExclutInTopHtml(out, ctx, { preserveManualItems: true })
+  }
   out = refreshDevisTitleInTopHtml(out, devisTitle)
   out = refreshSectionHeadingsInTopHtml(out)
   out = refreshSalmonFieldLabelsInTopHtml(out)
@@ -1789,18 +2042,153 @@ function ulFromLabels(labels: string[]): string {
 }
 
 /** Blocs « Votre devis inclut / Notre forfait exclut » selon les cases cochées. */
-export function buildOffreInclutExclutHtml(ctx: DevisLetterContext): string {
+export function buildOffreInclutExclutHtml(
+  ctx: DevisLetterContext,
+  extra?: { inclut?: string[]; exclut?: string[] },
+): string {
   const notes = pickDevis(ctx)?.notesSejour ?? ''
   const drainageNb = resolveDrainageNb(notes, pickRapport(ctx) ?? null)
   const contentionDetail = parseContentionDetailFromNotes(notes)
-  const inclut = labelsForInclut(resolveInclutIds(notes), drainageNb, contentionDetail)
-  const exclut = labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes))
+  const inclut = [
+    ...labelsForInclut(resolveInclutIds(notes), drainageNb, contentionDetail),
+    ...(extra?.inclut ?? []),
+  ]
+  const exclut = [
+    ...labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes)),
+    ...(extra?.exclut ?? []),
+  ]
   return `${OFFRE_INCLUT_START}
 ${devisSalmonHeading('Votre devis inclut :')}
 ${ulFromLabels(inclut)}
 ${devisSalmonHeading('Notre forfait exclut :')}
 ${ulFromLabels(exclut)}
 ${OFFRE_EXCLUT_END}`
+}
+
+/** Libellés inclut / exclut tels que les donnent les cases cochées du modal. */
+export function offreModalLabelsFromContext(ctx: DevisLetterContext): { inclut: string[]; exclut: string[] } {
+  const notes = pickDevis(ctx)?.notesSejour ?? ''
+  const drainageNb = resolveDrainageNb(notes, pickRapport(ctx) ?? null)
+  const contentionDetail = parseContentionDetailFromNotes(notes)
+  return {
+    inclut: labelsForInclut(resolveInclutIds(notes), drainageNb, contentionDetail),
+    exclut: labelsForIds(DEVIS_EXCLUT_ITEMS, resolveExclutIds(notes)),
+  }
+}
+
+const normOffreLabel = (s: string) =>
+  s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+
+/** Applique (ajouts/retraits) d’une liste modal sur la liste éditée, sans toucher au reste. */
+function mergeModalDeltaIntoList(current: string[], prev: string[], next: string[]): string[] {
+  const nextKeys = new Set(next.map(normOffreLabel))
+  const prevKeys = new Set(prev.map(normOffreLabel))
+  const removed = new Set([...prevKeys].filter((k) => !nextKeys.has(k)))
+  const added = next.filter((l) => !prevKeys.has(normOffreLabel(l)))
+
+  const out = current.filter((l) => !removed.has(normOffreLabel(l)))
+  for (const label of added) {
+    const key = normOffreLabel(label)
+    if (out.some((l) => normOffreLabel(l) === key)) continue
+    // Position = juste après le libellé modal précédent déjà présent dans la liste.
+    const idxInNext = next.findIndex((l) => normOffreLabel(l) === key)
+    let insertAt = 0
+    for (let i = idxInNext - 1; i >= 0; i--) {
+      const at = out.findIndex((l) => normOffreLabel(l) === normOffreLabel(next[i]))
+      if (at >= 0) { insertAt = at + 1; break }
+    }
+    out.splice(insertAt, 0, label)
+  }
+  return out
+}
+
+/**
+ * Lettre déjà personnalisée : applique uniquement ce qui a CHANGÉ dans les cases du modal
+ * (prevCtx → nextCtx). Les ajouts / suppressions faits à la main dans l’éditeur sont conservés.
+ */
+export function applyModalInclutExclutDeltaToTopHtml(
+  html: string,
+  prevCtx: DevisLetterContext,
+  nextCtx: DevisLetterContext,
+): string {
+  if (!html?.trim() || !hasOffreInclutExclutHeadings(html)) return html
+  const prev = offreModalLabelsFromContext(prevCtx)
+  const next = offreModalLabelsFromContext(nextCtx)
+  const same = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((x, i) => normOffreLabel(x) === normOffreLabel(b[i]))
+  if (same(prev.inclut, next.inclut) && same(prev.exclut, next.exclut)) return html
+
+  const current = extractOffreListLabelsFromHtml(html)
+  const merged = {
+    inclut: mergeModalDeltaIntoList(current.inclut, prev.inclut, next.inclut),
+    exclut: mergeModalDeltaIntoList(current.exclut, prev.exclut, next.exclut),
+  }
+  if (same(merged.inclut, current.inclut) && same(merged.exclut, current.exclut)) return html
+  return refreshOffreInclutExclutInTopHtml(html, nextCtx, { listsOverride: merged })
+}
+
+/** True si les titres inclut + exclut sont présents (texte, pas HTML TipTap découpé). */
+export function hasOffreInclutExclutHeadings(html: string): boolean {
+  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  return /Votre devis inclut\s*:/i.test(text) && /Notre forfait exclut\s*:/i.test(text)
+}
+
+/**
+ * Libellés des listes inclut/exclut dans le HTML éditeur
+ * (li + paragraphes saisis à la main juste après les titres).
+ */
+export function extractOffreListLabelsFromHtml(html: string): { inclut: string[]; exclut: string[] } {
+  const empty = { inclut: [] as string[], exclut: [] as string[] }
+  if (!html?.trim() || typeof DOMParser === 'undefined') return empty
+
+  const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return empty
+
+  const blocks = Array.from(root.children)
+  let mode: 'none' | 'inclut' | 'exclut' = 'none'
+  const inclut: string[] = []
+  const exclut: string[] = []
+
+  const pushFrom = (el: Element, into: string[]) => {
+    if (el.tagName === 'UL' || el.tagName === 'OL') {
+      for (const li of Array.from(el.querySelectorAll(':scope > li'))) {
+        const t = (li.textContent ?? '').replace(/\s+/g, ' ').trim()
+        if (t && t !== '—') into.push(t)
+      }
+      return
+    }
+    if (el.tagName === 'P') {
+      const t = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (!t || t === '—' || /votre devis inclut|notre forfait exclut|notre meilleure offre|offre de prix/i.test(t)) {
+        return
+      }
+      into.push(t)
+    }
+  }
+
+  for (const el of blocks) {
+    const t = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (/votre devis inclut\s*:/i.test(t)) {
+      mode = 'inclut'
+      const after = t.replace(/^[\s\S]*?votre devis inclut\s*:\s*/i, '').trim()
+      if (after && after !== '—') inclut.push(after)
+      continue
+    }
+    if (/notre forfait exclut\s*:/i.test(t)) {
+      mode = 'exclut'
+      const after = t.replace(/^[\s\S]*?notre forfait exclut\s*:\s*/i, '').trim()
+      if (after && after !== '—') exclut.push(after)
+      continue
+    }
+    if (/notre meilleure offre\s*:/i.test(t) || /^offre de prix\s*:/i.test(t)) {
+      if (/notre meilleure offre/i.test(t)) mode = 'none'
+      continue
+    }
+    if (mode === 'inclut') pushFrom(el, inclut)
+    else if (mode === 'exclut') pushFrom(el, exclut)
+  }
+  return { inclut, exclut }
 }
 
 /** Grand titre gris « Offre de prix : » — inséré si absent avant « Votre devis inclut ». */
@@ -1817,9 +2205,37 @@ export function ensureOffrePrixSectionHeading(html: string): string {
 /**
  * Resynchronise la section inclut/exclut depuis les cases du modal (notesSejour).
  * TipTap retire souvent les commentaires HTML → repli index-safe (pas de regex multi-<p>).
+ * `preserveManualItems` : conserve les lignes ajoutées dans l’éditeur (absentes du modal).
  */
-export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetterContext): string {
-  const fresh = buildOffreInclutExclutHtml(ctx)
+export function refreshOffreInclutExclutInTopHtml(
+  html: string,
+  ctx: DevisLetterContext,
+  opts?: { preserveManualItems?: boolean; listsOverride?: { inclut: string[]; exclut: string[] } },
+): string {
+  let fresh: string
+  if (opts?.listsOverride) {
+    fresh = `${OFFRE_INCLUT_START}
+${devisSalmonHeading('Votre devis inclut :')}
+${ulFromLabels(opts.listsOverride.inclut)}
+${devisSalmonHeading('Notre forfait exclut :')}
+${ulFromLabels(opts.listsOverride.exclut)}
+${OFFRE_EXCLUT_END}`
+  } else if (opts?.preserveManualItems) {
+    const fromEditor = extractOffreListLabelsFromHtml(html)
+    // Listes éditeur = source de vérité (ajouts ET suppressions).
+    if (fromEditor.inclut.length > 0 || fromEditor.exclut.length > 0) {
+      fresh = `${OFFRE_INCLUT_START}
+${devisSalmonHeading('Votre devis inclut :')}
+${ulFromLabels(fromEditor.inclut)}
+${devisSalmonHeading('Notre forfait exclut :')}
+${ulFromLabels(fromEditor.exclut)}
+${OFFRE_EXCLUT_END}`
+    } else {
+      fresh = buildOffreInclutExclutHtml(ctx)
+    }
+  } else {
+    fresh = buildOffreInclutExclutHtml(ctx)
+  }
   const heading = devisSectionHeading('Offre de prix :')
   let out = html
   const marked = new RegExp(`${OFFRE_INCLUT_START}[\\s\\S]*?${OFFRE_EXCLUT_END}`)
@@ -1834,18 +2250,39 @@ export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetter
         const afterExclutTitle = out.indexOf('</p>', exclutIdx)
         if (afterExclutTitle > exclutIdx) {
           let pos = afterExclutTitle + 4
-          for (let guard = 0; guard < 40; guard++) {
+          for (let guard = 0; guard < 80; guard++) {
             const empty = out.slice(pos).match(/^\s*<p\b[^>]*>\s*<\/p>/i)
-            if (!empty || empty[0].length === 0) break
-            pos += empty[0].length
+            if (empty && empty[0].length > 0) {
+              pos += empty[0].length
+              continue
+            }
+            const ulMatch = out.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)
+            if (ulMatch) {
+              pos += ulMatch[0].length
+              continue
+            }
+            const olMatch = out.slice(pos).match(/^\s*<ol\b[^>]*>[\s\S]*?<\/ol>/i)
+            if (olMatch) {
+              pos += olMatch[0].length
+              continue
+            }
+            // Paragraphes saisis à la main après la liste (hors titres suivants)
+            const pMatch = out.slice(pos).match(/^\s*<p\b[^>]*>([\s\S]*?)<\/p>/i)
+            if (pMatch) {
+              const pText = pMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+              if (
+                !pText
+                || /notre meilleure offre|offre de prix|modalit/i.test(pText)
+              ) {
+                break
+              }
+              pos += pMatch[0].length
+              continue
+            }
+            break
           }
-          const ulMatch = out.slice(pos).match(/^\s*<ul\b[^>]*>[\s\S]*?<\/ul>/i)
-          if (ulMatch) {
-            pos += ulMatch[0].length
-          } else {
-            const dash = out.slice(pos).match(/^\s*<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—\s*(?:<\/em>)?\s*<\/p>/i)
-            if (dash) pos += dash[0].length
-          }
+          const dash = out.slice(pos).match(/^\s*<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—\s*(?:<\/em>)?\s*<\/p>/i)
+          if (dash) pos += dash[0].length
           out = `${out.slice(0, start)}${fresh}${out.slice(pos)}`
         }
       }
@@ -1858,8 +2295,44 @@ export function refreshOffreInclutExclutInTopHtml(html: string, ctx: DevisLetter
           out = `${out}\n${heading}\n${fresh}`
         }
       } else {
+        // Ne pas tronquer tout le document après « Offre de prix » :
+        // remplacer seulement un éventuel ancien bloc, sinon insérer fresh juste après le titre.
         const close = out.indexOf('</p>', offreIdx)
-        if (close >= 0) out = `${out.slice(0, close + 4)}\n${fresh}`
+        if (close >= 0) {
+          const after = close + 4
+          const rest = out.slice(after)
+          if (hasOffreInclutExclutHeadings(rest) || /Votre devis inclut|Notre forfait exclut/i.test(rest)) {
+            // Repli : essayer de remplacer via extraction + rebuild déjà dans fresh
+            const restInclut = rest.search(/Votre devis inclut\s*:/i)
+            const restExclut = rest.search(/Notre forfait exclut\s*:/i)
+            if (restInclut >= 0 && restExclut > restInclut) {
+              const absInclut = after + restInclut
+              const start = out.lastIndexOf('<p', absInclut)
+              let pos = after + restExclut
+              const afterExclutTitle = out.indexOf('</p>', pos)
+              pos = afterExclutTitle > 0 ? afterExclutTitle + 4 : pos
+              for (let guard = 0; guard < 80; guard++) {
+                const ulMatch = out.slice(pos).match(/^\s*<[uo]l\b[^>]*>[\s\S]*?<\/[uo]l>/i)
+                if (ulMatch) { pos += ulMatch[0].length; continue }
+                const pMatch = out.slice(pos).match(/^\s*<p\b[^>]*>([\s\S]*?)<\/p>/i)
+                if (pMatch) {
+                  const pText = pMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+                  if (!pText || /notre meilleure offre/i.test(pText)) break
+                  if (/votre devis inclut|notre forfait exclut|offre de prix/i.test(pText)) break
+                  pos += pMatch[0].length
+                  continue
+                }
+                break
+              }
+              if (start >= 0) out = `${out.slice(0, start)}${fresh}${out.slice(pos)}`
+              else out = `${out.slice(0, after)}\n${fresh}${out.slice(pos)}`
+            } else {
+              out = `${out.slice(0, after)}\n${fresh}${out.slice(after)}`
+            }
+          } else {
+            out = `${out.slice(0, after)}\n${fresh}${out.slice(after)}`
+          }
+        }
       }
     }
   }
@@ -1885,21 +2358,32 @@ function normalizeOfferSubtitleHeadingHtml(subtitleHtml?: string | null): string
 
 /** Retire le sous-titre « Notre meilleure offre » du HTML haut (stockage / export PDF). */
 export function stripOfferMeilleureHeadingFromTopHtml(html: string): string {
-  let out = html.replace(
-    /<p\b[^>]*\bdevis-salmon-heading\b[^>]*>[\s\S]*?Notre meilleure offre\s*:[\s\S]*?<\/p>\s*/gi,
-    '',
-  )
-  const exclutIdx = out.search(/Notre forfait exclut\s*:/i)
-  if (exclutIdx >= 0 && OFFRE_MEILLEURE_RE.test(out)) {
-    const meilleureIdx = out.search(OFFRE_MEILLEURE_RE)
-    if (meilleureIdx > exclutIdx) {
-      const start = out.lastIndexOf('<p', meilleureIdx)
-      const end = out.indexOf('</p>', meilleureIdx)
-      if (start >= 0 && end > start) {
-        out = `${out.slice(0, start)}${out.slice(end + 4)}`
+  if (!html?.trim()) return html
+
+  // IMPORTANT : ne jamais utiliser un regex qui part d’un `devis-salmon-heading`
+  // antérieur (inclut/exclut) jusqu’à « Notre meilleure offre » — ça supprimait
+  // tout le bloc + les lignes ajoutées à la main, puis le PDF ne gardait que le modal.
+  if (typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+    const root = doc.getElementById('__root')
+    if (!root) return html
+    for (const p of Array.from(root.querySelectorAll('p'))) {
+      const t = (p.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (/^Notre meilleure offre\s*:?\s*$/i.test(t)) {
+        p.remove()
       }
     }
+    return stripTrailingEmptyParagraphs(root.innerHTML)
   }
+
+  // SSR : uniquement le paragraphe dont le texte est le sous-titre (pas de [\s\S]* traversant).
+  let out = html.replace(
+    /<p\b([^>]*)>([\s\S]*?)<\/p>/gi,
+    (full, _attrs: string, inner: string) => {
+      const t = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      return /^Notre meilleure offre\s*:?\s*$/i.test(t) ? '' : full
+    },
+  )
   return stripTrailingEmptyParagraphs(out)
 }
 

@@ -207,6 +207,7 @@ import {
   stripOfferMeilleureHeadingForExport,
   stripOfferMeilleureHeadingFromTopHtml,
   syncDureeTotaleSejourInHtml,
+  repairDevisEditorTopHtml,
   type DevisLetterContext,
 } from '@/lib/devisLetterHtml'
 import { diagnosticDarkFluoCss, diagnosticBlockGapCss, diagnosticZoneLeadCss, diagnosticVisageCss } from '@/lib/diagnosticFormat'
@@ -663,6 +664,8 @@ export default function DevisEditorPage() {
   const tndPerEurRef = useRef(DEFAULT_TND_PER_EUR)
   /** Empêche une auto-save TipTap trop tôt (ex. total encore à l’ancienne valeur). */
   const readyToSaveRef = useRef(false)
+  /** Lettre régénérée au chargement → une sauvegarde après hydrate. */
+  const letterRebuiltOnLoadRef = useRef(false)
   const offerTotalTouchedRef = useRef(false)
   const hydratedRef = useRef({
     top: '', bot: '', offer: '', total: '', headDesc: '', headPrice: '',
@@ -681,6 +684,7 @@ export default function DevisEditorPage() {
   const load = useCallback(async () => {
     if (!patientId) return
     readyToSaveRef.current = false
+    letterRebuiltOnLoadRef.current = false
     offerTotalTouchedRef.current = false
     hydratedRef.current = { top: '', bot: '', offer: '', total: '', headDesc: '', headPrice: '' }
     setLoading(true); setError(null)
@@ -730,13 +734,20 @@ export default function DevisEditorPage() {
           devis: dv,
           letterContext: ctx,
         })
-        setInitialTopHtml(restoreDevisCanonicalColorsInTopHtml(prepareDevisHtmlForEditor(
-          applyTopWithOfferHeading(
-            syncDureeTotaleSejourInHtml(loaded.topHtml, sv.dureeTotale),
-            loaded.offerSubtitle,
-            lignes.length > 0,
-          ),
-        )))
+        letterRebuiltOnLoadRef.current = loaded.letterRebuilt
+        // Lettre déjà perso : HTML brut (sinon sync/layout → chevauchement après envoi / F5).
+        // Rebuild seul : appliquer heading + durée + couleurs charte.
+        setInitialTopHtml(
+          loaded.letterRebuilt || !personalized
+            ? restoreDevisCanonicalColorsInTopHtml(
+                applyTopWithOfferHeading(
+                  syncDureeTotaleSejourInHtml(loaded.topHtml, sv.dureeTotale),
+                  loaded.offerSubtitle,
+                  lignes.length > 0,
+                ),
+              )
+            : loaded.topHtml,
+        )
         setInitialBottomHtml(loaded.botHtml)
         setInitialOfferTitle(
           looksLikeOfferDescHtml(loaded.offerTitle)
@@ -782,7 +793,14 @@ export default function DevisEditorPage() {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = undefined
     }
-    const rawTop = markDevisSpacerParagraphs(editorTopRef.current?.getHTML() ?? '')
+    const fromEditor = editorTopRef.current?.getHTML() ?? ''
+    const repairedTop = repairDevisEditorTopHtml(fromEditor)
+    // Remettre l’écran d’aplomb si TipTap a tout mis en liste 1. 2. 3.
+    if (editorTopRef.current && repairedTop !== fromEditor) {
+      editorTopRef.current.commands.setContent(repairedTop, { emitUpdate: false })
+      hydratedRef.current.top = repairedTop
+    }
+    const rawTop = markDevisSpacerParagraphs(repairedTop)
     const { topHtml, subtitleHtml } = stripOfferMeilleureHeadingForExport(rawTop)
     const botHtml = markDevisSpacerParagraphs(editorBotRef.current?.getHTML() ?? '')
     const offerTitle = editorOfferRef.current?.getHTML()?.trim()
@@ -868,10 +886,10 @@ export default function DevisEditorPage() {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = undefined
       }
-      if (id && readyToSaveRef.current) {
-        const content = snapshotCustomContent()
-        if (content) gestionnaireApi.saveDevisCustomContentKeepalive(id, content)
-      }
+      // Jamais sauvegarder avant hydrate TipTap (sinon on écrase la lettre DB).
+      if (!id || !readyToSaveRef.current) return
+      const content = snapshotCustomContent()
+      if (content) gestionnaireApi.saveDevisCustomContentKeepalive(id, content)
       void flushSave({ force: true })
     }
     const onVisibility = () => {
@@ -947,7 +965,8 @@ export default function DevisEditorPage() {
   useEffect(() => {
     if (!editorTop || !initialTopHtml || loading) return
     if (hydratedRef.current.top === initialTopHtml) return
-    editorTop.commands.setContent(restoreDevisCanonicalColorsInTopHtml(initialTopHtml), { emitUpdate: false })
+    // Pas de restoreCanonical ici : déjà fait au rebuild ; sur lettre sauvée ça chevauche.
+    editorTop.commands.setContent(initialTopHtml, { emitUpdate: false })
     hydratedRef.current.top = initialTopHtml
   }, [editorTop, initialTopHtml, loading])
   useEffect(() => {
@@ -984,10 +1003,17 @@ export default function DevisEditorPage() {
     editorOfferHeadPrice.commands.setContent(next, { emitUpdate: false })
     hydratedRef.current.headPrice = next
   }, [editorOfferHeadPrice, initialOfferHeadPrice, loading])
+  /* Auto-save seulement après hydrate lettre (évite d’écraser la DB avec un éditeur encore vide). */
   useEffect(() => {
-    if (loading) return
+    if (loading || !initialTopHtml || !initialBottomHtml) return
+    if (hydratedRef.current.top !== initialTopHtml) return
+    if (hydratedRef.current.bot !== initialBottomHtml) return
     readyToSaveRef.current = true
-  }, [loading])
+    if (letterRebuiltOnLoadRef.current) {
+      letterRebuiltOnLoadRef.current = false
+      void flushSave({ force: true }).then((ok) => { if (ok) setSaved(true) })
+    }
+  }, [loading, initialTopHtml, initialBottomHtml, editorTop, editorBot, flushSave])
 
   /* Sauvegarde manuelle */
   const handleManualSave = async () => {
@@ -1019,6 +1045,24 @@ export default function DevisEditorPage() {
       const fullHtml = await inlineHtmlImages(buildDevisFullHtml())
       const sentResult = await gestionnaireApi.sendDevis(id, { html: fullHtml })
       setSentOk(true)
+      // Ne pas recharger l’éditeur : load() retraitait le HTML et provoquait le chevauchement
+      // alors que le PDF patient (généré juste avant) restait correct.
+      setPatient((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          status: prev.status === 'devis_accepte' || prev.status === 'date_reservee'
+            || prev.status === 'logistique' || prev.status === 'intervention'
+            || prev.status === 'post_op' || prev.status === 'suivi_termine'
+            ? prev.status
+            : 'devis_envoye',
+          devis: (prev.devis ?? []).map((d) =>
+            d.id === id
+              ? { ...d, statut: 'envoye' as const, envoyeAt: d.envoyeAt ?? new Date().toISOString() }
+              : d,
+          ),
+        }
+      })
       if (opts?.whatsapp) {
         const opened = finishWhatsAppPopup(popup, sentResult.whatsapp?.whatsappUrl)
         toast({
@@ -1035,8 +1079,6 @@ export default function DevisEditorPage() {
           variant: 'success',
         })
       }
-
-      await load()
     } catch (e) {
       try { popup?.close() } catch { /* ignore */ }
       setSendError(e instanceof Error ? e.message : 'Envoi impossible.')
@@ -1105,20 +1147,37 @@ export default function DevisEditorPage() {
       defaultOfferSubtitleHtml(),
       lignesReset.length > 0,
     )
-    editorTop?.commands.setContent(topReset)
-    editorBot?.commands.setContent(buildBottomHtml(totalReset, tndPerEur))
-    editorOffer?.commands.setContent(buildOfferDescEditorHtml(defaultOffer, svReset.sejourLine, svReset.typeChambre))
-    editorOfferTotal?.commands.setContent(offerTotalEditorHtml(fmtNum(totalReset)))
-    editorOfferHeadDesc?.commands.setContent(defaultOfferHeadDescHtml())
-    editorOfferHeadPrice?.commands.setContent(defaultOfferHeadPriceHtml())
-    setInitialOfferTitle(buildOfferDescEditorHtml(defaultOffer, svReset.sejourLine, svReset.typeChambre))
+    const botReset = buildBottomHtml(totalReset, tndPerEur)
+    const offerReset = buildOfferDescEditorHtml(defaultOffer, svReset.sejourLine, svReset.typeChambre)
+    const totalHtmlReset = offerTotalEditorHtml(fmtNum(totalReset))
+    const headDescReset = defaultOfferHeadDescHtml()
+    const headPriceReset = defaultOfferHeadPriceHtml()
+    editorTop?.commands.setContent(topReset, { emitUpdate: false })
+    editorBot?.commands.setContent(botReset, { emitUpdate: false })
+    editorOffer?.commands.setContent(offerReset, { emitUpdate: false })
+    editorOfferTotal?.commands.setContent(totalHtmlReset, { emitUpdate: false })
+    editorOfferHeadDesc?.commands.setContent(headDescReset, { emitUpdate: false })
+    editorOfferHeadPrice?.commands.setContent(headPriceReset, { emitUpdate: false })
+    setInitialTopHtml(topReset)
+    setInitialBottomHtml(botReset)
+    setInitialOfferTitle(offerReset)
     setInitialOfferTotal(fmtNum(totalReset))
-    setInitialOfferHeadDesc(defaultOfferHeadDescHtml())
-    setInitialOfferHeadPrice(defaultOfferHeadPriceHtml())
+    setInitialOfferHeadDesc(headDescReset)
+    setInitialOfferHeadPrice(headPriceReset)
+    hydratedRef.current = {
+      top: topReset,
+      bot: botReset,
+      offer: loadOfferEditorHtml(offerReset, 'Séjour médical personnalisé'),
+      total: loadOfferTotalEditorHtml(fmtNum(totalReset), '0'),
+      headDesc: headDescReset,
+      headPrice: headPriceReset,
+    }
     offerTotalTouchedRef.current = false
     readyToSaveRef.current = true
     setSaved(false)
-    void flushSave()
+    void flushSave({ force: true }).then((ok) => {
+      if (ok) setSaved(true)
+    })
   }
 
   /* Calculs financiers (utilisés par l’aperçu et l’export PDF) */
@@ -1179,6 +1238,7 @@ export default function DevisEditorPage() {
       tndPerEur,
       preserveTopHtml: true,
       preserveBotHtml: true,
+      syncInclutExclut: false,
     })
   }
 

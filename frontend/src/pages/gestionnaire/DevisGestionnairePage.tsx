@@ -79,6 +79,7 @@ import { queryKeys } from '@/lib/queryKeys'
 import {
   buildGestionnaireDevisExportHtml,
   mergeDevisCustomContentOnModalSave,
+  applyModalInclutExclutDeltaToCustomContent,
   hasPersonalizedDevisLetter,
   devisOfferSegmentPlainText,
   splitDevisCustomContent,
@@ -1399,6 +1400,8 @@ export default function DevisGestionnairePage() {
   /** Une seule nouvelle version à l’ouverture « nouveau devis » ; les auto-saves suivants mettent à jour. */
   const createNewVersionOnceRef = useRef(false)
   const modalDevisIdRef = useRef<string | undefined>(undefined)
+  /** Notes séjour (cases cochées) à l’ouverture / dernier enregistrement : base du « delta » vers la lettre. */
+  const modalBaselineNotesRef = useRef<string | null>(null)
   const modalRapportIdRef = useRef<string | null>(null)
   const persistDraftSilentRef = useRef<() => Promise<boolean>>(async () => false)
   const [modalReady, setModalReady] = useState(false)
@@ -1882,6 +1885,7 @@ export default function DevisGestionnairePage() {
       setNbEnfants(p.nbEnfants !== '' ? p.nbEnfants : fromRapport.nbEnfants)
       setDureeSejourTotale(p.dureeSejourTotale !== '' ? p.dureeSejourTotale : fromRapport.dureeSejourTotale)
       setNotesSejour(p.noteSejour)
+      modalBaselineNotesRef.current = source.notesSejour ?? ''
       setInclutIds(p.inclutIds ?? defaultInclutIds())
       setExclutIds(p.exclutIds ?? defaultExclutIds())
       setDrainageNb(p.drainageNb ?? defaultDrainageNbFromRapport(rap))
@@ -1980,6 +1984,7 @@ export default function DevisGestionnairePage() {
           : 'Prérempli depuis le rapport médical.',
       )
     }
+    if (!(source && effectiveIntent !== 'create')) modalBaselineNotesRef.current = null
     setSent(false); setSavedDraft(false)
     setModalError(null)
     setCliniqueNomInvalid(false)
@@ -2115,6 +2120,7 @@ export default function DevisGestionnairePage() {
           },
           devisForSync,
         )
+        const alreadyPersonalized = hasPersonalizedDevisLetter(existingContent)
         const contentToPersist = mergeDevisCustomContentOnModalSave({
           customContent: existingContent,
           devis: devisForSync,
@@ -2122,11 +2128,16 @@ export default function DevisGestionnairePage() {
           tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
           syncOfferTotalFromLignes: true,
           syncOfferTitleFromDevis: false,
-          syncInclutExclut: true,
+          // Après perso éditeur : ne pas réécraser inclut/exclut depuis les cases,
+          // mais appliquer les cases ajoutées / retirées depuis l’ouverture du modal.
+          syncInclutExclut: !alreadyPersonalized,
+          previousNotesSejour: alreadyPersonalized ? modalBaselineNotesRef.current : undefined,
           preserveLegacyManualOfferTotal: false,
         })
         await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToPersist)
         savedDevis = { ...r.devis, customContent: contentToPersist }
+        // Les cases du modal sont désormais dans la lettre : nouvelle base du delta.
+        modalBaselineNotesRef.current = payload.notesSejour ?? ''
       }
 
       createNewVersionOnceRef.current = false
@@ -2328,16 +2339,35 @@ export default function DevisGestionnairePage() {
         tndPerEur: rate,
         syncOfferTotalFromLignes: true,
         syncOfferTitleFromDevis: false,
-        syncInclutExclut: true,
+        // Ne pas écraser les lignes ajoutées à la main dans l’éditeur.
+        syncInclutExclut: !personalized,
         preserveLegacyManualOfferTotal: false,
       })
       if (!personalized) {
         await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
       }
-      const split = splitDevisCustomContent(contentToSave)
+      // Lettre perso : contenu éditeur tel quel, SAUF cases modal ajoutées / retirées
+      // (inclut / exclut) qui sont appliquées et enregistrées.
+      let personalizedContent: string | null | undefined = null
+      if (personalized) {
+        personalizedContent = applyModalInclutExclutDeltaToCustomContent({
+          customContent: devisForPdf.customContent,
+          devis: devisForPdf,
+          letterContext: letterCtx,
+          previousNotesSejour: modalBaselineNotesRef.current,
+        })
+        if (personalizedContent && personalizedContent !== devisForPdf.customContent) {
+          await gestionnaireApi.saveDevisCustomContent(r.devis.id, personalizedContent)
+          modalBaselineNotesRef.current = payload.notesSejour ?? ''
+        }
+      }
+      const contentForPdf = personalized
+        ? (personalizedContent ?? devisForPdf.customContent ?? contentToSave)
+        : contentToSave
+      const split = splitDevisCustomContent(contentForPdf)
       const fullHtml = await inlineHtmlImages(
         buildGestionnaireDevisExportHtml({
-          devis: { ...devisForPdf, customContent: contentToSave },
+          devis: { ...devisForPdf, customContent: contentForPdf },
           patient: patientForPdf,
           topHtml: split.topHtml,
           botHtml: split.botHtml,
@@ -2353,7 +2383,7 @@ export default function DevisGestionnairePage() {
           tndPerEur: rate,
           preserveTopHtml: personalized,
           preserveBotHtml: personalized,
-          syncInclutExclut: true,
+          syncInclutExclut: !personalized,
         }),
       )
       const sentResult = await gestionnaireApi.sendDevis(r.devis.id, { html: fullHtml })
@@ -2508,6 +2538,7 @@ export default function DevisGestionnairePage() {
         devisForSync,
       )
       const savedOfferTitle = splitDevisCustomContent(devisForSync.customContent).offerTitle?.trim()
+      const alreadyPersonalized = hasPersonalizedDevisLetter(devisForSync.customContent)
       const contentToSave = mergeDevisCustomContentOnModalSave({
         customContent: devisForSync.customContent,
         devis: devisForSync,
@@ -2515,7 +2546,10 @@ export default function DevisGestionnairePage() {
         tndPerEur: tauxEur?.tndPerEur ?? DEFAULT_TND_PER_EUR,
         syncOfferTotalFromLignes: true,
         syncOfferTitleFromDevis: !savedOfferTitle,
-        syncInclutExclut: true,
+        // Lettre déjà personnalisée : ne pas écraser les lignes ajoutées à la main,
+        // appliquer seulement les cases modal ajoutées / retirées.
+        syncInclutExclut: !alreadyPersonalized,
+        previousNotesSejour: alreadyPersonalized ? modalBaselineNotesRef.current : undefined,
         preserveLegacyManualOfferTotal: false,
       })
       await gestionnaireApi.saveDevisCustomContent(r.devis.id, contentToSave)
@@ -2785,13 +2819,16 @@ export default function DevisGestionnairePage() {
         tndPerEur: rate,
         syncOfferTotalFromLignes: true,
         syncOfferTitleFromDevis: false,
-        syncInclutExclut: true,
+        syncInclutExclut: !personalized,
         preserveLegacyManualOfferTotal: false,
       })
-      const split = splitDevisCustomContent(contentToSave)
+      const contentForPdf = personalized
+        ? (devisForPdf.customContent ?? contentToSave)
+        : contentToSave
+      const split = splitDevisCustomContent(contentForPdf)
       const fullHtml = await inlineHtmlImages(
         buildGestionnaireDevisExportHtml({
-          devis: { ...devisForPdf, customContent: contentToSave },
+          devis: { ...devisForPdf, customContent: contentForPdf },
           patient: detail,
           topHtml: split.topHtml,
           botHtml: split.botHtml,
@@ -2807,7 +2844,7 @@ export default function DevisGestionnairePage() {
           tndPerEur: rate,
           preserveTopHtml: personalized,
           preserveBotHtml: personalized,
-          syncInclutExclut: true,
+          syncInclutExclut: !personalized,
         }),
       )
       const r = await gestionnaireApi.sendDevisRappel(devisForPdf.id, {

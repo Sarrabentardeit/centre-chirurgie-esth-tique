@@ -76,6 +76,7 @@ function Badge({ statut }: { statut: string }) {
 async function exportPdf(dv: DevisWithPatient) {
   try {
     const { topHtml, botHtml, offerTitle, offerTotal } = letterParts(dv)
+    const personalized = Boolean(topHtml?.trim())
     const html = await inlineHtmlImages(
       buildDevisExportHtml({
         devis: dv,
@@ -85,6 +86,9 @@ async function exportPdf(dv: DevisWithPatient) {
         botHtml,
         operationTitle: offerTitle,
         operationTotal: offerTotal,
+        preserveTopHtml: personalized,
+        preserveBotHtml: personalized,
+        syncInclutExclut: false,
       }),
     )
     const blob = await medecinApi.renderDevisPdf(html)

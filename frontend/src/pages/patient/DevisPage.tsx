@@ -171,11 +171,16 @@ export default function DevisPage() {
       patientIdentity.dossierNumber ||
       fresh.numeroDevis ||
       ''
+    const personalized = Boolean(fresh.customContent?.trim())
     const html = await inlineHtmlImages(
       buildDevisExportHtml({
         devis: fresh,
         dossierNumber: dossierRef,
         patientFullName: fullName,
+        // Lettre perso (ajouts à la main inclus) : ne pas resync depuis le modal.
+        preserveTopHtml: personalized,
+        preserveBotHtml: personalized,
+        syncInclutExclut: false,
       }),
     )
     const blob = await patientApi.renderDevisPdf(html)

@@ -14,13 +14,16 @@ import {
   pickRapport,
   refreshDevisLetterTopHtml,
   restoreDevisCanonicalColorsInTopHtml,
+  repairDevisEditorTopHtml,
+  letterExamensAreCorrupted,
+  applyModalInclutExclutDeltaToTopHtml,
+  hasOffreInclutExclutHeadings,
   refreshOffreInclutExclutInTopHtml,
   refreshSalmonFieldLabelsInTopHtml,
   sejourPdfFromContext,
   stripOfferMeilleureHeadingFromTopHtml,
   syncOfferSejourInHtml,
   stripDiagnosticOpTitlesInTopHtml,
-  upgradeDevisMissingLayoutInTopHtml,
   type DevisLetterContext,
 } from '@/lib/devisLetterHtml'
 import { replaceDevisAmountPlaceholders, DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
@@ -179,9 +182,13 @@ export function loadDevisCustomContentForEditor(input: {
   offerSubtitle: string
   offerHeadDesc: string
   offerHeadPrice: string
+  /** true si la lettre haute a été régénérée (à persister après hydrate). */
+  letterRebuilt: boolean
 } {
   const tndPerEur = input.tndPerEur ?? DEFAULT_TND_PER_EUR
   const split = splitDevisCustomContent(input.customContent)
+  // Lettre corrompue par l’ancien bug « tout numéroté » : on repart du modèle propre.
+  if (letterExamensAreCorrupted(split.topHtml)) split.topHtml = ''
   const hasSavedLetter = Boolean(split.topHtml.trim())
   const hasSavedBot = Boolean(split.botHtml.trim())
   const letterCtx = input.devis && input.letterContext
@@ -190,33 +197,19 @@ export function loadDevisCustomContentForEditor(input: {
 
   let topRaw = split.topHtml.trim() || input.defaultTopHtml
   let botRaw = split.botHtml.trim() || input.defaultBotHtml
+  let letterRebuilt = false
 
   if (letterCtx) {
-    if (hasSavedLetter) {
-      // Resync données + ordre des sections (examens → offre → inclut), sans écraser la mise en forme manuelle
-      topRaw = upgradeDevisMissingLayoutInTopHtml(
-        refreshDevisLetterTopHtml(topRaw, letterCtx, {
-          syncInclutExclut: true,
-          preserveManualLayout: true,
-          preserveManualDiagnostic: true,
-        }),
-      )
-    } else {
-      const refreshed = refreshDevisCustomContentParts({
-        customContent: input.customContent,
-        devis: input.devis!,
-        letterContext: input.letterContext!,
-        tndPerEur,
-        syncOfferTotalFromLignes: true,
-        syncOfferTitleFromDevis: false,
-        syncInclutExclut: true,
-        preserveLegacyManualOfferTotal: false,
-        preserveManualLayout: true,
-        preserveManualDiagnostic: true,
-      })
-      topRaw = refreshed.topHtml.trim() || input.defaultTopHtml
-      botRaw = refreshed.botHtml.trim() || input.defaultBotHtml
-      topRaw = prepareDevisHtmlForEditor(topRaw)
+    // Lettre déjà sauvegardée = source de vérité (ajouts / suppressions éditeur).
+    // Ne JAMAIS rebuild auto (diagnostic stale / structure) : ça remettait le modal
+    // à chaque réouverture et effaçait les modifs manuelles.
+    // Rebuild uniquement si vide → même source que « Réinitialiser ».
+    if (!hasSavedLetter) {
+      topRaw = prepareDevisHtmlForEditor(buildDevisLetterTopHtml(letterCtx))
+      if (!hasSavedBot) botRaw = input.defaultBotHtml
+      letterRebuilt = true
+    } else if (!hasSavedBot) {
+      botRaw = input.defaultBotHtml
     }
   }
 
@@ -233,6 +226,32 @@ export function loadDevisCustomContentForEditor(input: {
             )
       )
     : offerRaw
+
+  // Lettre déjà en base : renvoyer le HTML tel quel (aucun refresh / layout / couleurs).
+  // Ces passes (restoreCanonical, applyDiagnosticLayout, salmon…) mélangent TipTap à chaque load.
+  if (hasSavedLetter && !letterRebuilt) {
+    const repaired = repairDevisEditorTopHtml(topRaw)
+    const wasRepaired = repaired !== topRaw
+    return {
+      topHtml: repaired,
+      botHtml: hasSavedBot
+        ? botRaw
+        : prepareDevisHtmlForEditor(
+            refreshSalmonFieldLabelsInTopHtml(
+              replaceDevisAmountPlaceholders(botRaw, input.lignesTotal, tndPerEur),
+            ),
+          ),
+      offerTitle,
+      offerTotal: syncOfferTotalDisplay(split.offerTotal?.trim() || input.defaultOfferTotal, input.lignesTotal),
+      offerTotalManual: false,
+      offerSubtitle: split.offerSubtitle?.trim() || input.defaultOfferSubtitle || '',
+      offerHeadDesc: split.offerHeadDesc?.trim() || input.defaultOfferHeadDesc || '',
+      offerHeadPrice: split.offerHeadPrice?.trim() || input.defaultOfferHeadPrice || '',
+      // Persister la réparation (liste 1.2.3. / doublons) pour ne pas la revoir à chaque ouverture.
+      letterRebuilt: wasRepaired,
+    }
+  }
+
   const botPrepared = refreshSalmonFieldLabelsInTopHtml(
     replaceDevisAmountPlaceholders(botRaw, input.lignesTotal, tndPerEur),
   )
@@ -247,6 +266,7 @@ export function loadDevisCustomContentForEditor(input: {
     offerSubtitle: split.offerSubtitle?.trim() || input.defaultOfferSubtitle || '',
     offerHeadDesc: split.offerHeadDesc?.trim() || input.defaultOfferHeadDesc || '',
     offerHeadPrice: split.offerHeadPrice?.trim() || input.defaultOfferHeadPrice || '',
+    letterRebuilt,
   }
 }
 
@@ -364,10 +384,16 @@ export function refreshDevisCustomContentParts(input: {
    * Défaut : auto (conserver si corps diagnostic déjà enregistré).
    */
   preserveManualDiagnostic?: boolean
+  /**
+   * Notes séjour (cases cochées) AVANT cette sauvegarde modal. Avec syncInclutExclut=false,
+   * seules les cases ajoutées/retirées depuis sont appliquées à la lettre (ajouts manuels conservés).
+   */
+  previousNotesSejour?: string | null
 }): { topHtml: string; botHtml: string; offerTitle: string | null; offerTotal: string | null; contentToSave: string } {
   const tndPerEur = input.tndPerEur ?? DEFAULT_TND_PER_EUR
   const total = (input.devis.lignes ?? []).reduce((s, l) => s + l.quantite * l.prixUnitaire, 0)
   const split = splitDevisCustomContent(input.customContent)
+  if (letterExamensAreCorrupted(split.topHtml)) split.topHtml = ''
   let topHtml = split.topHtml
   let botHtml = split.botHtml
 
@@ -425,6 +451,13 @@ export function refreshDevisCustomContentParts(input: {
     preserveManualLayout: input.preserveManualLayout === true,
     preserveManualDiagnostic,
   })
+  if (input.syncInclutExclut === false && typeof input.previousNotesSejour === 'string') {
+    topHtml = applyModalInclutExclutDeltaToTopHtml(
+      topHtml,
+      { ...ctx, activeDevis: { ...input.devis, notesSejour: input.previousNotesSejour } },
+      ctx,
+    )
+  }
   topHtml = markDevisSpacerParagraphs(topHtml)
   botHtml = markDevisSpacerParagraphs(normalizeDevisBottomFluoInHtml(replaceDevisAmountPlaceholders(botHtml, letterTotal, tndPerEur)))
   return {
@@ -445,6 +478,43 @@ export function refreshDevisCustomContentParts(input: {
       },
     ),
   }
+}
+
+/**
+ * Lettre personnalisée + cases modal modifiées : applique UNIQUEMENT les cases
+ * ajoutées / retirées (inclut / exclut), le reste de la lettre reste tel quel.
+ * Retourne le même contenu s’il n’y a rien à appliquer.
+ */
+export function applyModalInclutExclutDeltaToCustomContent(input: {
+  customContent: string | null | undefined
+  devis: Devis
+  letterContext: DevisLetterContext
+  previousNotesSejour: string | null | undefined
+}): string | null | undefined {
+  const { customContent, previousNotesSejour } = input
+  if (!customContent?.trim() || typeof previousNotesSejour !== 'string') return customContent
+  if (previousNotesSejour === (input.devis.notesSejour ?? '')) return customContent
+  const split = splitDevisCustomContent(customContent)
+  if (!split.topHtml.trim()) return customContent
+  const nextCtx: DevisLetterContext = { ...input.letterContext, activeDevis: input.devis }
+  const prevCtx: DevisLetterContext = {
+    ...input.letterContext,
+    activeDevis: { ...input.devis, notesSejour: previousNotesSejour },
+  }
+  const topHtml = applyModalInclutExclutDeltaToTopHtml(split.topHtml, prevCtx, nextCtx)
+  if (topHtml === split.topHtml) return customContent
+  return joinDevisCustomContent(
+    topHtml,
+    split.botHtml,
+    split.offerTitle,
+    split.offerTotal,
+    split.offerTotalManual,
+    {
+      subtitle: split.offerSubtitle,
+      headDesc: split.offerHeadDesc,
+      headPrice: split.offerHeadPrice,
+    },
+  )
 }
 
 /**
@@ -549,22 +619,35 @@ export function buildDevisExportHtml(input: {
     botHtml = buildDevisLetterBottomHtml(letterTotal.amount, tndPerEur)
   }
   const preserveTop = input.preserveTopHtml === true
-  if (!preserveTop) {
+  if (preserveTop) {
+    // WYSIWYG : réparer liste parasite, puis HTML éditeur (ajouts / suppressions).
+    topHtml = repairDevisEditorTopHtml(topHtml)
+    topHtml = stripDiagnosticOpTitlesInTopHtml(topHtml)
+    topHtml = stripOfferMeilleureHeadingFromTopHtml(topHtml)
+    if (!hasOffreInclutExclutHeadings(topHtml)) {
+      topHtml = refreshOffreInclutExclutInTopHtml(topHtml, ctxForRefresh, {
+        preserveManualItems: true,
+      })
+    }
+  } else {
     topHtml = refreshDevisLetterTopHtml(topHtml, ctxForRefresh, {
       syncInclutExclut: input.syncInclutExclut !== false,
     })
-  } else {
-    topHtml = stripDiagnosticOpTitlesInTopHtml(topHtml)
-  }
-  topHtml = stripOfferMeilleureHeadingFromTopHtml(topHtml)
-  if (/Offre de prix\s*:/i.test(topHtml)) {
-    const inclutIdx = topHtml.search(/Votre devis inclut\s*:/i)
-    const exclutIdx = topHtml.search(/Notre forfait exclut\s*:/i)
-    const hasInclutList = inclutIdx >= 0 && /<ul\b/i.test(topHtml.slice(inclutIdx))
-    const hasExclutList =
-      exclutIdx >= 0 && (/<ul\b/i.test(topHtml.slice(exclutIdx)) || /<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—/i.test(topHtml.slice(exclutIdx)))
-    if (inclutIdx < 0 || exclutIdx < 0 || !hasInclutList || !hasExclutList) {
-      topHtml = refreshOffreInclutExclutInTopHtml(topHtml, ctxForRefresh)
+    topHtml = stripOfferMeilleureHeadingFromTopHtml(topHtml)
+    if (input.syncInclutExclut !== false) {
+      const hasHeadings = hasOffreInclutExclutHeadings(topHtml)
+      const inclutIdx = topHtml.search(/Votre devis inclut\s*:/i)
+      const exclutIdx = topHtml.search(/Notre forfait exclut\s*:/i)
+      const hasInclutList = inclutIdx >= 0 && /<ul\b/i.test(topHtml.slice(inclutIdx))
+      const hasExclutList =
+        exclutIdx >= 0
+        && (/<ul\b/i.test(topHtml.slice(exclutIdx))
+          || /<p\b[^>]*>\s*(?:<em\b[^>]*>)?\s*—/i.test(topHtml.slice(exclutIdx)))
+      if (!hasHeadings || !hasInclutList || !hasExclutList) {
+        topHtml = refreshOffreInclutExclutInTopHtml(topHtml, ctxForRefresh, {
+          preserveManualItems: true,
+        })
+      }
     }
   }
   topHtml = markDevisSpacerParagraphs(topHtml)

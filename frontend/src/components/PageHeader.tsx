@@ -30,6 +30,8 @@ type KpiTone = 'default' | 'amber' | 'sky' | 'emerald' | 'rose' | 'slate' | 'bra
 type KpiItem = {
   key: string
   label: string
+  /** Précision courte affichée sous le libellé (et en infobulle). */
+  hint?: string
   value: number | string
   active?: boolean
   onClick?: () => void
@@ -111,6 +113,7 @@ export function KpiStrip({ items, className }: { items: KpiItem[]; className?: s
             key={item.key}
             type={item.onClick ? 'button' : undefined}
             onClick={item.onClick}
+            title={item.hint ? `${item.label} — ${item.hint}` : undefined}
             className={cn(
               'shrink-0 min-w-[5.5rem] rounded-xl border-2 px-3 py-2.5 text-left transition-all',
               tone.card,
@@ -120,6 +123,9 @@ export function KpiStrip({ items, className }: { items: KpiItem[]; className?: s
           >
             <p className={cn('text-lg font-bold leading-none tabular-nums', tone.value)}>{item.value}</p>
             <p className={cn('text-[10px] font-semibold mt-1 whitespace-nowrap', tone.label)}>{item.label}</p>
+            {item.hint && (
+              <p className={cn('text-[9px] font-normal leading-tight whitespace-nowrap opacity-80', tone.label)}>{item.hint}</p>
+            )}
           </Comp>
         )
       })}

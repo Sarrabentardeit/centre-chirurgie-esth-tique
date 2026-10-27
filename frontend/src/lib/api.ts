@@ -1731,6 +1731,7 @@ export const gestionnaireApi = {
       dateArrivee?: string | null
       dateDepart?: string | null
       dateIntervention?: string | null
+      notes?: string
     },
   ) =>
     request<{ ok: true }>(`/gestionnaire/logistique/${patientId}`, {
@@ -1804,7 +1805,14 @@ export const gestionnaireApi = {
       funnel: GestionnaireFunnelStep[]
       statusDistribution: GestionnaireAnalyticsStatus[]
       monthlyDevis: GestionnaireAnalyticsMonthly[]
-      kpis: { acceptanceRate: number; rdvRate: number }
+      kpis: {
+        acceptanceRate: number
+        acceptanceAccepted: number
+        acceptanceBase: number
+        rdvRate: number
+        rdvPatients: number
+        rdvBase: number
+      }
     }>('/gestionnaire/analytics'),
 
   getAuditLogs: (params?: { entity?: string; action?: string; limit?: number }) => {

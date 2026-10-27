@@ -311,11 +311,11 @@ export async function getDashboard(gestionnaireUserId: string) {
     devisSansReponse,
     rdvAConfirmer,
     patientsLogistique,
-    funnel,
+    funnelData,
   ] = await Promise.all([
     prisma.patient.count({ where: { status: { not: 'abstention' } } }),
-    prisma.devis.count({ where: { statut: { in: ['brouillon', 'envoye'] } } }),
-    prisma.devis.count({ where: { statut: 'envoye' } }),
+    prisma.devis.count({ where: { deletedAt: null, statut: { in: ['brouillon', 'envoye'] } } }),
+    prisma.devis.count({ where: { deletedAt: null, statut: 'envoye' } }),
     prisma.agendaEvent.count({
       where: { type: 'rdv', statut: 'planifie', dateDebut: { gte: now } },
     }),
@@ -328,7 +328,7 @@ export async function getDashboard(gestionnaireUserId: string) {
       take: 6,
     }),
     prisma.devis.findMany({
-      where: { statut: 'envoye' },
+      where: { deletedAt: null, statut: 'envoye' },
       select: {
         id: true,
         numeroDevis: true,
@@ -376,23 +376,8 @@ export async function getDashboard(gestionnaireUserId: string) {
       orderBy: { updatedAt: 'desc' },
       take: 8,
     }),
-    Promise.all([
-      prisma.patient.count(),
-      prisma.formulaire.count({ where: { status: 'submitted' } }),
-      prisma.devis.count({ where: { statut: { in: ['envoye', 'accepte', 'refuse'] } } }),
-      prisma.agendaEvent.count({ where: { type: 'rdv', statut: { not: 'annule' } } }),
-      prisma.patient.count({ where: { status: { in: ['intervention', 'post_op'] } } }),
-    ]),
+    buildPatientFunnel(),
   ])
-
-  const [leads, forms, devisTotal, rdvCount, interventions] = funnel
-  const funnelData = [
-    { step: 'Leads', count: leads },
-    { step: 'Formulaires', count: forms },
-    { step: 'Devis', count: devisTotal },
-    { step: 'RDV', count: rdvCount },
-    { step: 'Interventions', count: interventions },
-  ]
 
   const { aProgrammer, realisees } = await getDashboardInterventions(prisma)
 
@@ -1974,14 +1959,17 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
   })
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
 
-  const notesLogistiques = JSON.stringify({
-    documents: input.documents,
-    notes: '',
-  })
-
   const previousLog = await prisma.logistique.findUnique({
     where: { patientId },
-    select: { dateArrivee: true },
+    select: { dateArrivee: true, notesLogistiques: true },
+  })
+  // Notes spéciales : si le client ne les envoie pas, on conserve celles déjà enregistrées.
+  const notes = typeof input.notes === 'string'
+    ? input.notes.trim()
+    : parseLogistiqueMeta(previousLog?.notesLogistiques ?? null).notes
+  const notesLogistiques = JSON.stringify({
+    documents: input.documents,
+    notes,
   })
   const nextArrivee = input.dateArrivee ? new Date(input.dateArrivee) : null
   const arrivalChanged = (previousLog?.dateArrivee?.getTime() ?? null) !== (nextArrivee?.getTime() ?? null)
@@ -2550,60 +2538,133 @@ export async function resetCommunicationTemplate(userId: string, key: TemplateKe
   return { ok: true as const }
 }
 
+/** Statut devis « principal » d’un patient (même règle que la page Gestion des devis). */
+function primaryDevisStatutOf(
+  devis: Array<{ statut: string }>,
+): 'brouillon' | 'envoye' | 'accepte' | 'refuse' | null {
+  if (!devis.length) return null
+  if (devis.some((d) => d.statut === 'accepte')) return 'accepte'
+  if (devis.some((d) => d.statut === 'envoye')) return 'envoye'
+  if (devis.some((d) => d.statut === 'brouillon')) return 'brouillon'
+  if (devis.some((d) => d.statut === 'refuse')) return 'refuse'
+  return null
+}
+
+/**
+ * Entonnoir en patients uniques (1 patient = 1 au plus à chaque étape).
+ * Pas de mélange versions de devis / événements agenda.
+ */
+async function buildPatientFunnel(): Promise<Array<{ step: string; count: number }>> {
+  const [patients, formulaires, devis, rdv, interventions] = await Promise.all([
+    prisma.patient.count(),
+    prisma.patient.count({
+      where: { formulaires: { some: { status: 'submitted' } } },
+    }),
+    prisma.patient.count({
+      where: {
+        devis: {
+          some: { deletedAt: null, statut: { in: ['envoye', 'accepte', 'refuse'] } },
+        },
+      },
+    }),
+    prisma.patient.count({
+      where: {
+        agendaEvents: {
+          some: { type: 'rdv', OR: [{ statut: null }, { statut: { not: 'annule' } }] },
+        },
+      },
+    }),
+    prisma.patient.count({
+      where: { status: { in: ['intervention', 'post_op', 'suivi_termine'] } },
+    }),
+  ])
+  return [
+    { step: 'Patients', count: patients },
+    { step: 'Formulaires', count: formulaires },
+    { step: 'Devis', count: devis },
+    { step: 'RDV', count: rdv },
+    { step: 'Interventions', count: interventions },
+  ]
+}
+
 export async function getAnalytics() {
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
-  const [statusRows, devisRows, agendaRows, patientsRows] = await Promise.all([
+
+  const [statusRows, devisRows, patientsWithDevis, funnel, totalPatients, patientsWithRdv] = await Promise.all([
     prisma.patient.groupBy({
       by: ['status'],
       _count: { _all: true },
     }),
     prisma.devis.findMany({
-      where: { dateCreation: { gte: monthStart } },
-      select: { statut: true, dateCreation: true, total: true },
-    }),
-    prisma.agendaEvent.count({
-      where: { type: 'rdv', statut: { not: 'annule' } },
+      where: { deletedAt: null, dateCreation: { gte: monthStart } },
+      select: { statut: true, dateCreation: true },
     }),
     prisma.patient.findMany({
-      where: { createdAt: { gte: monthStart } },
-      select: { createdAt: true },
+      select: {
+        devis: {
+          where: { deletedAt: null },
+          select: { statut: true },
+        },
+      },
+    }),
+    buildPatientFunnel(),
+    prisma.patient.count(),
+    prisma.patient.count({
+      where: {
+        agendaEvents: {
+          some: { type: 'rdv', OR: [{ statut: null }, { statut: { not: 'annule' } }] },
+        },
+      },
     }),
   ])
 
-  const funnel = [
-    { step: 'Leads', count: await prisma.patient.count() },
-    { step: 'Formulaires', count: await prisma.formulaire.count({ where: { status: 'submitted' } }) },
-    { step: 'Devis', count: await prisma.devis.count({ where: { statut: { in: ['envoye', 'accepte', 'refuse'] } } }) },
-    { step: 'RDV', count: agendaRows },
-    { step: 'Interventions', count: await prisma.patient.count({ where: { status: { in: ['intervention', 'post_op'] } } }) },
-  ]
-
-  const statusDistribution = statusRows.map((s) => ({
-    status: s.status,
-    count: s._count._all,
-  }))
+  const statusDistribution = statusRows
+    .map((s) => ({
+      status: s.status,
+      count: s._count._all,
+    }))
+    .sort((a, b) => b.count - a.count)
 
   const monthlyDevis: Array<{ key: string; mois: string; total: number; envoye: number; accepte: number }> = []
   for (let i = 5; i >= 0; i -= 1) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const mois = d.toLocaleDateString('fr-FR', { month: 'short' })
-    const rows = devisRows.filter((r) => r.dateCreation.toISOString().slice(0, 7) === key)
+    const rows = devisRows.filter((r) => {
+      const y = r.dateCreation.getFullYear()
+      const m = r.dateCreation.getMonth() + 1
+      return `${y}-${String(m).padStart(2, '0')}` === key
+    })
     monthlyDevis.push({
       key,
       mois,
-      total: rows.reduce((sum, r) => sum + r.total, 0),
+      // nombre de devis créés ce mois (pas la somme des montants)
+      total: rows.length,
       envoye: rows.filter((r) => r.statut === 'envoye').length,
       accepte: rows.filter((r) => r.statut === 'accepte').length,
     })
   }
 
-  const accepted = devisRows.filter((d) => d.statut === 'accepte').length
-  const sent = devisRows.filter((d) => d.statut === 'envoye' || d.statut === 'accepte' || d.statut === 'refuse').length
-  const acceptanceRate = sent > 0 ? Math.round((accepted / sent) * 100) : 0
-  const leads = patientsRows.length
-  const rdvRate = leads > 0 ? Math.round((agendaRows / leads) * 100) : 0
+  // Taux acceptation : patients dont le devis principal est accepté
+  // ÷ patients ayant un devis traité (envoyé / accepté / refusé). Même règle que Gestion des devis.
+  let acceptedPatients = 0
+  let treatedPatients = 0
+  for (const p of patientsWithDevis) {
+    const primary = primaryDevisStatutOf(p.devis)
+    if (primary === 'accepte' || primary === 'envoye' || primary === 'refuse') {
+      treatedPatients += 1
+      if (primary === 'accepte') acceptedPatients += 1
+    }
+  }
+  const acceptanceRate = treatedPatients > 0
+    ? Math.round((acceptedPatients / treatedPatients) * 100)
+    : 0
+
+  // Taux RDV : patients ayant ≥ 1 RDV non annulé ÷ tous les patients (≤ 100 %).
+  const rdvRate = totalPatients > 0
+    ? Math.round((patientsWithRdv / totalPatients) * 100)
+    : 0
 
   return {
     funnel,
@@ -2611,7 +2672,11 @@ export async function getAnalytics() {
     monthlyDevis,
     kpis: {
       acceptanceRate,
+      acceptanceAccepted: acceptedPatients,
+      acceptanceBase: treatedPatients,
       rdvRate,
+      rdvPatients: patientsWithRdv,
+      rdvBase: totalPatients,
     },
   }
 }

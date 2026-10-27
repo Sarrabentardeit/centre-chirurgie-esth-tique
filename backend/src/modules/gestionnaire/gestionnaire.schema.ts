@@ -58,6 +58,8 @@ export const logistiqueSchema = z.object({
   dateArrivee: z.string().optional().nullable(),
   dateDepart: z.string().optional().nullable(),
   dateIntervention: z.string().optional().nullable(),
+  /** Notes spéciales du dossier (infos complémentaires libres). */
+  notes: z.string().max(5000).optional(),
 })
 
 export type LogistiqueInput = z.infer<typeof logistiqueSchema>

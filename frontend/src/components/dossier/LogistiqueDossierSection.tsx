@@ -168,6 +168,7 @@ export function LogistiqueDossierSection({
   const [dateArrivee, setDateArrivee] = useState(base.dateArrivee ?? '')
   const [dateDepart, setDateDepart] = useState(base.dateDepart ?? '')
   const [dateIntervention, setDateIntervention] = useState(base.dateIntervention ?? '')
+  const [notes, setNotes] = useState(base.notes ?? '')
   const [uploadingKey, setUploadingKey] = useState<keyof GestionnaireLogistiqueDocuments | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -182,6 +183,7 @@ export function LogistiqueDossierSection({
     setDateArrivee(next.dateArrivee ?? '')
     setDateDepart(next.dateDepart ?? '')
     setDateIntervention(next.dateIntervention ?? '')
+    setNotes(next.notes ?? '')
   }, [patientId, initialData])
 
   const rowSnapshot = (): GestionnaireLogistiqueRow => ({
@@ -189,7 +191,7 @@ export function LogistiqueDossierSection({
     dateDepart: dateDepart || null,
     dateIntervention: dateIntervention || null,
     documents,
-    notes: '',
+    notes,
   })
 
   const essentialsDone = logistiqueEssentialsDoneCount(rowSnapshot())
@@ -204,6 +206,7 @@ export function LogistiqueDossierSection({
       dateArrivee: datetimeLocalToIso(dates?.dateArrivee ?? dateArrivee),
       dateDepart: datetimeLocalToIso(dates?.dateDepart ?? dateDepart),
       dateIntervention: datetimeLocalToIso(dates?.dateIntervention ?? dateIntervention),
+      notes,
     })
     await invalidateCache(queryKeys.logistique())
     onSaved?.()
@@ -255,7 +258,7 @@ export function LogistiqueDossierSection({
     try {
       await persist(documents)
       feedbackSuccess(
-        isComplete ? 'Logistique complète' : 'Dates enregistrées',
+        isComplete ? 'Logistique complète' : 'Logistique enregistrée',
         isComplete
           ? `Les ${LOGISTIQUE_DOCUMENT_TOTAL} documents et les 3 dates sont renseignés.`
           : `${essentialsDone}/${LOGISTIQUE_ESSENTIAL_TOTAL} élément(s) complété(s).`,
@@ -391,6 +394,22 @@ export function LogistiqueDossierSection({
         </div>
       </div>
 
+      <div className="space-y-1">
+        <label htmlFor={`logistique-notes-${patientId}`} className="text-xs font-semibold text-slate-600">
+          Notes spéciales
+        </label>
+        <Textarea
+          id={`logistique-notes-${patientId}`}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={4}
+          maxLength={5000}
+          placeholder="Informations supplémentaires sur le dossier (allergies, régime, accompagnant, demandes particulières…)"
+          className="text-sm leading-relaxed resize-y min-h-[96px]"
+        />
+        <p className="text-[11px] text-slate-400">Enregistrées avec le bouton « Enregistrer » ci-dessous.</p>
+      </div>
+
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -415,7 +434,7 @@ export function LogistiqueDossierSection({
               Enregistrer — dossier complet
             </>
           ) : (
-            'Enregistrer les dates'
+            'Enregistrer'
           )}
         </Button>
       </div>

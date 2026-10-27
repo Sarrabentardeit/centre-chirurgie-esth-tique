@@ -1274,6 +1274,12 @@ export interface GestionnaireAuditLog {
     role: string
     fullName: string
   }
+  context?: {
+    patientName: string | null
+    dossierNumber: string | null
+    numeroDevis: string | null
+    patientId: string | null
+  }
 }
 
 export interface GestionnaireLogistiqueDocument {

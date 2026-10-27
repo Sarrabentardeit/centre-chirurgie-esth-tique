@@ -1,58 +1,81 @@
 import { useRef, useState } from 'react'
-import { CheckCircle2, Clock, ExternalLink, FileText, ImageOff, Loader2, Upload } from 'lucide-react'
+import { CheckCircle2, Clock, ExternalLink, FileText, ImageOff, Loader2, Trash2, Upload } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { chatApi } from '@/lib/api'
 import { formatDate, formatIsoDateFrLong } from '@/lib/utils'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 
-function PhotoThumb({ url, fileName }: { url: string; fileName: string }) {
+function PhotoThumb({
+  url,
+  fileName,
+  onRemove,
+  removing,
+}: {
+  url: string
+  fileName: string
+  onRemove?: () => void
+  removing?: boolean
+}) {
   const [error, setError] = useState(false)
   const hasValidUrl = Boolean(url && url.trim())
   const showErrorState = error || !hasValidUrl
 
-  if (!hasValidUrl) {
-    return (
-      <div
-        className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30"
-        title={fileName}
-      >
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-50 text-slate-400 p-2">
-          <ImageOff className="h-6 w-6 shrink-0" />
-          <span className="text-[10px] text-center leading-tight truncate w-full">{fileName}</span>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
       className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30"
       title={fileName}
     >
-      {showErrorState ? (
+      {hasValidUrl ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute inset-0 block"
+        >
+          {showErrorState ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-50 text-slate-400 p-2">
+              <ImageOff className="h-6 w-6 shrink-0" />
+              <span className="text-[10px] text-center leading-tight truncate w-full">{fileName}</span>
+            </div>
+          ) : (
+            <img
+              src={url}
+              alt={fileName}
+              className="h-full w-full object-cover"
+              loading="lazy"
+              onError={() => setError(true)}
+            />
+          )}
+          {!showErrorState && (
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center pointer-events-none">
+              <ExternalLink className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          )}
+        </a>
+      ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-50 text-slate-400 p-2">
           <ImageOff className="h-6 w-6 shrink-0" />
           <span className="text-[10px] text-center leading-tight truncate w-full">{fileName}</span>
         </div>
-      ) : (
-        <img
-          src={url}
-          alt={fileName}
-          className="h-full w-full object-cover"
-          loading="lazy"
-          onError={() => setError(true)}
-        />
       )}
-      {!showErrorState && (
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-          <ExternalLink className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
+      {onRemove && (
+        <button
+          type="button"
+          aria-label={`Supprimer ${fileName}`}
+          disabled={removing}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onRemove()
+          }}
+          className="absolute right-1.5 top-1.5 z-10 rounded-full bg-white/95 p-1.5 text-rose-600 shadow hover:bg-white disabled:opacity-50"
+        >
+          {removing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+        </button>
       )}
-    </a>
+    </div>
   )
 }
 
@@ -79,6 +102,19 @@ function asString(value: unknown): string | null {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map((v) => String(v).trim()).filter(Boolean)
+}
+
+/** Retire une photo/doc du tableau payload (string URL ou `{ url, name }`). */
+export function removeFormulaireFileEntry(list: unknown[], fileRaw: string): unknown[] {
+  return list.filter((item) => {
+    if (typeof item === 'string') return item.trim() !== fileRaw
+    if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>
+      const raw = String(o.url ?? o.path ?? o.src ?? '').trim()
+      return raw !== fileRaw
+    }
+    return true
+  })
 }
 
 /** Photos / docs : string URL ou objet `{ url, name }`. */
@@ -169,6 +205,8 @@ export interface FormulairePayloadViewProps {
   showStatusBanner?: boolean
   /** Si fourni, affiche « Ajouter » photos / documents : les fichiers sont envoyés puis transmis au parent pour enregistrement. */
   onAddFiles?: (kind: 'photos' | 'documents', files: Array<{ url: string; name: string }>) => Promise<void>
+  /** Si fourni, affiche la suppression d’une photo / d’un document (valeur brute stockée dans le payload). */
+  onRemoveFile?: (kind: 'photos' | 'documents', fileRaw: string) => Promise<void>
 }
 
 const PHOTO_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif'
@@ -182,10 +220,17 @@ export function FormulairePayloadView({
   subtitle,
   showStatusBanner = true,
   onAddFiles,
+  onRemoveFile,
 }: FormulairePayloadViewProps) {
   const p = payload
   const [busy, setBusy] = useState<'photos' | 'documents' | null>(null)
+  const [removingRaw, setRemovingRaw] = useState<string | null>(null)
   const [addError, setAddError] = useState<string | null>(null)
+  const [pendingRemove, setPendingRemove] = useState<{
+    kind: 'photos' | 'documents'
+    raw: string
+    name: string
+  } | null>(null)
   const photosInputRef = useRef<HTMLInputElement | null>(null)
   const docsInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -212,6 +257,21 @@ export function FormulairePayloadView({
       setAddError(`Fichier(s) non envoyé(s) : ${failed.join(', ')}. Formats acceptés : JPG, PNG, WEBP, HEIC, PDF (12 Mo max).`)
     }
     setBusy(null)
+  }
+
+  const confirmRemove = async () => {
+    if (!onRemoveFile || !pendingRemove) return
+    const { kind, raw } = pendingRemove
+    setRemovingRaw(raw)
+    setAddError(null)
+    try {
+      await onRemoveFile(kind, raw)
+      setPendingRemove(null)
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Suppression impossible.')
+    } finally {
+      setRemovingRaw(null)
+    }
   }
 
   return (
@@ -333,7 +393,7 @@ export function FormulairePayloadView({
                       variant="outline"
                       size="sm"
                       className="gap-1.5"
-                      disabled={busy !== null}
+                      disabled={busy !== null || removingRaw !== null}
                       onClick={() => photosInputRef.current?.click()}
                     >
                       {busy === 'photos' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
@@ -360,7 +420,17 @@ export function FormulairePayloadView({
                   {asFileEntries(p.photos).map((photo, idx) => {
                     const url = resolveFormulaireFileUrl(photo.raw)
                     return (
-                      <PhotoThumb key={`${photo.raw}-${idx}`} url={url} fileName={photo.name} />
+                      <PhotoThumb
+                        key={`${photo.raw}-${idx}`}
+                        url={url}
+                        fileName={photo.name}
+                        removing={removingRaw === photo.raw}
+                        onRemove={
+                          onRemoveFile
+                            ? () => setPendingRemove({ kind: 'photos', raw: photo.raw, name: photo.name })
+                            : undefined
+                        }
+                      />
                     )
                   })}
                 </div>
@@ -376,7 +446,7 @@ export function FormulairePayloadView({
                       variant="outline"
                       size="sm"
                       className="gap-1.5"
-                      disabled={busy !== null}
+                      disabled={busy !== null || removingRaw !== null}
                       onClick={() => docsInputRef.current?.click()}
                     >
                       {busy === 'documents' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
@@ -404,6 +474,19 @@ export function FormulairePayloadView({
                     const url = resolveFormulaireFileUrl(doc.raw)
                     const fileName = doc.name
                     const hasValidUrl = Boolean(url && url.trim())
+                    const removeBtn = onRemoveFile ? (
+                      <button
+                        type="button"
+                        aria-label={`Supprimer ${fileName}`}
+                        disabled={removingRaw === doc.raw || busy !== null}
+                        onClick={() => setPendingRemove({ kind: 'documents', raw: doc.raw, name: fileName })}
+                        className="rounded-md p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        {removingRaw === doc.raw
+                          ? <Loader2 className="h-4 w-4 animate-spin" />
+                          : <Trash2 className="h-4 w-4" />}
+                      </button>
+                    ) : null
                     if (!hasValidUrl) {
                       return (
                         <div
@@ -414,21 +497,27 @@ export function FormulairePayloadView({
                           <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
                           <span className="text-sm truncate flex-1">{fileName}</span>
                           <ImageOff className="h-4 w-4 shrink-0" />
+                          {removeBtn}
                         </div>
                       )
                     }
                     return (
-                      <a
+                      <div
                         key={`${doc.raw}-${idx}`}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="flex items-center gap-2 rounded-lg border px-3 py-2 hover:bg-muted/30 transition-colors"
                       >
-                        <FileText className="h-4 w-4 text-rose-500 shrink-0" />
-                        <span className="text-sm truncate flex-1">{fileName}</span>
-                        <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0" />
-                      </a>
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 min-w-0 flex-1"
+                        >
+                          <FileText className="h-4 w-4 text-rose-500 shrink-0" />
+                          <span className="text-sm truncate flex-1">{fileName}</span>
+                          <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0" />
+                        </a>
+                        {removeBtn}
+                      </div>
                     )
                   })}
                 </div>
@@ -437,6 +526,24 @@ export function FormulairePayloadView({
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onClose={() => {
+          if (removingRaw === null) setPendingRemove(null)
+        }}
+        title={pendingRemove?.kind === 'photos' ? 'Supprimer cette photo ?' : 'Supprimer ce document ?'}
+        description={
+          pendingRemove
+            ? `« ${pendingRemove.name} » sera retiré du dossier. Cette action est immédiate.`
+            : undefined
+        }
+        confirmLabel="Supprimer"
+        cancelLabel="Annuler"
+        confirmVariant="destructive"
+        loading={removingRaw !== null}
+        onConfirm={() => { void confirmRemove() }}
+      />
     </div>
   )
 }

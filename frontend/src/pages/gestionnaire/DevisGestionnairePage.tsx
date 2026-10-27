@@ -32,7 +32,7 @@ import {
 } from '@/lib/api'
 import type { DossierStatus } from '@/types'
 import { DiagnosticFormattedView } from '@/components/dossier/DiagnosticFormattedView'
-import { FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
+import { FormulairePayloadView, removeFormulaireFileEntry } from '@/components/dossier/FormulairePayloadView'
 import { FormulairePayloadEditor } from '@/components/dossier/FormulairePayloadEditor'
 import { IdentityFicheEditor } from '@/components/dossier/IdentityFicheEditor'
 import { DossierParcoursNav, type DossierAnchor, type DossierParcoursStep } from '@/components/dossier/DossierParcoursNav'
@@ -1819,6 +1819,22 @@ export default function DevisGestionnairePage() {
     })
     applyFichePatient(r.patient)
     feedbackSuccess(kind === 'photos' ? 'Photos ajoutées' : 'Documents ajoutés')
+  }
+
+  const handleRemoveFormulaireFile = async (
+    currentPayload: Record<string, unknown>,
+    kind: 'photos' | 'documents',
+    fileRaw: string,
+  ) => {
+    if (!selectedPatient) return
+    const key = kind === 'photos' ? 'photos' : 'documentsPDF'
+    const existing = Array.isArray(currentPayload[key]) ? (currentPayload[key] as unknown[]) : []
+    const next = removeFormulaireFileEntry(existing, fileRaw)
+    const r = await gestionnaireApi.updatePatientFiche(selectedPatient, {
+      formulairePayload: { ...currentPayload, [key]: next },
+    })
+    applyFichePatient(r.patient)
+    feedbackSuccess(kind === 'photos' ? 'Photo supprimée' : 'Document supprimé')
   }
 
   const pickEditableDevis = (list: Devis[] | null | undefined): Devis | null => {
@@ -3907,6 +3923,9 @@ export default function DevisGestionnairePage() {
                                   showStatusBanner={false}
                                   onAddFiles={(kind, files) =>
                                     handleAddFormulaireFiles((f.payload ?? {}) as Record<string, unknown>, kind, files)
+                                  }
+                                  onRemoveFile={(kind, fileRaw) =>
+                                    handleRemoveFormulaireFile((f.payload ?? {}) as Record<string, unknown>, kind, fileRaw)
                                   }
                                 />
                                 {hiddenCount > 0 && (

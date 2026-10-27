@@ -786,16 +786,7 @@ export async function saveDevisCustomContent(gestionnaireId: string, devisId: st
     },
   })
 
-  await prisma.auditLog.create({
-    data: {
-      actorId: gestionnaireId,
-      actorRole: 'gestionnaire',
-      action: 'update',
-      entity: 'devis',
-      entityId: devisId,
-      after: { customContentSaved: true, length: content.length } as never,
-    },
-  }).catch(() => undefined)
+  // Pas d’entrée d’audit à chaque autosave de lettre (bruit inutile dans le journal).
 
   return { ok: true }
 }
@@ -912,12 +903,17 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
         patientId: patient.id,
         patientStatus: patient.status,
         numeroDevis: devis.numeroDevis,
+        patientName: patient.user.fullName,
+        dossierNumber: patient.dossierNumber,
       } as never,
       after: {
         statut: updated.statut,
         patientId: patient.id,
         patientStatus: keepStatus.includes(patient.status) ? patient.status : 'devis_envoye',
         numeroDevis: devis.numeroDevis,
+        patientName: patient.user.fullName,
+        dossierNumber: patient.dossierNumber,
+        kind: 'envoi_devis',
       } as never,
     },
   }).catch(() => undefined)
@@ -1418,12 +1414,17 @@ export async function refuseDevis(gestionnaireId: string, devisId: string, input
         statut: devis.statut,
         patientId: devis.patientId,
         numeroDevis: devis.numeroDevis,
+        patientName: devis.patient.user.fullName,
+        dossierNumber: devis.patient.dossierNumber,
       } as never,
       after: {
         statut: updated.statut,
         patientId: devis.patientId,
         numeroDevis: devis.numeroDevis,
+        patientName: devis.patient.user.fullName,
+        dossierNumber: devis.patient.dossierNumber,
         reason: reasonText || null,
+        kind: 'refus_devis',
       } as never,
     },
   }).catch(() => undefined)
@@ -1473,13 +1474,18 @@ export async function acceptDevis(gestionnaireId: string, devisId: string) {
         patientId: devis.patientId,
         patientStatus: devis.patient.status,
         numeroDevis: devis.numeroDevis,
+        patientName: devis.patient.user.fullName,
+        dossierNumber: devis.patient.dossierNumber,
       } as never,
       after: {
         statut: updated.statut,
         patientId: devis.patientId,
         patientStatus: 'devis_accepte',
         numeroDevis: devis.numeroDevis,
+        patientName: devis.patient.user.fullName,
+        dossierNumber: devis.patient.dossierNumber,
         source: 'gestionnaire',
+        kind: 'acceptation_devis',
       } as never,
     },
   }).catch(() => undefined)
@@ -1555,13 +1561,18 @@ export async function cancelAcceptDevis(gestionnaireId: string, devisId: string)
         patientId: devis.patientId,
         patientStatus: devis.patient.status,
         numeroDevis: devis.numeroDevis,
+        patientName: devis.patient.user.fullName,
+        dossierNumber: devis.patient.dossierNumber,
       } as never,
       after: {
         statut: updated.statut,
         patientId: devis.patientId,
         patientStatus: patientStatusAfter,
         numeroDevis: devis.numeroDevis,
+        patientName: devis.patient.user.fullName,
+        dossierNumber: devis.patient.dossierNumber,
         source: 'gestionnaire_annulation_acceptation',
+        kind: 'annulation_acceptation',
       } as never,
     },
   }).catch(() => undefined)
@@ -1643,6 +1654,9 @@ export async function deleteDevis(gestionnaireId: string, devisId: string) {
         total: devis.total,
         softDelete: true,
         chatPdfRemoved: true,
+        patientName: devis.patient.user.fullName,
+        dossierNumber: devis.patient.dossierNumber,
+        kind: 'suppression_devis',
       } as never,
     },
   }).catch(() => undefined)
@@ -3221,6 +3235,12 @@ export async function markAllNotificationsRead(userId: string) {
 
 const AUDIT_ENTITIES = ['devis', 'patient', 'message'] as const
 
+function auditMetaString(data: unknown, key: string): string | null {
+  if (!data || typeof data !== 'object') return null
+  const v = (data as Record<string, unknown>)[key]
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
 export async function listAuditLogs(input?: {
   entity?: string
   action?: string
@@ -3230,6 +3250,8 @@ export async function listAuditLogs(input?: {
   const entity = input?.entity?.trim()
   const action = input?.action?.trim()
 
+  // Exclure les autosaves de lettre EN BASE : sinon les ~4000 updates noient
+  // les vraies actions (status_change / delete) hors de la fenêtre take.
   const logs = await prisma.auditLog.findMany({
     where: {
       entity: entity && AUDIT_ENTITIES.includes(entity as (typeof AUDIT_ENTITIES)[number])
@@ -3238,6 +3260,13 @@ export async function listAuditLogs(input?: {
       ...(action
         ? { action: action as 'create' | 'update' | 'delete' | 'status_change' }
         : {}),
+      NOT: {
+        AND: [
+          { entity: 'devis' },
+          { action: 'update' },
+          { after: { path: ['customContentSaved'], equals: true } },
+        ],
+      },
     },
     orderBy: { createdAt: 'desc' },
     take: limit,
@@ -3252,21 +3281,107 @@ export async function listAuditLogs(input?: {
     : []
   const actorMap = new Map(actors.map((a) => [a.id, a]))
 
+  const devisIds = [...new Set(logs.filter((l) => l.entity === 'devis').map((l) => l.entityId))]
+  const patientIdsFromLogs = [
+    ...new Set(
+      logs.flatMap((l) => {
+        if (l.entity === 'patient') return [l.entityId]
+        const fromAfter = auditMetaString(l.after, 'patientId')
+        const fromBefore = auditMetaString(l.before, 'patientId')
+        return [fromAfter, fromBefore].filter((id): id is string => Boolean(id))
+      }),
+    ),
+  ]
+
+  const [devisRows, patientRows] = await Promise.all([
+    devisIds.length
+      ? prisma.devis.findMany({
+          where: { id: { in: devisIds } },
+          select: {
+            id: true,
+            numeroDevis: true,
+            version: true,
+            patient: {
+              select: {
+                id: true,
+                dossierNumber: true,
+                user: { select: { fullName: true } },
+              },
+            },
+          },
+        })
+      : Promise.resolve([]),
+    patientIdsFromLogs.length
+      ? prisma.patient.findMany({
+          where: { id: { in: patientIdsFromLogs } },
+          select: {
+            id: true,
+            dossierNumber: true,
+            user: { select: { fullName: true } },
+          },
+        })
+      : Promise.resolve([]),
+  ])
+
+  const devisMap = new Map(devisRows.map((d) => [d.id, d]))
+  const patientMap = new Map(patientRows.map((p) => [p.id, p]))
+
   return {
     logs: logs.map((l) => {
       const actor = actorMap.get(l.actorId)
+      const before = (l.before ?? null) as Record<string, unknown> | null
+      const after = (l.after ?? null) as Record<string, unknown> | null
+
+      let patientName =
+        auditMetaString(after, 'patientName')
+        ?? auditMetaString(before, 'patientName')
+        ?? auditMetaString(before, 'fullName')
+      let dossierNumber =
+        auditMetaString(after, 'dossierNumber')
+        ?? auditMetaString(before, 'dossierNumber')
+      let numeroDevis =
+        auditMetaString(after, 'numeroDevis')
+        ?? auditMetaString(before, 'numeroDevis')
+
+      if (l.entity === 'devis') {
+        const d = devisMap.get(l.entityId)
+        if (d) {
+          patientName = patientName ?? d.patient.user.fullName
+          dossierNumber = dossierNumber ?? d.patient.dossierNumber
+          numeroDevis = numeroDevis ?? d.numeroDevis
+        }
+      }
+
+      const patientId =
+        l.entity === 'patient'
+          ? l.entityId
+          : (auditMetaString(after, 'patientId') ?? auditMetaString(before, 'patientId'))
+      if (patientId && (!patientName || !dossierNumber)) {
+        const p = patientMap.get(patientId)
+        if (p) {
+          patientName = patientName ?? p.user.fullName
+          dossierNumber = dossierNumber ?? p.dossierNumber
+        }
+      }
+
       return {
         id: l.id,
         action: l.action,
         entity: l.entity,
         entityId: l.entityId,
-        before: l.before,
-        after: l.after,
+        before,
+        after,
         createdAt: l.createdAt.toISOString(),
         actor: {
           id: l.actorId,
           role: l.actorRole,
           fullName: actor?.fullName ?? 'Utilisateur inconnu',
+        },
+        context: {
+          patientName: patientName ?? null,
+          dossierNumber: dossierNumber ?? null,
+          numeroDevis: numeroDevis ?? null,
+          patientId: patientId ?? null,
         },
       }
     }),

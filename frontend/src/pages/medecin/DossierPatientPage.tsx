@@ -19,7 +19,7 @@ import { medecinApi } from '@/lib/api'
 import type { Devis, RendezVous } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
-import { InfoRow, FormulairePayloadView } from '@/components/dossier/FormulairePayloadView'
+import { InfoRow, FormulairePayloadView, removeFormulaireFileEntry } from '@/components/dossier/FormulairePayloadView'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DiagnosticPicker } from '@/components/dossier/DiagnosticPicker'
 import { FormulairePayloadEditor } from '@/components/dossier/FormulairePayloadEditor'
@@ -703,6 +703,17 @@ export default function DossierPatientPage() {
                   const res = await medecinApi.updatePatientFormulaire(id, {
                     ...current,
                     [key]: [...existing, ...files.map((f) => f.url)],
+                  })
+                  setPatient(res.patient as PatientDetail)
+                }}
+                onRemoveFile={async (kind, fileRaw) => {
+                  if (!id) return
+                  const current = (formulaire.payload ?? {}) as Record<string, unknown>
+                  const key = kind === 'photos' ? 'photos' : 'documentsPDF'
+                  const existing = Array.isArray(current[key]) ? (current[key] as unknown[]) : []
+                  const res = await medecinApi.updatePatientFormulaire(id, {
+                    ...current,
+                    [key]: removeFormulaireFileEntry(existing, fileRaw),
                   })
                   setPatient(res.patient as PatientDetail)
                 }}

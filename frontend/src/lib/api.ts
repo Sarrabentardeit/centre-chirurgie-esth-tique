@@ -1372,6 +1372,17 @@ export interface GestionnaireAnalyticsMonthly {
   accepte: number
 }
 
+export interface GestionnaireAnalyticsMonthlyPatients {
+  key: string
+  mois: string
+  total: number
+}
+
+export interface GestionnaireAnalyticsSource {
+  source: string
+  count: number
+}
+
 export interface GestionnaireUserRow {
   id: string
   fullName: string
@@ -1805,10 +1816,15 @@ export const gestionnaireApi = {
       funnel: GestionnaireFunnelStep[]
       statusDistribution: GestionnaireAnalyticsStatus[]
       monthlyDevis: GestionnaireAnalyticsMonthly[]
+      monthlyPatients: GestionnaireAnalyticsMonthlyPatients[]
+      sourceDistribution: GestionnaireAnalyticsSource[]
       kpis: {
         acceptanceRate: number
         acceptanceAccepted: number
         acceptanceBase: number
+        responseRate: number
+        responseResponded: number
+        responseBase: number
         rdvRate: number
         rdvPatients: number
         rdvBase: number

@@ -91,12 +91,7 @@ export function DiagnosticPicker({
     return !current || current === lastAppliedRef.current.trim() || current === composed.trim()
   }
 
-  const applySelection = (nextIds: string[]) => {
-    const composed = composeDiagnosticTemplates(nextIds)
-    lastAppliedRef.current = composed
-    setSelectedIds(nextIds)
-    onDiagnosticChange(composed)
-
+  const syncInterventionsList = (nextIds: string[]) => {
     const labels = interventionLabelsFromIds(nextIds)
     const previousLabels = interventionLabelsFromIds(selectedIds)
     const currentLines = interventions
@@ -112,10 +107,47 @@ export function DiagnosticPicker({
     onInterventionsChange(nextLines.join('\n'))
   }
 
+  /** Remplace tout le diagnostic par les modèles des interventions sélectionnées. */
+  const applySelectionReplace = (nextIds: string[]) => {
+    const composed = composeDiagnosticTemplates(nextIds)
+    lastAppliedRef.current = composed
+    setSelectedIds(nextIds)
+    onDiagnosticChange(composed)
+    syncInterventionsList(nextIds)
+  }
+
+  /**
+   * Garde le texte actuel et ajoute seulement les modèles des nouvelles interventions
+   * (cas : 2e opération sur un diagnostic déjà modifié).
+   */
+  const applySelectionAppend = (nextIds: string[]) => {
+    const addedIds = nextIds.filter((id) => !selectedIds.includes(id))
+    setSelectedIds(nextIds)
+    syncInterventionsList(nextIds)
+
+    if (addedIds.length === 0) {
+      lastAppliedRef.current = diagnostic
+      return
+    }
+
+    const addedBlock = composeDiagnosticTemplates(addedIds)
+    // Renuméroter le bloc ajouté à la suite du texte existant
+    const existingCount = (diagnostic.match(/^\s*\d+\s*[-–.)]/gm) ?? []).length
+    const renumbered = addedBlock.replace(/^\s*(\d+)\s*[-–.]/gm, (_m, n) => {
+      const idx = Number(n)
+      return `${existingCount + idx} -`
+    })
+    const nextText = diagnostic.trim()
+      ? `${diagnostic.trim()}\n\n${renumbered}`
+      : composeDiagnosticTemplates(nextIds)
+    lastAppliedRef.current = nextText
+    onDiagnosticChange(nextText)
+  }
+
   const requestSelection = (nextIds: string[]) => {
     if (disabled) return
     if (isPristine()) {
-      applySelection(nextIds)
+      applySelectionReplace(nextIds)
       return
     }
     setPendingIds(nextIds)
@@ -243,13 +275,18 @@ export function DiagnosticPicker({
       <ConfirmDialog
         open={pendingIds !== null}
         onClose={() => setPendingIds(null)}
-        title="Remplacer le diagnostic ?"
-        description="Le texte actuel a été modifié. Le modèle de l’intervention choisie remplacera ce contenu. Vous pourrez ensuite le rééditer."
-        confirmLabel="Remplacer"
+        title="Diagnostic déjà modifié"
+        description="Le texte actuel a été modifié. Vous pouvez le garder tel quel, y ajouter le modèle de la nouvelle intervention, ou tout remplacer par les modèles sélectionnés."
         cancelLabel="Garder mon texte"
+        secondaryLabel="Ajouter au texte"
+        confirmLabel="Remplacer"
         confirmVariant="brand"
+        onSecondary={() => {
+          if (pendingIds) applySelectionAppend(pendingIds)
+          setPendingIds(null)
+        }}
         onConfirm={() => {
-          if (pendingIds) applySelection(pendingIds)
+          if (pendingIds) applySelectionReplace(pendingIds)
           setPendingIds(null)
         }}
       />

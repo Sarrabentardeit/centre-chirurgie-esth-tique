@@ -266,6 +266,22 @@ function primaryDevisStatut(
   return null
 }
 
+/** En attente et aucun devis envoyé consulté par la patiente. */
+function isDevisNonConsulte(
+  devis: Array<{ statut?: string | null; vuParPatientAt?: string | null }> | undefined | null,
+): boolean {
+  if (primaryDevisStatut(devis) !== 'envoye' || !devis?.length) return false
+  return !devis.some((d) => d.statut === 'envoye' && d.vuParPatientAt)
+}
+
+/** En attente et au moins un devis envoyé déjà consulté. */
+function isDevisConsulte(
+  devis: Array<{ statut?: string | null; vuParPatientAt?: string | null }> | undefined | null,
+): boolean {
+  if (primaryDevisStatut(devis) !== 'envoye' || !devis?.length) return false
+  return devis.some((d) => d.statut === 'envoye' && d.vuParPatientAt)
+}
+
 /** Repli si l’API Communication est indisponible. */
 const ABSTENTION_MESSAGE_FALLBACK = `Chère Madame,
 Merci encore pour votre intérêt et la confiance que vous témoignez envers le cabinet du Dr CHENNOUFI.
@@ -1308,7 +1324,7 @@ export default function DevisGestionnairePage() {
   const [cliniqueNomInvalid, setCliniqueNomInvalid] = useState(false)
   const [hotelNomInvalid, setHotelNomInvalid] = useState(false)
   const [search, setSearch]               = useState('')
-  const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'supprime'>('all')
+  const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'non_consulte' | 'consulte' | 'accepte' | 'refuse' | 'supprime'>('all')
   const [page, setPage]                   = useState(1)
   const [view, setView]                   = useState<PageView>('list')
   const [selectedPatient, setSelectedPatient] = useState('')
@@ -1424,6 +1440,8 @@ export default function DevisGestionnairePage() {
     )
     if (devisFilter === 'all') return bySearch
     return bySearch.filter((p) => {
+      if (devisFilter === 'non_consulte') return isDevisNonConsulte(p.devis)
+      if (devisFilter === 'consulte') return isDevisConsulte(p.devis)
       const statut = primaryDevisStatut(p.devis)
       if (devisFilter === 'aucun') return !statut
       return statut === devisFilter
@@ -2915,7 +2933,6 @@ export default function DevisGestionnairePage() {
     const kpi = {
       total:     allDevisPatients.length,
       aucun:     allDevisPatients.filter((p) => !primaryDevisStatut(p.devis)).length,
-      brouillon: allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'brouillon').length,
       envoye:    allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'envoye').length,
       accepte:   allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'accepte').length,
       refuse:    allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'refuse').length,
@@ -2950,8 +2967,7 @@ export default function DevisGestionnairePage() {
           items={[
             { key: 'all', label: 'Total', value: listLoading ? '—' : kpi.total, tone: 'slate', active: devisFilter === 'all', onClick: () => setDevisFilter('all') },
             { key: 'aucun', label: 'Sans devis', value: listLoading ? '—' : kpi.aucun, tone: 'violet', active: devisFilter === 'aucun', onClick: () => setDevisFilter('aucun') },
-            { key: 'brouillon', label: 'Brouillon', value: listLoading ? '—' : kpi.brouillon, tone: 'amber', active: devisFilter === 'brouillon', onClick: () => setDevisFilter('brouillon') },
-            { key: 'envoye', label: 'Envoyé', hint: 'hors acceptés / refusés', value: listLoading ? '—' : kpi.envoye, tone: 'sky', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
+            { key: 'envoye', label: 'En attente', value: listLoading ? '—' : kpi.envoye, tone: 'sky', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
             { key: 'accepte', label: 'Accepté', value: listLoading ? '—' : kpi.accepte, tone: 'emerald', active: devisFilter === 'accepte', onClick: () => setDevisFilter('accepte') },
             { key: 'refuse', label: 'Refusé', value: listLoading ? '—' : kpi.refuse, tone: 'rose', active: devisFilter === 'refuse', onClick: () => setDevisFilter('refuse') },
             { key: 'supprime', label: 'Supprimés', value: deletedLoading && deletedDevis.length === 0 ? '—' : kpi.supprime, tone: 'default', active: devisFilter === 'supprime', onClick: () => setDevisFilter('supprime') },
@@ -2977,13 +2993,10 @@ export default function DevisGestionnairePage() {
             </div>
             <div className="flex bg-muted/50 rounded-xl p-1 gap-0.5 w-full sm:w-auto overflow-x-auto scrollbar-none">
               {([
-                { key: 'all'       as const, label: 'Tous' },
-                { key: 'aucun'     as const, label: 'Sans devis' },
-                { key: 'brouillon' as const, label: 'Brouillon' },
-                { key: 'envoye'    as const, label: 'Envoyé' },
-                { key: 'accepte'   as const, label: 'Accepté' },
-                { key: 'refuse'    as const, label: 'Refusé' },
-                { key: 'supprime'  as const, label: 'Supprimés' },
+                { key: 'all'          as const, label: 'Tous' },
+                { key: 'brouillon'    as const, label: 'Brouillon' },
+                { key: 'non_consulte' as const, label: 'Non consultés' },
+                { key: 'consulte'     as const, label: 'Consultés' },
               ]).map(({ key, label }) => (
                 <button key={key} type="button"
                   onClick={() => setDevisFilter(key)}

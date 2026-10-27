@@ -2550,18 +2550,34 @@ function primaryDevisStatutOf(
   return null
 }
 
+/** Même périmètre que la page Gestion des devis (hors abstention / hors prospect). */
+const ANALYTICS_DEVIS_STATUSES = [
+  'rapport_genere',
+  'rapport_modifie',
+  'devis_preparation',
+  'devis_envoye',
+  'devis_accepte',
+  'date_reservee',
+  'logistique',
+  'intervention',
+  'post_op',
+  'suivi_termine',
+] as const
+
 /**
  * Entonnoir en patients uniques (1 patient = 1 au plus à chaque étape).
- * Pas de mélange versions de devis / événements agenda.
+ * Périmètre = dossiers actifs hors abstention.
  */
 async function buildPatientFunnel(): Promise<Array<{ step: string; count: number }>> {
+  const activeWhere = { status: { not: 'abstention' as const } }
   const [patients, formulaires, devis, rdv, interventions] = await Promise.all([
-    prisma.patient.count(),
+    prisma.patient.count({ where: activeWhere }),
     prisma.patient.count({
-      where: { formulaires: { some: { status: 'submitted' } } },
+      where: { ...activeWhere, formulaires: { some: { status: 'submitted' } } },
     }),
     prisma.patient.count({
       where: {
+        status: { in: [...ANALYTICS_DEVIS_STATUSES] },
         devis: {
           some: { deletedAt: null, statut: { in: ['envoye', 'accepte', 'refuse'] } },
         },
@@ -2569,6 +2585,7 @@ async function buildPatientFunnel(): Promise<Array<{ step: string; count: number
     }),
     prisma.patient.count({
       where: {
+        ...activeWhere,
         agendaEvents: {
           some: { type: 'rdv', OR: [{ statut: null }, { statut: { not: 'annule' } }] },
         },
@@ -2579,9 +2596,9 @@ async function buildPatientFunnel(): Promise<Array<{ step: string; count: number
     }),
   ])
   return [
-    { step: 'Patients', count: patients },
+    { step: 'Patients actifs', count: patients },
     { step: 'Formulaires', count: formulaires },
-    { step: 'Devis', count: devis },
+    { step: 'Devis traités', count: devis },
     { step: 'RDV', count: rdv },
     { step: 'Interventions', count: interventions },
   ]
@@ -2591,7 +2608,16 @@ export async function getAnalytics() {
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
 
-  const [statusRows, devisRows, patientsWithDevis, funnel, totalPatients, patientsWithRdv] = await Promise.all([
+  const [
+    statusRows,
+    devisRows,
+    patientsWithDevis,
+    funnel,
+    totalPatientsActifs,
+    patientsWithRdv,
+    newPatientsRows,
+    sourceRows,
+  ] = await Promise.all([
     prisma.patient.groupBy({
       by: ['status'],
       _count: { _all: true },
@@ -2600,7 +2626,9 @@ export async function getAnalytics() {
       where: { deletedAt: null, dateCreation: { gte: monthStart } },
       select: { statut: true, dateCreation: true },
     }),
+    // Même base que Gestion des devis → plus d’écart 80 vs 77
     prisma.patient.findMany({
+      where: { status: { in: [...ANALYTICS_DEVIS_STATUSES] } },
       select: {
         devis: {
           where: { deletedAt: null },
@@ -2609,12 +2637,27 @@ export async function getAnalytics() {
       },
     }),
     buildPatientFunnel(),
-    prisma.patient.count(),
+    prisma.patient.count({ where: { status: { not: 'abstention' } } }),
     prisma.patient.count({
       where: {
+        status: { not: 'abstention' },
         agendaEvents: {
           some: { type: 'rdv', OR: [{ statut: null }, { statut: { not: 'annule' } }] },
         },
+      },
+    }),
+    prisma.patient.findMany({
+      where: { createdAt: { gte: monthStart } },
+      select: { createdAt: true },
+    }),
+    // Source = ce que la patiente a coché dans le formulaire soumis (pas patient.sourceContact / rôle staff).
+    prisma.formulaire.findMany({
+      where: { status: 'submitted' },
+      orderBy: { submittedAt: 'desc' },
+      select: {
+        patientId: true,
+        payload: true,
+        patient: { select: { status: true } },
       },
     }),
   ])
@@ -2627,6 +2670,7 @@ export async function getAnalytics() {
     .sort((a, b) => b.count - a.count)
 
   const monthlyDevis: Array<{ key: string; mois: string; total: number; envoye: number; accepte: number }> = []
+  const monthlyPatients: Array<{ key: string; mois: string; total: number }> = []
   for (let i = 5; i >= 0; i -= 1) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -2644,39 +2688,74 @@ export async function getAnalytics() {
       envoye: rows.filter((r) => r.statut === 'envoye').length,
       accepte: rows.filter((r) => r.statut === 'accepte').length,
     })
+    const newInMonth = newPatientsRows.filter((r) => {
+      const y = r.createdAt.getFullYear()
+      const m = r.createdAt.getMonth() + 1
+      return `${y}-${String(m).padStart(2, '0')}` === key
+    }).length
+    monthlyPatients.push({ key, mois, total: newInMonth })
   }
 
-  // Taux acceptation : patients dont le devis principal est accepté
-  // ÷ patients ayant un devis traité (envoyé / accepté / refusé). Même règle que Gestion des devis.
+  // Taux acceptation + taux de réponse : même périmètre que Gestion des devis.
   let acceptedPatients = 0
+  let refusedPatients = 0
   let treatedPatients = 0
   for (const p of patientsWithDevis) {
     const primary = primaryDevisStatutOf(p.devis)
     if (primary === 'accepte' || primary === 'envoye' || primary === 'refuse') {
       treatedPatients += 1
       if (primary === 'accepte') acceptedPatients += 1
+      if (primary === 'refuse') refusedPatients += 1
     }
   }
+  const respondedPatients = acceptedPatients + refusedPatients
   const acceptanceRate = treatedPatients > 0
     ? Math.round((acceptedPatients / treatedPatients) * 100)
     : 0
-
-  // Taux RDV : patients ayant ≥ 1 RDV non annulé ÷ tous les patients (≤ 100 %).
-  const rdvRate = totalPatients > 0
-    ? Math.round((patientsWithRdv / totalPatients) * 100)
+  const responseRate = treatedPatients > 0
+    ? Math.round((respondedPatients / treatedPatients) * 100)
     : 0
+
+  // Patients actifs avec ≥ 1 RDV ÷ patients actifs (hors abstention).
+  const rdvRate = totalPatientsActifs > 0
+    ? Math.round((patientsWithRdv / totalPatientsActifs) * 100)
+    : 0
+
+  const sourceCounts = new Map<string, number>()
+  const sourceSeenPatients = new Set<string>()
+  for (const form of sourceRows) {
+    if (sourceSeenPatients.has(form.patientId)) continue
+    if (form.patient.status === 'abstention') continue
+    sourceSeenPatients.add(form.patientId)
+    const payload = (form.payload && typeof form.payload === 'object')
+      ? (form.payload as Record<string, unknown>)
+      : null
+    const raw = typeof payload?.sourceContact === 'string'
+      ? payload.sourceContact.trim().toLowerCase()
+      : ''
+    const key = raw || 'non_renseigne'
+    sourceCounts.set(key, (sourceCounts.get(key) ?? 0) + 1)
+  }
+  const sourceDistribution = [...sourceCounts.entries()]
+    .map(([source, count]) => ({ source, count }))
+    .sort((a, b) => b.count - a.count)
 
   return {
     funnel,
     statusDistribution,
     monthlyDevis,
+    monthlyPatients,
+    sourceDistribution,
     kpis: {
       acceptanceRate,
       acceptanceAccepted: acceptedPatients,
       acceptanceBase: treatedPatients,
+      responseRate,
+      responseResponded: respondedPatients,
+      responseBase: treatedPatients,
       rdvRate,
       rdvPatients: patientsWithRdv,
-      rdvBase: totalPatients,
+      rdvBase: totalPatientsActifs,
     },
   }
 }

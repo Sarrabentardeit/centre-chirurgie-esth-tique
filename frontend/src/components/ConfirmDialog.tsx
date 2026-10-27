@@ -10,6 +10,9 @@ export type ConfirmDialogProps = {
   description?: string
   confirmLabel?: string
   cancelLabel?: string
+  /** Action intermédiaire optionnelle (ex. « Ajouter au texte »). */
+  secondaryLabel?: string
+  onSecondary?: () => void | Promise<void>
   loading?: boolean
   error?: string | null
   onConfirm: () => void | Promise<void>
@@ -25,6 +28,8 @@ export function ConfirmDialog({
   description,
   confirmLabel = 'Confirmer',
   cancelLabel = 'Annuler',
+  secondaryLabel,
+  onSecondary,
   loading = false,
   error = null,
   onConfirm,
@@ -98,6 +103,11 @@ export function ConfirmDialog({
           <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
+          {secondaryLabel && onSecondary && (
+            <Button type="button" variant="outline" onClick={() => void onSecondary()} disabled={loading}>
+              {secondaryLabel}
+            </Button>
+          )}
           <Button
             type="button"
             variant={confirmVariant === 'brand' ? 'brand' : confirmVariant}

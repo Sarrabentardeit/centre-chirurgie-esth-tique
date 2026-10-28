@@ -5,6 +5,7 @@ import type {
   CreateAgendaEventInput,
   UpdateAgendaEventInput,
   UpdatePatientStatusInput,
+  UpdatePatientEspaceInput,
   CreatePreDossierInput,
 } from './medecin.schema.js'
 import bcrypt from 'bcryptjs'
@@ -701,6 +702,84 @@ export async function deletePatient(patientId: string) {
   // Supprime en cascade (User → Patient grâce aux contraintes Prisma)
   await prisma.user.delete({ where: { id: patient.userId } })
   return { deleted: true }
+}
+
+/**
+ * Basculer un dossier entre la liste « Patients » (creePar = patiente)
+ * et « Patients cabinet » (creePar = medecin | gestionnaire).
+ */
+export async function updatePatientEspace(
+  actorId: string,
+  patientId: string,
+  input: UpdatePatientEspaceInput,
+  actorRole: 'medecin' | 'gestionnaire',
+) {
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    select: {
+      id: true,
+      creePar: true,
+      dossierNumber: true,
+      user: { select: { fullName: true } },
+    },
+  })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  const nextCreePar = input.espace === 'cabinet' ? actorRole : ('patiente' as const)
+  if (patient.creePar === nextCreePar) {
+    return {
+      patient: { id: patient.id, creePar: patient.creePar, espace: input.espace },
+      unchanged: true as const,
+    }
+  }
+
+  // Déjà dans l’autre liste cabinet (ex. créé par gestionnaire, bascule demandée par médecin) → no-op utile
+  const wasCabinet = patient.creePar === 'medecin' || patient.creePar === 'gestionnaire'
+  const wantCabinet = input.espace === 'cabinet'
+  if (wasCabinet === wantCabinet) {
+    return {
+      patient: {
+        id: patient.id,
+        creePar: patient.creePar,
+        espace: wantCabinet ? ('cabinet' as const) : ('patients' as const),
+      },
+      unchanged: true as const,
+    }
+  }
+
+  const updated = await prisma.patient.update({
+    where: { id: patientId },
+    data: { creePar: nextCreePar },
+    select: { id: true, creePar: true, dossierNumber: true },
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      actorRole,
+      action: 'update',
+      entity: 'patient_espace',
+      entityId: patientId,
+      before: { creePar: patient.creePar } as never,
+      after: {
+        creePar: updated.creePar,
+        espace: input.espace,
+        label: patient.user.fullName,
+      } as never,
+    },
+  }).catch((err) => {
+    console.warn('[updatePatientEspace] Audit non enregistré', err)
+  })
+
+  return {
+    patient: {
+      id: updated.id,
+      creePar: updated.creePar,
+      espace: input.espace,
+      dossierNumber: updated.dossierNumber,
+    },
+    unchanged: false as const,
+  }
 }
 
 export async function updatePatientStatus(

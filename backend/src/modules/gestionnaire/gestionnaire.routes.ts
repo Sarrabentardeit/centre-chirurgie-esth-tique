@@ -28,6 +28,7 @@ import {
   postOpRetourSchema,
   updateAgendaEventSchema,
   updatePatientStatusSchema,
+  updatePatientEspaceSchema,
 } from '../medecin/medecin.schema.js'
 import * as gestionnaireService from './gestionnaire.service.js'
 import * as medecinService from '../medecin/medecin.service.js'
@@ -223,6 +224,24 @@ gestionnaireRouter.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await gestionnaireService.updatePatientStatus(req.auth!.sub, pid(req.params.id), req.body)
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.patch(
+  '/patients/:id/espace',
+  validate(updatePatientEspaceSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await medecinService.updatePatientEspace(
+        req.auth!.sub,
+        pid(req.params.id),
+        req.body,
+        'gestionnaire',
+      )
       res.json({ ok: true, ...result })
     } catch (e) {
       next(e)

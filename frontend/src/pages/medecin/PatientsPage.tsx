@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   Search, Users, AlertCircle,
   RefreshCw, ChevronRight, UserPlus, Phone, Mail, MapPin,
-  Trash2, Pencil, X, Save, Archive, RotateCcw,
+  Trash2, Pencil, X, Save, Archive, RotateCcw, ArrowLeftRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -82,6 +82,10 @@ function reopenStatusFor(patient: PatientListItem, isGestionnaire: boolean): str
     return patient.statusBeforeAbstention
   }
   return isGestionnaire ? 'rapport_genere' : 'formulaire_complete'
+}
+
+function isCabinetCreePar(creePar?: PatientListItem['creePar']) {
+  return creePar === 'medecin' || creePar === 'gestionnaire'
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
@@ -371,6 +375,81 @@ function AbstentionModal({ patient, asGestionnaire, mode, onClose, onDone }: {
   )
 }
 
+// ─── Modal Basculer espace ────────────────────────────────────────────────────
+
+function EspaceModal({ patient, asGestionnaire, targetEspace, onClose, onDone }: {
+  patient: PatientListItem
+  asGestionnaire: boolean
+  targetEspace: 'cabinet' | 'patients'
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const toCabinet = targetEspace === 'cabinet'
+
+  const handleConfirm = async () => {
+    setSaving(true); setErr(null)
+    try {
+      if (asGestionnaire) await gestionnaireApi.updatePatientEspace(patient.id, targetEspace)
+      else await medecinApi.updatePatientEspace(patient.id, targetEspace)
+      onDone()
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Erreur lors du basculement.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border bg-background shadow-2xl overflow-hidden mx-4">
+        <div className="px-5 pt-5 pb-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${
+              toCabinet ? 'bg-brand-50' : 'bg-slate-100'
+            }`}>
+              <ArrowLeftRight className={`h-5 w-5 ${toCabinet ? 'text-brand-700' : 'text-slate-600'}`} />
+            </div>
+            <div>
+              <p className="font-bold text-sm">
+                {toCabinet ? 'Basculer vers Patients cabinet ?' : 'Basculer vers Patients ?'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {toCabinet
+                  ? 'Le dossier quittera la liste Patients et apparaîtra dans Patients cabinet.'
+                  : 'Le dossier quittera Patients cabinet et apparaîtra dans la liste Patients.'}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-xl bg-muted/50 border px-4 py-3">
+            <p className="font-semibold text-sm">{patient.user.fullName}</p>
+            <p className="text-xs text-muted-foreground">{getPatientDisplayReference(patient)}</p>
+          </div>
+          {err && (
+            <div className="flex items-center gap-2 mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" /> {err}
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t flex items-center justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Annuler</Button>
+          <Button
+            size="sm"
+            onClick={() => void handleConfirm()}
+            disabled={saving}
+            className={toCabinet ? 'bg-brand-700 hover:bg-brand-800' : ''}
+          >
+            <ArrowLeftRight className="h-4 w-4 mr-2" />
+            {saving ? 'Basculement...' : toCabinet ? 'Vers cabinet' : 'Vers Patients'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PatientsPage() {
@@ -399,6 +478,10 @@ export default function PatientsPage() {
   const [abstentionTarget, setAbstentionTarget] = useState<{
     patient: PatientListItem
     mode: 'classer' | 'reouvrir'
+  } | null>(null)
+  const [espaceTarget, setEspaceTarget] = useState<{
+    patient: PatientListItem
+    espace: 'cabinet' | 'patients'
   } | null>(null)
 
   useEffect(() => {
@@ -727,6 +810,26 @@ export default function PatientsPage() {
                       >
                         <Pencil className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                       </button>
+                    <button
+                      type="button"
+                      className="h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-xl sm:rounded-lg hover:bg-brand-50 text-muted-foreground hover:text-brand-700 transition-colors"
+                      title={isCabinetSpace || isCabinetCreePar(p.creePar)
+                        ? 'Basculer vers Patients'
+                        : 'Basculer vers Patients cabinet'}
+                      aria-label={isCabinetSpace || isCabinetCreePar(p.creePar)
+                        ? 'Basculer vers Patients'
+                        : 'Basculer vers Patients cabinet'}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const toCabinet = !(isCabinetSpace || isCabinetCreePar(p.creePar))
+                        setEspaceTarget({
+                          patient: p,
+                          espace: toCabinet ? 'cabinet' : 'patients',
+                        })
+                      }}
+                    >
+                      <ArrowLeftRight className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                    </button>
                     {isAbstention ? (
                       <button
                         type="button"
@@ -813,6 +916,19 @@ export default function PatientsPage() {
           onClose={() => setAbstentionTarget(null)}
           onDone={() => {
             setAbstentionTarget(null)
+            void load()
+          }}
+        />
+      )}
+      {espaceTarget && (
+        <EspaceModal
+          patient={espaceTarget.patient}
+          asGestionnaire={isGestionnaire}
+          targetEspace={espaceTarget.espace}
+          onClose={() => setEspaceTarget(null)}
+          onDone={() => {
+            setPatients((prev) => prev.filter((p) => p.id !== espaceTarget.patient.id))
+            setEspaceTarget(null)
             void load()
           }}
         />

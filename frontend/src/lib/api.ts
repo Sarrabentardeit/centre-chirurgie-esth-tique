@@ -986,6 +986,17 @@ export const medecinApi = {
       body: JSON.stringify({ status }),
     }),
 
+  /** Patients ↔ Patients cabinet */
+  updatePatientEspace: (id: string, espace: 'cabinet' | 'patients') =>
+    request<{
+      ok: true
+      unchanged: boolean
+      patient: { id: string; creePar: 'patiente' | 'medecin' | 'gestionnaire'; espace: 'cabinet' | 'patients' }
+    }>(`/medecin/patients/${id}/espace`, {
+      method: 'PATCH',
+      body: JSON.stringify({ espace }),
+    }),
+
   upsertRapport: (patientId: string, body: {
     diagnostic?: string
     examensDemandes?: string[]
@@ -1542,6 +1553,17 @@ export const gestionnaireApi = {
     request<{ ok: true; patient: unknown }>(`/gestionnaire/patients/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    }),
+
+  /** Patients ↔ Patients cabinet */
+  updatePatientEspace: (id: string, espace: 'cabinet' | 'patients') =>
+    request<{
+      ok: true
+      unchanged: boolean
+      patient: { id: string; creePar: 'patiente' | 'medecin' | 'gestionnaire'; espace: 'cabinet' | 'patients' }
+    }>(`/gestionnaire/patients/${id}/espace`, {
+      method: 'PATCH',
+      body: JSON.stringify({ espace }),
     }),
 
   updatePatientFiche: (

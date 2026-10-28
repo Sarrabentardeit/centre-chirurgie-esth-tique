@@ -78,6 +78,12 @@ export const createPreDossierSchema = z.object({
 })
 export type CreatePreDossierInput = z.infer<typeof createPreDossierSchema>
 
+/** Déplacer un dossier entre liste Patients et Patients cabinet. */
+export const updatePatientEspaceSchema = z.object({
+  espace: z.enum(['cabinet', 'patients']),
+})
+export type UpdatePatientEspaceInput = z.infer<typeof updatePatientEspaceSchema>
+
 export const postOpRetourSchema = z.object({
   message: z.string().trim().max(8000).optional(),
   /** Message déjà envoyé hors application : on enregistre seulement l'étape, sans rien renvoyer à la patiente. */

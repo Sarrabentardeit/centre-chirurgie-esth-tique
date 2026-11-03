@@ -25,6 +25,7 @@ const DEVIS_STATUS = {
   envoye:    { label: 'Reçu',      color: 'info' as const,      icon: AlertCircle, chip: 'bg-sky-100 text-sky-800 border-sky-200' },
   accepte:   { label: 'Accepté',   color: 'success' as const,   icon: CheckCircle2, chip: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   refuse:    { label: 'Refusé',    color: 'destructive' as const, icon: XCircle, chip: 'bg-rose-100 text-rose-800 border-rose-200' },
+  remplace:  { label: 'Remplacé',  color: 'secondary' as const, icon: Clock, chip: 'bg-slate-100 text-slate-600 border-slate-200' },
 }
 
 function PageSkeleton() {

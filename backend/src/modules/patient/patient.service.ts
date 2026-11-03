@@ -4,6 +4,7 @@ import { notifyStaff } from '../../lib/staffNotifications.js'
 import { createUserNotification } from '../../lib/userNotifications.js'
 import { dispatchFormulaireAck } from '../gestionnaire/gestionnaire.service.js'
 import { toPatientSuivi } from '../../lib/postOp.js'
+import { supersedeOtherAcceptedDevis } from '../../lib/devisAccept.js'
 import type { FormulaireSubmitInput, UpdateProfilInput, RepondreDevisInput, RepondreRendezVousInput } from './patient.schema.js'
 
 const RDV_PATIENT_ACCEPTED_TAG = 'PATIENT_DECISION:ACCEPTE'
@@ -211,7 +212,7 @@ export async function getDevis(userId: string) {
   const devis = await prisma.devis.findMany({
     where: {
       patientId: patient.id,
-      statut: { in: ['envoye', 'accepte', 'refuse'] },
+      statut: { in: ['envoye', 'accepte', 'refuse', 'remplace'] },
       deletedAt: null,
     },
     orderBy: [{ version: 'desc' }, { dateCreation: 'desc' }],
@@ -269,12 +270,18 @@ export async function repondreDevis(userId: string, devisId: string, input: Repo
     data: { statut: input.reponse },
   })
 
-  // Mettre à jour le statut du dossier
-  // Accepté → devis_accepte | Refusé → rapport_genere (gestionnaire doit préparer un nouveau devis)
-  await prisma.patient.update({
-    where: { id: patient.id },
-    data: { status: input.reponse === 'accepte' ? 'devis_accepte' : 'rapport_genere' },
-  })
+  if (input.reponse === 'accepte') {
+    await supersedeOtherAcceptedDevis(patient.id, devisId)
+  }
+
+  // Ne jamais rétrograder un séjour déjà avancé
+  const advancedStay = ['date_reservee', 'logistique', 'intervention', 'post_op', 'suivi_termine']
+  if (!advancedStay.includes(patient.status)) {
+    await prisma.patient.update({
+      where: { id: patient.id },
+      data: { status: input.reponse === 'accepte' ? 'devis_accepte' : 'rapport_genere' },
+    })
+  }
 
   const patientProfile = await prisma.patient.findUnique({
     where: { id: patient.id },

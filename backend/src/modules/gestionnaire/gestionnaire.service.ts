@@ -39,6 +39,7 @@ import { buildPlanningAccompagnementMessage } from '../../lib/whatsappPlanning.j
 import { publicDevisPdfUrl } from '../../lib/devisPdfPublic.js'
 import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
 import { softDeleteDevisPdfMessages, sendStaffOnlyMessage } from '../chat/chat.service.js'
+import { supersedeOtherAcceptedDevis } from '../../lib/devisAccept.js'
 
 const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
 
@@ -519,9 +520,28 @@ export async function getPatientById(patientId: string) {
 }
 
 function assertPatientReadyForDevis(status: string) {
-  const ok = ['rapport_genere', 'rapport_modifie', 'devis_preparation', 'devis_envoye', 'devis_accepte'].includes(status)
+  // Correction devis autorisée même si le séjour a avancé (sans régresser le dossier).
+  const ok = [
+    'rapport_genere',
+    'rapport_modifie',
+    'devis_preparation',
+    'devis_envoye',
+    'devis_accepte',
+    'date_reservee',
+    'logistique',
+    'intervention',
+  ].includes(status)
   if (!ok) {
-    throw new AppError(400, 'PATIENT_NOT_READY', 'Le dossier patient n’est pas prêt pour un devis.')
+    throw new AppError(
+      400,
+      'PATIENT_NOT_READY',
+      status === 'nouveau' ||
+        status === 'formulaire_en_cours' ||
+        status === 'formulaire_complete' ||
+        status === 'en_analyse'
+        ? 'Rapport médical requis avant devis.'
+        : 'Impossible de créer ou modifier un devis à ce stade du dossier.',
+    )
   }
 }
 
@@ -1454,6 +1474,8 @@ export async function acceptDevis(gestionnaireId: string, devisId: string) {
     data: { statut: 'accepte' },
   })
 
+  const superseded = await supersedeOtherAcceptedDevis(devis.patientId, devisId)
+
   const unlockStatuses = ['devis_envoye', 'devis_preparation', 'rapport_genere', 'rapport_modifie']
   if (unlockStatuses.includes(devis.patient.status)) {
     await prisma.patient.update({
@@ -1480,12 +1502,13 @@ export async function acceptDevis(gestionnaireId: string, devisId: string) {
       after: {
         statut: updated.statut,
         patientId: devis.patientId,
-        patientStatus: 'devis_accepte',
+        patientStatus: devis.patient.status,
         numeroDevis: devis.numeroDevis,
         patientName: devis.patient.user.fullName,
         dossierNumber: devis.patient.dossierNumber,
         source: 'gestionnaire',
         kind: 'acceptation_devis',
+        supersededCount: superseded.count,
       } as never,
     },
   }).catch(() => undefined)
@@ -1531,7 +1554,7 @@ export async function cancelAcceptDevis(gestionnaireId: string, devisId: string)
     throw new AppError(
       400,
       'DOSSIER_TOO_FAR',
-      'Le dossier a déjà avancé (date / logistique / intervention). Impossible d’annuler l’acceptation.',
+      'Le dossier a déjà avancé (date / logistique / intervention). Utilisez « Corriger le devis » (nouvelle version), puis mettez à jour logistique et planning.',
     )
   }
 
@@ -2555,12 +2578,13 @@ export async function resetCommunicationTemplate(userId: string, key: TemplateKe
 /** Statut devis « principal » d’un patient (même règle que la page Gestion des devis). */
 function primaryDevisStatutOf(
   devis: Array<{ statut: string }>,
-): 'brouillon' | 'envoye' | 'accepte' | 'refuse' | null {
+): 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'remplace' | null {
   if (!devis.length) return null
   if (devis.some((d) => d.statut === 'accepte')) return 'accepte'
   if (devis.some((d) => d.statut === 'envoye')) return 'envoye'
   if (devis.some((d) => d.statut === 'brouillon')) return 'brouillon'
   if (devis.some((d) => d.statut === 'refuse')) return 'refuse'
+  if (devis.some((d) => d.statut === 'remplace')) return 'remplace'
   return null
 }
 

@@ -257,12 +257,13 @@ const STATUTS_DEVIS = [
 /** Statut affiché dans filtres/KPI : un devis accepté prime sur les versions plus récentes envoyées. */
 function primaryDevisStatut(
   devis: Array<{ statut?: string | null }> | undefined | null,
-): 'brouillon' | 'envoye' | 'accepte' | 'refuse' | null {
+): 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'remplace' | null {
   if (!devis?.length) return null
   if (devis.some((d) => d.statut === 'accepte')) return 'accepte'
   if (devis.some((d) => d.statut === 'envoye')) return 'envoye'
   if (devis.some((d) => d.statut === 'brouillon')) return 'brouillon'
   if (devis.some((d) => d.statut === 'refuse')) return 'refuse'
+  if (devis.some((d) => d.statut === 'remplace')) return 'remplace'
   return null
 }
 
@@ -336,15 +337,46 @@ const DEVIS_READY_STATUSES = [
   'devis_preparation',
   'devis_envoye',
   'devis_accepte',
+  'date_reservee',
+  'logistique',
+  'intervention',
+] as const
+
+const DEVIS_CANCEL_ACCEPT_BLOCKED = [
+  'date_reservee',
+  'logistique',
+  'intervention',
+  'post_op',
+  'suivi_termine',
 ] as const
 
 function canPatientHaveDevis(status: string): boolean {
   return (DEVIS_READY_STATUSES as readonly string[]).includes(status)
 }
 
+function canCancelDevisAccept(status: string): boolean {
+  return !(DEVIS_CANCEL_ACCEPT_BLOCKED as readonly string[]).includes(status)
+}
+
+function devisBlockedHint(status: string): string {
+  if (
+    status === 'nouveau' ||
+    status === 'formulaire_en_cours' ||
+    status === 'formulaire_complete' ||
+    status === 'en_analyse'
+  ) {
+    return 'Rapport médical requis avant devis.'
+  }
+  if (status === 'post_op' || status === 'suivi_termine') {
+    return 'Dossier en post-op / terminé : plus de nouvelle version de devis.'
+  }
+  if (status === 'abstention') return 'Dossier en abstention.'
+  return 'Impossible de créer un devis à ce stade.'
+}
+
 function apiErrorMessage(e: unknown): string {
   if (e instanceof ApiRequestError) {
-    if (e.code === 'PATIENT_NOT_READY') return e.message
+    if (e.code === 'PATIENT_NOT_READY' || e.code === 'DOSSIER_TOO_FAR') return e.message
     if (e.issues) {
       const parts = Object.entries(e.issues).flatMap(([field, msgs]) =>
         msgs.map((m) => `${field}: ${m}`),
@@ -2492,13 +2524,20 @@ export default function DevisGestionnairePage() {
       await invalidateCache(queryKeys.logistique())
       await loadPatientDetail(selectedPatient)
       await loadPatients()
+      const statusAfter =
+        patients.find((p) => p.id === selectedPatient)?.status ??
+        patientDetail?.status ??
+        ''
+      const isCorrectiveAccept = !canCancelDevisAccept(statusAfter)
       setSectionOpen('logistique', true)
       scrollToDossierSection('dossier-logistique')
       setHighlightSectionId('dossier-logistique')
       window.setTimeout(() => setHighlightSectionId(null), 4500)
       feedbackSuccess(
         'Devis accepté',
-        'Prochaine étape : complétez la logistique du séjour ci-dessous.',
+        isCorrectiveAccept
+          ? 'Ancien devis → Remplacé. Mettez à jour logistique et planning (accompagnant, chambre, dates).'
+          : 'Prochaine étape : complétez la logistique du séjour ci-dessous.',
       )
     } catch (e) {
       setPageError(e instanceof Error ? e.message : 'Impossible de marquer le devis comme accepté.')
@@ -3319,6 +3358,7 @@ export default function DevisGestionnairePage() {
     )
 
     const devisAllowed = canPatientHaveDevis(patientRow.status)
+    const cancelAcceptAllowed = canCancelDevisAccept(patientRow.status)
     const isAbstention = patientRow.status === 'abstention'
 
     const showSuiviSejour = patientHasPostDevisAccepte(patientRow.status, devisVersions)
@@ -3434,7 +3474,7 @@ export default function DevisGestionnairePage() {
           label: latestRapportNumero > 0 ? `Créer le devis R${latestRapportNumero}` : 'Créer un devis',
           intent: 'create',
         }
-      : existingDevis && existingDevis.statut !== 'refuse'
+      : existingDevis && existingDevis.statut !== 'refuse' && existingDevis.statut !== 'remplace'
         ? existingDevis.statut === 'brouillon'
           ? { label: 'Modifier', intent: 'edit-draft', target: existingDevis }
           : existingDevis.statut === 'accepte'
@@ -3459,7 +3499,7 @@ export default function DevisGestionnairePage() {
         ? latestRapportNumero > 1
           ? `À traiter · devis R${latestRapportNumero}`
           : 'À traiter'
-        : !existingDevis || existingDevis.statut === 'refuse'
+        : !existingDevis || existingDevis.statut === 'refuse' || existingDevis.statut === 'remplace'
           ? rapportsList.length > 0 && devisAllowed
             ? 'À traiter'
             : dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)
@@ -3471,9 +3511,7 @@ export default function DevisGestionnairePage() {
                 : 'Devis envoyé · non consulté'
               : existingDevis.statut === 'accepte'
                 ? 'Accepté'
-                : existingDevis.statut === 'refuse'
-                  ? 'Refusé'
-                  : dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)
+                : dossierStatusLabel(patientRow.status, patientRow.rapportsCount ?? patientRow.rapports?.length)
 
     return (
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -3578,18 +3616,28 @@ export default function DevisGestionnairePage() {
                             variant="outline"
                             className="gap-1.5 h-10 text-sm border-brand-200 text-brand-800 hover:bg-brand-50 bg-white"
                             disabled={detailLoading || !devisAllowed}
+                            title={
+                              !cancelAcceptAllowed
+                                ? 'Nouvelle version. Ensuite mettez à jour logistique et planning.'
+                                : undefined
+                            }
                             onClick={() => void openDevisTable('new-version', existingDevis)}
                           >
                             <Pencil className="h-4 w-4" />
-                            Nouvelle version
+                            {!cancelAcceptAllowed ? 'Corriger le devis' : 'Nouvelle version'}
                           </Button>
                         )}
                         {existingDevis && existingDevis.statut === 'accepte' && (
                           <Button
                             type="button"
                             variant="outline"
-                            className="gap-1.5 h-10 text-sm border-amber-200 text-amber-800 hover:bg-amber-50 bg-white"
-                            disabled={detailLoading || actionLoading}
+                            className="gap-1.5 h-10 text-sm border-amber-200 text-amber-800 hover:bg-amber-50 bg-white disabled:opacity-50"
+                            disabled={detailLoading || actionLoading || !cancelAcceptAllowed}
+                            title={
+                              cancelAcceptAllowed
+                                ? undefined
+                                : 'Impossible : dossier avancé. Utilisez « Corriger le devis ».'
+                            }
                             onClick={() => setCancelAcceptDevisId(existingDevis.id)}
                           >
                             <RotateCcw className="h-4 w-4" />
@@ -3667,7 +3715,13 @@ export default function DevisGestionnairePage() {
                     </p>
                   ) : !devisAllowed ? (
                     <p className="text-[11px] text-amber-700">
-                      Rapport médical requis avant devis.
+                      {devisBlockedHint(patientRow.status)}
+                    </p>
+                  ) : existingDevis?.statut === 'accepte' && !cancelAcceptAllowed ? (
+                    <p className="text-[11px] text-slate-600">
+                      Pour rectifier : <span className="font-semibold">Corriger le devis</span>
+                      {' '}→ ré-accepter (ancien → Remplacé) → mettre à jour{' '}
+                      <span className="font-semibold">logistique &amp; planning</span>.
                     </p>
                   ) : null}
                 </div>
@@ -4012,10 +4066,11 @@ export default function DevisGestionnairePage() {
                     <div className="divide-y divide-slate-100">
                       {devisVersions.map((d) => {
                         const sc = {
-                          accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
-                          refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
-                          envoye:    { label: 'Envoyé',   cls: 'bg-blue-100 text-blue-700' },
-                          brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
+                          accepte:   { label: 'Accepté',   cls: 'bg-emerald-100 text-emerald-700' },
+                          refuse:    { label: 'Refusé',    cls: 'bg-red-100 text-red-600' },
+                          remplace:  { label: 'Remplacé',  cls: 'bg-slate-100 text-slate-600' },
+                          envoye:    { label: 'Envoyé',    cls: 'bg-blue-100 text-blue-700' },
+                          brouillon: { label: 'Brouillon', cls: 'bg-slate-100 text-slate-600' },
                         }[d.statut] ?? { label: d.statut, cls: 'bg-slate-100 text-slate-600' }
                         const devisName = devisDisplayName(
                           d,
@@ -4065,7 +4120,7 @@ export default function DevisGestionnairePage() {
                                   <WhatsAppIcon className="h-3.5 w-3.5" />
                                 </button>
                               )}
-                              {d.statut !== 'brouillon' && d.statut !== 'refuse' && d.statut !== 'accepte' && (
+                              {d.statut !== 'brouillon' && d.statut !== 'refuse' && d.statut !== 'accepte' && d.statut !== 'remplace' && (
                                 <button
                                   type="button"
                                   className="h-7 w-7 flex items-center justify-center rounded-md text-slate-400 hover:text-brand-700 hover:bg-brand-50 transition-colors disabled:opacity-40"
@@ -4328,7 +4383,7 @@ export default function DevisGestionnairePage() {
           setCancelAcceptDevisId(null)
         }}
         title="Annuler l’acceptation de ce devis ?"
-        description="À utiliser en cas d’erreur. Le devis repasse en « Envoyé » et le dossier en « Devis envoyé » (si le séjour n’a pas encore avancé)."
+        description="Uniquement si le séjour n’a pas encore démarré. Sinon utilisez « Corriger le devis » (nouvelle version), puis mettez à jour logistique et planning."
         confirmLabel="Annuler l’acceptation"
         confirmVariant="default"
         loading={actionLoading}
@@ -4440,10 +4495,11 @@ export default function DevisGestionnairePage() {
               )}
               {!deletePicker.loading && deletePicker.versions.map((d) => {
                 const sc = {
-                  accepte:   { label: 'Accepté',  cls: 'bg-emerald-100 text-emerald-700' },
-                  refuse:    { label: 'Refusé',   cls: 'bg-red-100 text-red-600' },
-                  envoye:    { label: 'Envoyé',   cls: 'bg-sky-100 text-sky-700' },
-                  brouillon: { label: 'Brouillon',cls: 'bg-slate-100 text-slate-600' },
+                  accepte:   { label: 'Accepté',   cls: 'bg-emerald-100 text-emerald-700' },
+                  refuse:    { label: 'Refusé',    cls: 'bg-red-100 text-red-600' },
+                  remplace:  { label: 'Remplacé',  cls: 'bg-slate-100 text-slate-600' },
+                  envoye:    { label: 'Envoyé',    cls: 'bg-sky-100 text-sky-700' },
+                  brouillon: { label: 'Brouillon', cls: 'bg-slate-100 text-slate-600' },
                 } as const
                 const badge = sc[d.statut as keyof typeof sc] ?? sc.brouillon
                 const selected = deletePicker.selectedIds.includes(d.id)

@@ -9,6 +9,7 @@ import {
   Package,
   Calendar,
   CircleDot,
+  RotateCcw,
   type LucideIcon,
 } from 'lucide-react'
 import type { DossierStatus } from '@/types'
@@ -26,7 +27,7 @@ const TONE_CLASS: Record<StatusTone, string> = {
   rose:    'bg-rose-50 text-rose-800 border-rose-200',
 }
 
-export type DevisStatut = 'brouillon' | 'envoye' | 'accepte' | 'refuse'
+export type DevisStatut = 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'remplace'
 
 const DOSSIER_UI: Record<DossierStatus, { label: string; tone: StatusTone; icon: LucideIcon }> = {
   nouveau:              { label: 'Nouveau',           tone: 'slate',   icon: CircleDot },
@@ -51,6 +52,7 @@ const DEVIS_UI: Record<DevisStatut, { label: string; tone: StatusTone; icon: Luc
   envoye:    { label: 'Envoyé',    tone: 'brand',   icon: Send },
   accepte:   { label: 'Accepté',   tone: 'emerald', icon: CheckCircle2 },
   refuse:    { label: 'Refusé',    tone: 'rose',    icon: Ban },
+  remplace:  { label: 'Remplacé',  tone: 'slate',   icon: RotateCcw },
 }
 
 export function dossierStatusUi(status: DossierStatus) {

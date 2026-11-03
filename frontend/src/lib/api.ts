@@ -377,7 +377,7 @@ export interface Devis {
   id: string
   numeroDevis?: string | null
   rapportId?: string | null
-  statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse'
+  statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'remplace'
   version: number
   lignes: DevisLigne[]
   total: number

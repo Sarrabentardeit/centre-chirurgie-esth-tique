@@ -54,6 +54,8 @@ enum DevisStatut {
   envoye
   accepte
   refuse
+  /// Ancienne version acceptée, remplacée par une version plus récente acceptée
+  remplace
 }
 
 enum RdvStatut {

@@ -109,7 +109,7 @@ export interface Devis {
   dateValidite: string
   lignes: LigneDevis[]
   total: number
-  statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse'
+  statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'remplace'
   planningMedical?: string
   notesSejour?: string
   version: number

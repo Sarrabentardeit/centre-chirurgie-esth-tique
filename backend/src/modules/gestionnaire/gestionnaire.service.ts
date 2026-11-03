@@ -1543,18 +1543,14 @@ export async function cancelAcceptDevis(gestionnaireId: string, devisId: string)
     throw new AppError(400, 'DEVIS_NOT_ACCEPTED', 'Seul un devis accepté peut être remis en « envoyé ».')
   }
 
-  const blockedStatuses = [
-    'date_reservee',
-    'logistique',
-    'intervention',
-    'post_op',
-    'suivi_termine',
-  ] as const
+  // Après intervention / clôture : trop tard pour annuler l’acceptation.
+  // Avant (y compris logistique / date) : OK — ex. patiente qui annule le deal.
+  const blockedStatuses = ['post_op', 'suivi_termine'] as const
   if (blockedStatuses.includes(devis.patient.status as (typeof blockedStatuses)[number])) {
     throw new AppError(
       400,
       'DOSSIER_TOO_FAR',
-      'Le dossier a déjà avancé (date / logistique / intervention). Utilisez « Corriger le devis » (nouvelle version), puis mettez à jour logistique et planning.',
+      'Le dossier est en post-op ou terminé : impossible d’annuler l’acceptation.',
     )
   }
 
@@ -1563,8 +1559,16 @@ export async function cancelAcceptDevis(gestionnaireId: string, devisId: string)
     data: { statut: 'envoye' },
   })
 
+  // Deal annulé / acceptation retirée → dossier repart au stade « devis envoyé »
+  // (sauf abstention : on ne change que le devis, le classement reste).
   let patientStatusAfter = devis.patient.status
-  if (devis.patient.status === 'devis_accepte') {
+  const regressStatuses = [
+    'devis_accepte',
+    'date_reservee',
+    'logistique',
+    'intervention',
+  ] as const
+  if (regressStatuses.includes(devis.patient.status as (typeof regressStatuses)[number])) {
     await prisma.patient.update({
       where: { id: devis.patientId },
       data: { status: 'devis_envoye' },

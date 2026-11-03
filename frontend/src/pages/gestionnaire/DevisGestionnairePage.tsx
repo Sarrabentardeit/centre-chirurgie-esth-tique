@@ -342,12 +342,14 @@ const DEVIS_READY_STATUSES = [
   'intervention',
 ] as const
 
-const DEVIS_CANCEL_ACCEPT_BLOCKED = [
+/** Statuts où « Annuler l’acceptation » n’a plus de sens (séjour réalisé). */
+const DEVIS_CANCEL_ACCEPT_BLOCKED = ['post_op', 'suivi_termine'] as const
+
+/** Dossier avancé mais deal encore vivant → libellé « Corriger le devis ». */
+const DEVIS_CORRECTIVE_STATUSES = [
   'date_reservee',
   'logistique',
   'intervention',
-  'post_op',
-  'suivi_termine',
 ] as const
 
 function canPatientHaveDevis(status: string): boolean {
@@ -356,6 +358,10 @@ function canPatientHaveDevis(status: string): boolean {
 
 function canCancelDevisAccept(status: string): boolean {
   return !(DEVIS_CANCEL_ACCEPT_BLOCKED as readonly string[]).includes(status)
+}
+
+function isCorrectiveDevisStage(status: string): boolean {
+  return (DEVIS_CORRECTIVE_STATUSES as readonly string[]).includes(status)
 }
 
 function devisBlockedHint(status: string): string {
@@ -2528,7 +2534,7 @@ export default function DevisGestionnairePage() {
         patients.find((p) => p.id === selectedPatient)?.status ??
         patientDetail?.status ??
         ''
-      const isCorrectiveAccept = !canCancelDevisAccept(statusAfter)
+      const isCorrectiveAccept = isCorrectiveDevisStage(statusAfter)
       setSectionOpen('logistique', true)
       scrollToDossierSection('dossier-logistique')
       setHighlightSectionId('dossier-logistique')
@@ -2560,7 +2566,7 @@ export default function DevisGestionnairePage() {
       await loadPatients()
       feedbackSuccess(
         'Acceptation annulée',
-        'Le devis est de nouveau « Envoyé ». Vous pouvez le marquer accepté plus tard.',
+        'Devis → Envoyé, dossier → Devis envoyé. Vous pourrez ré-accepter plus tard si le deal reprend.',
       )
     } catch (e) {
       setPageError(e instanceof Error ? e.message : 'Impossible d’annuler l’acceptation.')
@@ -3359,6 +3365,7 @@ export default function DevisGestionnairePage() {
 
     const devisAllowed = canPatientHaveDevis(patientRow.status)
     const cancelAcceptAllowed = canCancelDevisAccept(patientRow.status)
+    const correctiveStage = isCorrectiveDevisStage(patientRow.status)
     const isAbstention = patientRow.status === 'abstention'
 
     const showSuiviSejour = patientHasPostDevisAccepte(patientRow.status, devisVersions)
@@ -3617,14 +3624,14 @@ export default function DevisGestionnairePage() {
                             className="gap-1.5 h-10 text-sm border-brand-200 text-brand-800 hover:bg-brand-50 bg-white"
                             disabled={detailLoading || !devisAllowed}
                             title={
-                              !cancelAcceptAllowed
+                              correctiveStage
                                 ? 'Nouvelle version. Ensuite mettez à jour logistique et planning.'
                                 : undefined
                             }
                             onClick={() => void openDevisTable('new-version', existingDevis)}
                           >
                             <Pencil className="h-4 w-4" />
-                            {!cancelAcceptAllowed ? 'Corriger le devis' : 'Nouvelle version'}
+                            {correctiveStage ? 'Corriger le devis' : 'Nouvelle version'}
                           </Button>
                         )}
                         {existingDevis && existingDevis.statut === 'accepte' && (
@@ -3635,8 +3642,8 @@ export default function DevisGestionnairePage() {
                             disabled={detailLoading || actionLoading || !cancelAcceptAllowed}
                             title={
                               cancelAcceptAllowed
-                                ? undefined
-                                : 'Impossible : dossier avancé. Utilisez « Corriger le devis ».'
+                                ? 'Si la patiente annule le deal : devis → Envoyé, dossier → Devis envoyé.'
+                                : 'Impossible en post-op / dossier terminé.'
                             }
                             onClick={() => setCancelAcceptDevisId(existingDevis.id)}
                           >
@@ -3717,11 +3724,11 @@ export default function DevisGestionnairePage() {
                     <p className="text-[11px] text-amber-700">
                       {devisBlockedHint(patientRow.status)}
                     </p>
-                  ) : existingDevis?.statut === 'accepte' && !cancelAcceptAllowed ? (
+                  ) : existingDevis?.statut === 'accepte' && correctiveStage ? (
                     <p className="text-[11px] text-slate-600">
-                      Pour rectifier : <span className="font-semibold">Corriger le devis</span>
-                      {' '}→ ré-accepter (ancien → Remplacé) → mettre à jour{' '}
-                      <span className="font-semibold">logistique &amp; planning</span>.
+                      Contenu à changer → <span className="font-semibold">Corriger le devis</span>
+                      {' '}(ré-accepter → Remplacé). Deal annulé →{' '}
+                      <span className="font-semibold">Annuler l’acceptation</span>.
                     </p>
                   ) : null}
                 </div>
@@ -4157,9 +4164,13 @@ export default function DevisGestionnairePage() {
                                 <button
                                   type="button"
                                   className="h-7 w-7 flex items-center justify-center rounded-md text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors disabled:opacity-40"
-                                  title="Annuler l’acceptation (erreur)"
+                                  title={
+                                    cancelAcceptAllowed
+                                      ? 'Annuler l’acceptation (deal annulé / erreur)'
+                                      : 'Impossible en post-op / dossier terminé'
+                                  }
                                   onClick={() => setCancelAcceptDevisId(d.id)}
-                                  disabled={actionLoading}
+                                  disabled={actionLoading || !cancelAcceptAllowed}
                                 >
                                   <RotateCcw className="h-3.5 w-3.5" />
                                 </button>
@@ -4383,7 +4394,7 @@ export default function DevisGestionnairePage() {
           setCancelAcceptDevisId(null)
         }}
         title="Annuler l’acceptation de ce devis ?"
-        description="Uniquement si le séjour n’a pas encore démarré. Sinon utilisez « Corriger le devis » (nouvelle version), puis mettez à jour logistique et planning."
+        description="Le devis repasse en « Envoyé » et le dossier en « Devis envoyé » (ex. patiente qui annule le deal). Pour seulement modifier le contenu, utilisez « Corriger le devis »."
         confirmLabel="Annuler l’acceptation"
         confirmVariant="default"
         loading={actionLoading}

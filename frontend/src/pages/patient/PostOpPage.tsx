@@ -9,7 +9,13 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuthStore } from '@/store/authStore'
-import { medecinApi, medecinPostOpApi, patientApi, uploadPostOpPhoto } from '@/lib/api'
+import {
+  medecinApi,
+  medecinPostOpApi,
+  patientApi,
+  uploadMedecinFile,
+  uploadPostOpPhoto,
+} from '@/lib/api'
 import type { SuiviPostOp, PostOpPatient } from '@/lib/api'
 import { PostOpSection } from '@/components/dossier/PostOpSection'
 import {
@@ -17,6 +23,7 @@ import {
   PostOpDemandesSection,
   PostOpPhotosGallery,
 } from '@/components/dossier/PostOpStaffSections'
+import { resolveProtectedUploadUrl } from '@/lib/mediaUrl'
 import { daysSinceDate, photoDayOffset } from '@/lib/postOpSteps'
 import { formatDate, formatRelative } from '@/lib/utils'
 import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
@@ -300,7 +307,18 @@ function MedecinView() {
             <p className="py-4 text-sm text-muted-foreground">Pas encore de suivi pour cette patiente.</p>
           ) : (
           <>
-          <PostOpPhotosGallery suivi={suivi} />
+          <PostOpPhotosGallery
+            suivi={suivi}
+            onUploadFiles={async (files) => {
+              let last = suivi
+              for (const file of files) {
+                const up = await uploadMedecinFile(file)
+                const res = await medecinApi.addPostOpPhoto(selected.id, { url: up.url })
+                last = res.suivi
+              }
+              handleSuiviChange(last)
+            }}
+          />
 
           <PostOpDemandesSection
             patientId={selected.id}
@@ -511,11 +529,19 @@ function PatientView() {
             <p className="text-xs font-semibold mb-2">Comparaison avant / après</p>
             <div className="grid grid-cols-2 gap-3 max-w-md">
               <div className="space-y-1">
-                <img src={beforeAfter.before.url} alt="Avant" className="w-full aspect-square object-cover rounded-lg border" />
+                <img
+                  src={resolveProtectedUploadUrl(beforeAfter.before.url)}
+                  alt="Avant"
+                  className="w-full aspect-square object-cover rounded-lg border"
+                />
                 <p className="text-[11px] text-muted-foreground">Première photo ({formatDate(beforeAfter.before.date)})</p>
               </div>
               <div className="space-y-1">
-                <img src={beforeAfter.after.url} alt="Après" className="w-full aspect-square object-cover rounded-lg border" />
+                <img
+                  src={resolveProtectedUploadUrl(beforeAfter.after.url)}
+                  alt="Après"
+                  className="w-full aspect-square object-cover rounded-lg border"
+                />
                 <p className="text-[11px] text-muted-foreground">Dernière photo ({formatDate(beforeAfter.after.date)})</p>
               </div>
             </div>
@@ -526,7 +552,11 @@ function PatientView() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {suivi.photos.map((photo, i) => (
               <div key={i} className="relative rounded-xl overflow-hidden border bg-muted">
-                <img src={photo.url} alt={`Photo de suivi ${i + 1}`} className="w-full aspect-square object-cover" />
+                <img
+                  src={resolveProtectedUploadUrl(photo.url)}
+                  alt={`Photo de suivi ${i + 1}`}
+                  className="w-full aspect-square object-cover"
+                />
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                   <p className="text-white text-[11px] font-semibold">J+{photoDayOffset(suivi, photo)}</p>
                   <p className="text-white/80 text-[10px]">{formatDate(photo.date)}</p>

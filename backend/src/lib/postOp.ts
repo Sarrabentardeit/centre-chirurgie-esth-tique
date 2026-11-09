@@ -140,6 +140,60 @@ export async function getPostOpForStaff(patientId: string) {
 }
 
 /**
+ * Ajoute une photo au suivi (gestionnaire / médecin).
+ * Crée le suivi si besoin à partir de la date logistique.
+ */
+export async function addPostOpPhoto(
+  actor: { id: string; role: StaffRole },
+  patientId: string,
+  photo: { url: string; note?: string },
+) {
+  const patient = await prisma.patient.findUnique({ where: { id: patientId } })
+  if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient introuvable.')
+
+  let suivi = await prisma.suiviPostOp.findUnique({ where: { patientId } })
+  if (!suivi) {
+    const logistique = await prisma.logistique.findUnique({
+      where: { patientId },
+      select: { dateIntervention: true },
+    })
+    const base = logistique?.dateIntervention ?? new Date()
+    const day = formatAgendaSlot(base).date
+    suivi = await prisma.suiviPostOp.create({
+      data: { patientId, dateIntervention: new Date(`${day}T00:00:00.000Z`), photos: [] },
+    })
+  }
+
+  type Photo = { url: string; note?: string; date: string }
+  const photos = asArray<Photo>(suivi.photos)
+  photos.push({
+    url: photo.url,
+    note: photo.note?.trim() || undefined,
+    date: new Date().toISOString(),
+  })
+
+  const updated = await prisma.suiviPostOp.update({
+    where: { patientId },
+    data: { photos },
+  })
+
+  await prisma.auditLog
+    .create({
+      data: {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: 'create',
+        entity: 'post_op_photo',
+        entityId: patientId,
+        after: { url: photo.url, source: actor.role } as never,
+      },
+    })
+    .catch(() => undefined)
+
+  return { suivi: updated }
+}
+
+/**
  * Message de retour à la maison : crée le suivi si besoin (date d'intervention de la logistique),
  * passe le dossier en post-op, poste le message dans le chat et prépare le lien WhatsApp.
  */

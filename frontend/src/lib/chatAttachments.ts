@@ -1,5 +1,7 @@
 /** Helpers pièces jointes chat (page complète + widget popup). */
 
+import { resolveProtectedUploadUrl } from '@/lib/mediaUrl'
+
 export function isImageUrl(url: string) {
   return /\.(jpe?g|png|webp)(\?|$)/i.test(url)
 }
@@ -8,37 +10,9 @@ export function isPdfUrl(url: string, name?: string | null) {
   return /\.pdf(\?|$)/i.test(url) || /\.pdf$/i.test(name ?? '')
 }
 
-/** Rebase les URLs uploads vers l’API courante (évite localhost / host Docker). */
+/** Rebase les URLs uploads vers l’API courante + auth (évite localhost / host Docker). */
 export function resolveAttachmentUrl(value: string): string {
-  if (!value?.trim()) return value
-  if (value.startsWith('blob:')) return value
-
-  const viteApi = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000/api').replace(
-    /\/$/,
-    '',
-  )
-  const apiBase = viteApi.replace(/\/api\/?$/, '') || ''
-
-  const normalizeUploadPath = (pathname: string): string => {
-    if (pathname.startsWith('/api/uploads/')) return `/uploads/${pathname.slice('/api/uploads/'.length)}`
-    return pathname
-  }
-
-  if (value.startsWith('http://') || value.startsWith('https://')) {
-    try {
-      const pathname = normalizeUploadPath(new URL(value).pathname)
-      if (pathname.startsWith('/uploads/')) return `${apiBase}${pathname}`
-    } catch {
-      return value
-    }
-    return value
-  }
-
-  const pathPart = normalizeUploadPath(value.trim())
-  if (pathPart.startsWith('/uploads/')) return `${apiBase}${pathPart}`
-  if (pathPart.startsWith('/')) return `${apiBase}${pathPart}`
-  if (pathPart.startsWith('uploads/')) return `${apiBase}/${pathPart}`
-  return `${apiBase}/uploads/${pathPart}`
+  return resolveProtectedUploadUrl(value)
 }
 
 export async function downloadAttachment(url: string, filename: string) {

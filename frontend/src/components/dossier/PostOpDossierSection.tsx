@@ -10,7 +10,12 @@ import {
   PostOpPhotosGallery,
   PostOpRetourSection,
 } from '@/components/dossier/PostOpStaffSections'
-import { gestionnaireApi, gestionnairePostOpApi, type SuiviPostOp } from '@/lib/api'
+import {
+  gestionnaireApi,
+  gestionnairePostOpApi,
+  uploadGestionnairePostOpPhoto,
+  type SuiviPostOp,
+} from '@/lib/api'
 import { daysSinceDate } from '@/lib/postOpSteps'
 import { formatDate } from '@/lib/utils'
 
@@ -80,7 +85,17 @@ export function PostOpDossierSection({ patientId, patientName, onStatusChange }:
         onChange={setSuivi}
       />
 
-      <PostOpPhotosGallery suivi={suivi} />
+      <PostOpPhotosGallery
+        suivi={suivi}
+        onUploadFiles={async (files) => {
+          let last: SuiviPostOp | null = suivi
+          for (const file of files) {
+            const res = await uploadGestionnairePostOpPhoto(patientId, file)
+            if (res.suivi) last = res.suivi
+          }
+          if (last) setSuivi(last)
+        }}
+      />
 
       <PostOpDemandesSection patientId={patientId} suivi={suivi} api={gestionnairePostOpApi} onChange={setSuivi} />
 

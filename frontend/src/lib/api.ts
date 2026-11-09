@@ -2175,6 +2175,38 @@ export async function uploadPostOpPhoto(file: File, note?: string): Promise<Uplo
   return (await res.json()) as UploadResponse & { suivi?: SuiviPostOp }
 }
 
+/** Upload photo post-op par la gestionnaire (ex. reçue WhatsApp). */
+export async function uploadGestionnairePostOpPhoto(
+  patientId: string,
+  file: File,
+  note?: string,
+): Promise<UploadResponse & { suivi?: SuiviPostOp }> {
+  const prepared = await compressImageForUpload(file)
+  const { access } = getTokens()
+  const formData = new FormData()
+  formData.append('file', prepared)
+  if (note) formData.append('note', note)
+
+  const headers: Record<string, string> = {}
+  if (access) headers['Authorization'] = `Bearer ${access}`
+
+  const url = `${BASE_URL}/gestionnaire/post-op/${encodeURIComponent(patientId)}/photos`
+  const res = await fetch(url, { method: 'POST', headers, body: formData })
+  if (res.status === 401) {
+    const newToken = await tryRefreshToken()
+    if (newToken) {
+      headers['Authorization'] = `Bearer ${newToken}`
+      const retry = await fetch(url, { method: 'POST', headers, body: formData })
+      if (!retry.ok) await readUploadError(retry)
+      return (await retry.json()) as UploadResponse & { suivi?: SuiviPostOp }
+    }
+    forceSessionExpired()
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
+  }
+  if (!res.ok) await readUploadError(res)
+  return (await res.json()) as UploadResponse & { suivi?: SuiviPostOp }
+}
+
 export async function uploadFile(file: File): Promise<UploadResponse> {
   const prepared = await compressImageForUpload(file)
   const { access } = getTokens()

@@ -1,7 +1,7 @@
 import './config/env.js'
 import path from 'path'
 import { readdir } from 'fs/promises'
-import { mkdirSync } from 'fs'
+import { existsSync, mkdirSync } from 'fs'
 import { fileURLToPath } from 'url'
 import express from 'express'
 import cors from 'cors'
@@ -21,6 +21,9 @@ import { startGoogleCalendarScheduler } from './modules/google-calendar/google-c
 import { startDevisRappelScheduler } from './modules/gestionnaire/devis-rappel.scheduler.js'
 import { startPlanningJ7RappelScheduler } from './modules/gestionnaire/planning-j7-rappel.scheduler.js'
 import { logMailerStatus } from './lib/mailer.js'
+import jwt from 'jsonwebtoken'
+import { verifyGuestUploadToken } from './lib/uploadAccess.js'
+import type { JwtPayload } from './modules/auth/auth.types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const allowedCorsOrigins = env.CORS_ORIGINS
@@ -63,73 +66,111 @@ app.use(pinoHttpMiddleware)
 app.use(express.json({ limit: '15mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-// ── Fichiers statiques (uploads) ─────────────────────────────────────────────
+// ── Uploads protégés (photos / PDF patients) ─────────────────────────────────
+// Plus d’accès public par lien nu : JWT (Bearer ou ?access_token=) ou jeton guest ?k=
 const uploadsDir = path.join(__dirname, '../uploads')
 mkdirSync(uploadsDir, { recursive: true })
-app.use('/uploads', (_req, res, next) => {
-  // Autoriser l'affichage des images/PDF dans le frontend (origin différente en dev: 5173 -> 4000).
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
-  next()
-})
-app.use('/uploads', express.static(uploadsDir, {
-  index: false,
-  fallthrough: true,
-  setHeaders(res, filePath) {
-    if (filePath.toLowerCase().endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf')
-      res.setHeader('Content-Disposition', 'inline')
+
+function extractUploadAccessToken(req: express.Request): string | null {
+  const header = req.headers.authorization
+  if (header?.startsWith('Bearer ')) return header.slice(7)
+  const q = req.query.access_token
+  if (typeof q === 'string' && q.trim()) return q.trim()
+  return null
+}
+
+function canAccessUpload(req: express.Request, filename: string): boolean {
+  const jwtToken = extractUploadAccessToken(req)
+  if (jwtToken) {
+    try {
+      jwt.verify(jwtToken, env.JWT_ACCESS_SECRET) as JwtPayload
+      return true
+    } catch {
+      /* fall through */
     }
-  },
-}))
-// Express 5 : `:filename` ne matche pas `fichier.pdf` → wildcard obligatoire.
+  }
+  const k = typeof req.query.k === 'string' ? req.query.k : undefined
+  return verifyGuestUploadToken(filename, k)
+}
+
+function sendUploadFile(
+  res: express.Response,
+  next: express.NextFunction,
+  filePath: string,
+) {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+  res.setHeader('Cache-Control', 'private, no-store')
+  if (filePath.toLowerCase().endsWith('.pdf')) {
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', 'inline')
+  }
+  res.sendFile(filePath, (err) => {
+    if (err) next(err)
+  })
+}
+
+// Express 5 : wildcard obligatoire pour `fichier.pdf`
 app.get('/uploads/*file', async (req, res, next) => {
   try {
     const raw = req.params.file
     const requested = Array.isArray(raw) ? raw.join('/') : String(raw ?? '')
     const safeRequested = path.basename(requested).replace(/[^a-zA-Z0-9._-]/g, '_')
+    if (!safeRequested) {
+      res.status(404).type('html').send(
+        '<!doctype html><meta charset="utf-8"><title>Fichier introuvable</title><p>Ce document n’est plus disponible.</p>',
+      )
+      return
+    }
+
+    if (!canAccessUpload(req, safeRequested)) {
+      res.status(401).type('html').send(
+        '<!doctype html><meta charset="utf-8"><title>Accès refusé</title><p>Connexion requise pour ouvrir ce fichier.</p>',
+      )
+      return
+    }
+
     const directPath = path.join(uploadsDir, safeRequested)
+    if (existsSync(directPath)) {
+      sendUploadFile(res, next, directPath)
+      return
+    }
 
-    res.sendFile(directPath, async (err) => {
-      if (!err) return
-      try {
-        const files = await readdir(uploadsDir)
-        const suffix = `-${safeRequested}`
-        const candidate = files
-          .filter((f) => f === safeRequested || f.endsWith(suffix))
-          .sort()
-          .pop()
+    try {
+      const files = await readdir(uploadsDir)
+      const suffix = `-${safeRequested}`
+      const candidate = files
+        .filter((f) => f === safeRequested || f.endsWith(suffix))
+        .sort()
+        .pop()
 
-        if (!candidate) {
-          res.status(404).type('html').send(
-            '<!doctype html><meta charset="utf-8"><title>Fichier introuvable</title><p>Ce document n’est plus disponible.</p>',
-          )
-          return
-        }
-        res.sendFile(path.join(uploadsDir, candidate), (fallbackErr) => {
-          if (fallbackErr) next(fallbackErr)
-        })
-      } catch (scanErr) {
-        if (scanErr && typeof scanErr === 'object' && 'code' in scanErr && (scanErr as { code?: string }).code === 'ENOENT') {
-          res.status(404).type('html').send(
-            '<!doctype html><meta charset="utf-8"><title>Fichier introuvable</title><p>Ce document n’est plus disponible.</p>',
-          )
-          return
-        }
-        next(scanErr)
+      if (!candidate) {
+        res.status(404).type('html').send(
+          '<!doctype html><meta charset="utf-8"><title>Fichier introuvable</title><p>Ce document n’est plus disponible.</p>',
+        )
+        return
       }
-    })
+      sendUploadFile(res, next, path.join(uploadsDir, candidate))
+    } catch (scanErr) {
+      if (scanErr && typeof scanErr === 'object' && 'code' in scanErr && (scanErr as { code?: string }).code === 'ENOENT') {
+        res.status(404).type('html').send(
+          '<!doctype html><meta charset="utf-8"><title>Fichier introuvable</title><p>Ce document n’est plus disponible.</p>',
+        )
+        return
+      }
+      next(scanErr)
+    }
   } catch (e) {
     next(e)
   }
 })
 
-// Compatibilité rétroactive : anciennes URLs stockées en `/api/uploads/...`
-// (ou caches frontend) doivent continuer à fonctionner en production.
+// Anciennes URLs `/api/uploads/...` → même contrôle d’accès (pas de redirect public).
 app.get('/api/uploads/*file', (req, res) => {
   const raw = req.params.file
   const requested = Array.isArray(raw) ? raw.join('/') : String(raw ?? '')
   const safeRequested = path.basename(requested).replace(/[^a-zA-Z0-9._-]/g, '_')
-  res.redirect(302, `/uploads/${safeRequested}`)
+  const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
+  res.redirect(302, `/uploads/${safeRequested}${q}`)
 })
 
 // ── Routes ───────────────────────────────────────────────────────────────────

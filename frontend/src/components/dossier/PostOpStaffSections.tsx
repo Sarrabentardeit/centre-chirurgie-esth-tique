@@ -8,6 +8,7 @@ import {
   Send,
   Star,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +20,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { PostOpSection } from '@/components/dossier/PostOpSection'
 import type { PostOpNoteInterne, PostOpStaffApi, SuiviPostOp } from '@/lib/api'
 import { buildPostOpRetourMessage } from '@/lib/postOpMessage'
+import { resolveProtectedUploadUrl } from '@/lib/mediaUrl'
 import { photoDayOffset } from '@/lib/postOpSteps'
 import { formatDate, formatRelative } from '@/lib/utils'
 
@@ -254,20 +256,39 @@ export function PostOpRetourSection({
   )
 }
 
-// ─── 3 · Photos (lecture) ────────────────────────────────────────────────────
+// ─── 3 · Photos (lecture + upload staff optionnel) ───────────────────────────
 
 export function PostOpPhotosGallery({
   suivi,
   children,
+  onUploadFiles,
 }: {
   suivi: SuiviPostOp | null
   children?: ReactNode
+  /** Si fourni : zone d’ajout comme côté patiente (ex. photos reçues WhatsApp). */
+  onUploadFiles?: (files: File[]) => Promise<void>
 }) {
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
   const photos = suivi?.photos ?? []
   const sorted = suivi
     ? [...photos].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     : []
   const compare = sorted.length >= 2 ? { before: sorted[0], after: sorted[sorted.length - 1] } : null
+
+  const handlePick = async (files: FileList | null) => {
+    if (!onUploadFiles || !files?.length) return
+    setUploading(true)
+    setUploadError(null)
+    try {
+      await onUploadFiles(Array.from(files))
+    } catch (e) {
+      setUploadError(errMessage(e, 'Envoi impossible.'))
+    } finally {
+      setUploading(false)
+    }
+  }
 
   return (
     <PostOpSection title="Photos" note={photos.length > 0 ? String(photos.length) : undefined}>
@@ -281,7 +302,11 @@ export function PostOpPhotosGallery({
               <div className="grid grid-cols-2 gap-3 max-w-md">
                 {([['Première', compare.before], ['Dernière', compare.after]] as const).map(([label, p]) => (
                   <div key={label} className="space-y-1">
-                    <img src={p.url} alt={label} className="w-full aspect-square object-cover rounded-lg border" />
+                    <img
+                      src={resolveProtectedUploadUrl(p.url)}
+                      alt={label}
+                      className="w-full aspect-square object-cover rounded-lg border"
+                    />
                     <p className="text-[11px] text-muted-foreground">
                       {label} · J+{photoDayOffset(suivi, p)} ({formatDate(p.date)})
                     </p>
@@ -294,12 +319,16 @@ export function PostOpPhotosGallery({
             {sorted.map((photo, i) => (
               <a
                 key={`${photo.url}-${i}`}
-                href={photo.url}
+                href={resolveProtectedUploadUrl(photo.url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="relative rounded-xl overflow-hidden border bg-muted group"
               >
-                <img src={photo.url} alt={`Photo de suivi ${i + 1}`} className="w-full aspect-square object-cover" />
+                <img
+                  src={resolveProtectedUploadUrl(photo.url)}
+                  alt={`Photo de suivi ${i + 1}`}
+                  className="w-full aspect-square object-cover"
+                />
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                   <p className="text-white text-[11px] font-semibold">J+{photoDayOffset(suivi, photo)}</p>
                   {photo.note && <p className="text-white/80 text-[10px] truncate">{photo.note}</p>}
@@ -308,6 +337,45 @@ export function PostOpPhotosGallery({
             ))}
           </div>
         </>
+      )}
+      {onUploadFiles && (
+        <div className="space-y-2">
+          <label
+            className={`block border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+              uploading ? 'border-brand-300 bg-brand-50/50 pointer-events-none' : 'border-border hover:border-brand-400'
+            }`}
+          >
+            {uploading ? (
+              <Loader2 className="h-5 w-5 text-brand-600 mx-auto mb-1.5 animate-spin" />
+            ) : (
+              <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1.5" />
+            )}
+            <p className="text-sm font-medium">
+              {uploading ? 'Envoi en cours…' : 'Ajouter des photos'}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Photos reçues de la patiente (WhatsApp, e-mail…) — visibles aussi dans son suivi
+            </p>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              disabled={uploading}
+              onChange={(e) => {
+                const input = e.currentTarget
+                void handlePick(input.files).finally(() => {
+                  input.value = ''
+                })
+              }}
+            />
+          </label>
+          {uploadError && (
+            <p className="text-xs text-destructive flex items-center gap-1">
+              <X className="h-3 w-3" /> {uploadError}
+            </p>
+          )}
+        </div>
       )}
       {children}
     </PostOpSection>

@@ -26,13 +26,12 @@ export function publicAppBaseUrl(): string {
   return PROD_APP_URL
 }
 
-/** Transforme une URL d’upload interne en lien public cliquable (WhatsApp / mobile). */
-export function toPublicUploadUrl(storedUrl: string | null | undefined): string | null {
-  if (!storedUrl?.trim()) return null
-  const match = storedUrl.trim().match(/\/uploads\/([^/?#]+)/i)
-  const filename = match?.[1]
-  if (!filename) return null
-  return `${publicAppBaseUrl()}/uploads/${filename}`
+/**
+ * Ne jamais exposer `/uploads/...` en clair (photos / PDF médicaux).
+ * WhatsApp doit passer par les liens signés `/api/public/...`.
+ */
+export function toPublicUploadUrl(_storedUrl: string | null | undefined): string | null {
+  return null
 }
 
 export function toWhatsAppDigits(phone: string | null | undefined): string | null {

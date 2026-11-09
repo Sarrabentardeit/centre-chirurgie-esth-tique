@@ -1,5 +1,8 @@
 import { Router } from 'express'
 import type { Request, Response, NextFunction } from 'express'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import multer from 'multer'
 import { validate } from '../../middleware/validate.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { AppError } from '../../middleware/errorHandler.js'
@@ -43,6 +46,21 @@ function pid(v: string | string[] | undefined): string {
   if (!s) throw new AppError(400, 'BAD_PARAM', 'Paramètre manquant.')
   return s
 }
+
+const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
+const uploadPostOp = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename: (_req, file, cb) => {
+      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+      cb(null, `postop-${Date.now()}-${safe}`)
+    },
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    cb(null, file.mimetype.startsWith('image/'))
+  },
+})
 
 export const gestionnaireRouter = Router()
 
@@ -100,6 +118,31 @@ gestionnaireRouter.get('/post-op/:patientId', async (req: Request, res: Response
     next(e)
   }
 })
+
+/** Upload photo post-op (reçue WhatsApp / cabinet) — même usage que la patiente. */
+gestionnaireRouter.post(
+  '/post-op/:patientId/photos',
+  uploadPostOp.single('file'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ ok: false, code: 'NO_FILE', message: 'Aucun fichier reçu.' })
+        return
+      }
+      const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
+      const url = `${baseUrl}/uploads/${req.file.filename}`
+      const note = typeof req.body.note === 'string' ? req.body.note : undefined
+      const result = await postOpService.addPostOpPhoto(
+        { id: req.auth!.sub, role: 'gestionnaire' },
+        pid(req.params.patientId),
+        { url, note },
+      )
+      res.json({ ok: true, url, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
 
 gestionnaireRouter.post(
   '/post-op/:patientId/retour',

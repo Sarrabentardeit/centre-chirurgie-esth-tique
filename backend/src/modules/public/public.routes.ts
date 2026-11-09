@@ -6,6 +6,7 @@ import multer from 'multer'
 import { rateLimit } from 'express-rate-limit'
 import { resolveDevisPdfPath, verifyDevisPdfToken } from '../../lib/devisPdfPublic.js'
 import { resolvePlanningPdfPath, verifyPlanningPdfToken } from '../../lib/planningPdfPublic.js'
+import { signGuestUploadToken } from '../../lib/uploadAccess.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
@@ -53,7 +54,9 @@ publicRouter.post(
       return
     }
     const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
-    const url = `${baseUrl}/uploads/${req.file.filename}`
+    const k = signGuestUploadToken(req.file.filename)
+    // Jeton guest : aperçu pendant le formulaire public uniquement (pas un lien permanent).
+    const url = `${baseUrl}/uploads/${req.file.filename}?k=${encodeURIComponent(k)}`
     res.json({ ok: true, url, name: req.file.originalname, size: req.file.size })
   },
 )

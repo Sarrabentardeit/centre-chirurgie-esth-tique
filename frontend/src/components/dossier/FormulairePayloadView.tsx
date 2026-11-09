@@ -4,6 +4,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { chatApi } from '@/lib/api'
+import { resolveProtectedUploadUrl } from '@/lib/mediaUrl'
 import { formatDate, formatIsoDateFrLong } from '@/lib/utils'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 
@@ -155,43 +156,7 @@ export function resolveFormulaireFileUrl(value: string): string {
   // Blob URL temporaire (créée par URL.createObjectURL) — jamais servable, on retourne vide
   // pour que PhotoThumb affiche l'état d'erreur plutôt qu'une 404 silencieuse.
   if (value.startsWith('blob:')) return ''
-
-  const viteApi = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000/api').replace(
-    /\/$/,
-    '',
-  )
-  /** Sans suffixe /api : origine en prod relative (`''`) ou absolue (`http://localhost:4000`). */
-  const apiBase = viteApi.replace(/\/api\/?$/, '') || ''
-
-  /** Express sert les fichiers sous `/uploads`, jamais sous `/api/uploads`. */
-  const normalizeUploadPath = (pathname: string): string => {
-    if (pathname.startsWith('/api/uploads/')) return `/uploads/${pathname.slice('/api/uploads/'.length)}`
-    return pathname
-  }
-
-  // URL complète (http:// ou https://) — on extrait le pathname pour le rebaser
-  // sur le VITE_API_URL courant (corrige les URLs Docker internes comme http://backend:4000).
-  if (value.startsWith('http://') || value.startsWith('https://')) {
-    try {
-      const pathname = normalizeUploadPath(new URL(value).pathname)
-      if (pathname.startsWith('/uploads/')) return `${apiBase}${pathname}`
-    } catch {
-      // URL malformée — on la retourne telle quelle
-    }
-    return value
-  }
-
-  const pathPart = normalizeUploadPath(value.trim())
-
-  // Chemin absolu
-  if (pathPart.startsWith('/uploads/')) return `${apiBase}${pathPart}`
-  if (pathPart.startsWith('/')) return `${apiBase}${pathPart}`
-
-  // Chemin relatif commençant par uploads/
-  if (pathPart.startsWith('uploads/')) return `${apiBase}/${pathPart}`
-
-  // Nom de fichier seul
-  return `${apiBase}/uploads/${pathPart}`
+  return resolveProtectedUploadUrl(value)
 }
 
 export interface FormulairePayloadViewProps {

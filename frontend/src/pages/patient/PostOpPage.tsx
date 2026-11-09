@@ -43,12 +43,6 @@ function displayName(name: string) {
     .replace(/(^|[\s'-])(\p{L})/gu, (_, sep: string, c: string) => sep + c.toLocaleUpperCase('fr'))
 }
 
-function getBeforeAfterPhotos(suivi: SuiviPostOp | null) {
-  if (!suivi || !suivi.photos || suivi.photos.length < 2) return null
-  const sorted = [...suivi.photos].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-  return { before: sorted[0], after: sorted[sorted.length - 1] }
-}
-
 // ─── Vue Médecin ─────────────────────────────────────────────────────────────
 
 function MedecinView() {
@@ -309,6 +303,9 @@ function MedecinView() {
           <>
           <PostOpPhotosGallery
             suivi={suivi}
+            patientId={selected.id}
+            api={medecinPostOpApi}
+            onChange={handleSuiviChange}
             onUploadFiles={async (files) => {
               let last = suivi
               for (const file of files) {
@@ -451,8 +448,6 @@ function PatientView() {
   const jours = daysSinceDate(suivi.dateIntervention)
   const daysLeft = 180 - jours
   const questionnaireAvailable = jours >= 1
-  const beforeAfter = getBeforeAfterPhotos(suivi)
-
   const handleSubmitQuestionnaire = async (e: React.FormEvent) => {
     e.preventDefault()
     if (note < 1) return
@@ -524,30 +519,6 @@ function PatientView() {
 
       <div className="rounded-xl border bg-white px-4 sm:px-5 divide-y">
       <PostOpSection title="Photos" note={suivi.photos.length > 0 ? String(suivi.photos.length) : undefined}>
-        {beforeAfter && (
-          <div className="rounded-xl border border-border p-3">
-            <p className="text-xs font-semibold mb-2">Comparaison avant / après</p>
-            <div className="grid grid-cols-2 gap-3 max-w-md">
-              <div className="space-y-1">
-                <img
-                  src={resolveProtectedUploadUrl(beforeAfter.before.url)}
-                  alt="Avant"
-                  className="w-full aspect-square object-cover rounded-lg border"
-                />
-                <p className="text-[11px] text-muted-foreground">Première photo ({formatDate(beforeAfter.before.date)})</p>
-              </div>
-              <div className="space-y-1">
-                <img
-                  src={resolveProtectedUploadUrl(beforeAfter.after.url)}
-                  alt="Après"
-                  className="w-full aspect-square object-cover rounded-lg border"
-                />
-                <p className="text-[11px] text-muted-foreground">Dernière photo ({formatDate(beforeAfter.after.date)})</p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {suivi.photos.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {suivi.photos.map((photo, i) => (

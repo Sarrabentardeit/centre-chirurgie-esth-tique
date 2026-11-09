@@ -144,6 +144,29 @@ gestionnaireRouter.post(
   },
 )
 
+gestionnaireRouter.delete(
+  '/post-op/:patientId/photos',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const clearAll = req.query.all === '1' || req.query.all === 'true'
+      const actor = { id: req.auth!.sub, role: 'gestionnaire' as const }
+      const patientId = pid(req.params.patientId)
+      if (clearAll) {
+        const result = await postOpService.clearPostOpPhotos(actor, patientId)
+        res.json({ ok: true, ...result })
+        return
+      }
+      const id = typeof req.query.id === 'string' ? req.query.id : undefined
+      const url = typeof req.query.url === 'string' ? req.query.url : undefined
+      const date = typeof req.query.date === 'string' ? req.query.date : undefined
+      const result = await postOpService.deletePostOpPhoto(actor, patientId, { id, url, date })
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
 gestionnaireRouter.post(
   '/post-op/:patientId/retour',
   validate(postOpRetourSchema),

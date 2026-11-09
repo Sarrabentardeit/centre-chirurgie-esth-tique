@@ -408,6 +408,7 @@ export interface RendezVous {
 // ─── Post-Op types ────────────────────────────────────────────────────────────
 
 export interface PostOpPhoto {
+  id?: string
   url: string
   note?: string
   date: string
@@ -478,6 +479,11 @@ export interface PostOpStaffApi {
     body: { type: 'deroulement' | 'depense'; texte: string; montant?: number | null },
   ) => Promise<{ suivi: SuiviPostOp }>
   deleteNote: (patientId: string, noteId: string) => Promise<{ suivi: SuiviPostOp }>
+  deletePhoto: (
+    patientId: string,
+    target: { id?: string; url?: string; date?: string },
+  ) => Promise<{ suivi: SuiviPostOp }>
+  clearPhotos: (patientId: string) => Promise<{ suivi: SuiviPostOp }>
 }
 
 export interface PostOpPatient {
@@ -1475,6 +1481,21 @@ function makePostOpStaffApi(prefix: '/medecin' | '/gestionnaire'): PostOpStaffAp
       }),
     deleteNote: (patientId, noteId) =>
       request<{ ok: true; suivi: SuiviPostOp }>(`${prefix}/post-op/${patientId}/notes/${noteId}`, {
+        method: 'DELETE',
+      }),
+    deletePhoto: (patientId, target) => {
+      const q = new URLSearchParams()
+      if (target.id) q.set('id', target.id)
+      if (target.url) q.set('url', target.url)
+      if (target.date) q.set('date', target.date)
+      const qs = q.toString()
+      return request<{ ok: true; suivi: SuiviPostOp }>(
+        `${prefix}/post-op/${patientId}/photos${qs ? `?${qs}` : ''}`,
+        { method: 'DELETE' },
+      )
+    },
+    clearPhotos: (patientId) =>
+      request<{ ok: true; suivi: SuiviPostOp }>(`${prefix}/post-op/${patientId}/photos?all=1`, {
         method: 'DELETE',
       }),
   }

@@ -1406,18 +1406,8 @@ export async function addPostOpPhoto(
   patientId: string,
   photo: { url: string; note?: string },
 ) {
-  const suivi = await prisma.suiviPostOp.findUnique({ where: { patientId } })
-  if (!suivi) throw new AppError(404, 'SUIVI_NOT_FOUND', 'Suivi post-opératoire introuvable.')
-
-  type Photo = { url: string; note?: string; date: string }
-  const photos = (suivi.photos as Photo[]) ?? []
-  photos.push({ url: photo.url, note: photo.note, date: new Date().toISOString() })
-
-  const updated = await prisma.suiviPostOp.update({
-    where: { patientId },
-    data: { photos },
-  })
-  return { suivi: updated }
+  const { addPostOpPhoto: addShared } = await import('../../lib/postOp.js')
+  return addShared({ id: 'system', role: 'medecin' }, patientId, photo)
 }
 
 // ─── RDV patient ──────────────────────────────────────────────────────────────

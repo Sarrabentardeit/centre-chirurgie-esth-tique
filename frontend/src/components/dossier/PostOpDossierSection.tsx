@@ -87,6 +87,9 @@ export function PostOpDossierSection({ patientId, patientName, onStatusChange }:
 
       <PostOpPhotosGallery
         suivi={suivi}
+        patientId={patientId}
+        api={gestionnairePostOpApi}
+        onChange={setSuivi}
         onUploadFiles={async (files) => {
           let last: SuiviPostOp | null = suivi
           for (const file of files) {

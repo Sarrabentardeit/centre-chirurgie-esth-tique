@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
@@ -444,9 +445,14 @@ export async function addMyPostOpPhoto(userId: string, photo: { url: string; not
   const suivi = await prisma.suiviPostOp.findUnique({ where: { patientId: patient.id } })
   if (!suivi) throw new AppError(404, 'SUIVI_NOT_FOUND', 'Suivi post-opératoire introuvable.')
 
-  type Photo = { url: string; note?: string; date: string }
+  type Photo = { id?: string; url: string; note?: string; date: string }
   const photos = (suivi.photos as Photo[]) ?? []
-  photos.push({ url: photo.url, note: photo.note, date: new Date().toISOString() })
+  photos.push({
+    id: randomUUID(),
+    url: photo.url,
+    note: photo.note,
+    date: new Date().toISOString(),
+  })
 
   const updated = await prisma.suiviPostOp.update({
     where: { patientId: patient.id },

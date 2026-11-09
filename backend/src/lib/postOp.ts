@@ -164,13 +164,15 @@ export async function addPostOpPhoto(
     })
   }
 
-  type Photo = { url: string; note?: string; date: string }
+  type Photo = { id?: string; url: string; note?: string; date: string }
   const photos = asArray<Photo>(suivi.photos)
-  photos.push({
+  const entry: Photo = {
+    id: randomUUID(),
     url: photo.url,
     note: photo.note?.trim() || undefined,
     date: new Date().toISOString(),
-  })
+  }
+  photos.push(entry)
 
   const updated = await prisma.suiviPostOp.update({
     where: { patientId },
@@ -185,7 +187,81 @@ export async function addPostOpPhoto(
         action: 'create',
         entity: 'post_op_photo',
         entityId: patientId,
-        after: { url: photo.url, source: actor.role } as never,
+        after: { url: photo.url, photoId: entry.id, source: actor.role } as never,
+      },
+    })
+    .catch(() => undefined)
+
+  return { suivi: updated }
+}
+
+type PostOpPhotoRow = { id?: string; url: string; note?: string; date: string }
+
+/** Supprime une photo du suivi (par id, ou url+date en secours). */
+export async function deletePostOpPhoto(
+  actor: { id: string; role: StaffRole },
+  patientId: string,
+  target: { id?: string; url?: string; date?: string },
+) {
+  const suivi = await loadSuiviOrThrow(patientId)
+  const photos = asArray<PostOpPhotoRow>(suivi.photos)
+  const before = photos.length
+
+  const next = photos.filter((p) => {
+    if (target.id && p.id) return p.id !== target.id
+    if (target.url && target.date) return !(p.url === target.url && p.date === target.date)
+    if (target.url) return p.url !== target.url
+    return true
+  })
+
+  if (next.length === before) {
+    throw new AppError(404, 'PHOTO_NOT_FOUND', 'Photo introuvable dans ce suivi.')
+  }
+
+  const updated = await prisma.suiviPostOp.update({
+    where: { patientId },
+    data: { photos: next },
+  })
+
+  await prisma.auditLog
+    .create({
+      data: {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: 'delete',
+        entity: 'post_op_photo',
+        entityId: patientId,
+        before: { count: before, target } as never,
+        after: { count: next.length } as never,
+      },
+    })
+    .catch(() => undefined)
+
+  return { suivi: updated }
+}
+
+/** Vide toutes les photos du suivi. */
+export async function clearPostOpPhotos(
+  actor: { id: string; role: StaffRole },
+  patientId: string,
+) {
+  const suivi = await loadSuiviOrThrow(patientId)
+  const before = asArray<PostOpPhotoRow>(suivi.photos).length
+  const updated = await prisma.suiviPostOp.update({
+    where: { patientId },
+    data: { photos: [] },
+  })
+
+  await prisma.auditLog
+    .create({
+      data: {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: 'delete',
+        entity: 'post_op_photos',
+        entityId: patientId,
+        before: { count: before } as never,
+        after: { count: 0 } as never,
       },
     })
     .catch(() => undefined)

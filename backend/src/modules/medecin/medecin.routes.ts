@@ -361,7 +361,29 @@ medecinRouter.post('/post-op/:patientId', async (req: Request, res: Response, ne
 
 medecinRouter.post('/post-op/:patientId/photos', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await medecinService.addPostOpPhoto(paramToString(req.params.patientId), req.body)
+    const result = await postOpService.addPostOpPhoto(
+      { id: req.auth!.sub, role: 'medecin' },
+      paramToString(req.params.patientId),
+      req.body,
+    )
+    res.json({ ok: true, ...result })
+  } catch (e) { next(e) }
+})
+
+medecinRouter.delete('/post-op/:patientId/photos', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clearAll = req.query.all === '1' || req.query.all === 'true'
+    const actor = { id: req.auth!.sub, role: 'medecin' as const }
+    const patientId = paramToString(req.params.patientId)
+    if (clearAll) {
+      const result = await postOpService.clearPostOpPhotos(actor, patientId)
+      res.json({ ok: true, ...result })
+      return
+    }
+    const id = typeof req.query.id === 'string' ? req.query.id : undefined
+    const url = typeof req.query.url === 'string' ? req.query.url : undefined
+    const date = typeof req.query.date === 'string' ? req.query.date : undefined
+    const result = await postOpService.deletePostOpPhoto(actor, patientId, { id, url, date })
     res.json({ ok: true, ...result })
   } catch (e) { next(e) }
 })

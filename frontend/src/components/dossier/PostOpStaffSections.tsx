@@ -1,7 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   EyeOff,
   Loader2,
@@ -18,7 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { PostOpSection } from '@/components/dossier/PostOpSection'
-import type { PostOpNoteInterne, PostOpStaffApi, SuiviPostOp } from '@/lib/api'
+import type { PostOpNoteInterne, PostOpPhoto, PostOpStaffApi, SuiviPostOp } from '@/lib/api'
 import { buildPostOpRetourMessage } from '@/lib/postOpMessage'
 import { resolveProtectedUploadUrl } from '@/lib/mediaUrl'
 import { photoDayOffset } from '@/lib/postOpSteps'
@@ -256,26 +258,62 @@ export function PostOpRetourSection({
   )
 }
 
-// ─── 3 · Photos (lecture + upload staff optionnel) ───────────────────────────
+// ─── 3 · Photos (gestion complète staff) ─────────────────────────────────────
+
+function photoIdentity(p: PostOpPhoto) {
+  return p.id ?? `${p.url}|${p.date}`
+}
 
 export function PostOpPhotosGallery({
   suivi,
+  patientId,
+  api,
+  onChange,
   children,
   onUploadFiles,
 }: {
   suivi: SuiviPostOp | null
+  patientId?: string
+  api?: PostOpStaffApi
+  onChange?: (suivi: SuiviPostOp) => void
   children?: ReactNode
-  /** Si fourni : zone d’ajout comme côté patiente (ex. photos reçues WhatsApp). */
+  /** Si fourni : zone d’ajout (WhatsApp / e-mail…). */
   onUploadFiles?: (files: File[]) => Promise<void>
 }) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<PostOpPhoto | 'all' | null>(null)
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
 
+  const canManage = Boolean(patientId && api && onChange)
   const photos = suivi?.photos ?? []
-  const sorted = suivi
-    ? [...photos].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    : []
-  const compare = sorted.length >= 2 ? { before: sorted[0], after: sorted[sorted.length - 1] } : null
+  const sorted = useMemo(
+    () =>
+      suivi
+        ? [...photos].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        : [],
+    [photos, suivi],
+  )
+  const groups = useMemo(() => {
+    if (!suivi) return [] as Array<{ day: string; label: string; jPlus: number; items: PostOpPhoto[] }>
+    const map = new Map<string, PostOpPhoto[]>()
+    for (const p of sorted) {
+      const day = p.date.slice(0, 10)
+      const list = map.get(day) ?? []
+      list.push(p)
+      map.set(day, list)
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([day, items]) => ({
+        day,
+        label: formatDate(day),
+        jPlus: photoDayOffset(suivi, items[0]),
+        items,
+      }))
+  }, [sorted, suivi])
 
   const handlePick = async (files: FileList | null) => {
     if (!onUploadFiles || !files?.length) return
@@ -290,71 +328,93 @@ export function PostOpPhotosGallery({
     }
   }
 
+  const confirmDelete = async () => {
+    if (!canManage || !patientId || !api || !onChange || !deleteTarget) return
+    setActionError(null)
+    setBusyKey(deleteTarget === 'all' ? 'all' : photoIdentity(deleteTarget))
+    try {
+      const res =
+        deleteTarget === 'all'
+          ? await api.clearPhotos(patientId)
+          : await api.deletePhoto(patientId, {
+              id: deleteTarget.id,
+              url: deleteTarget.url,
+              date: deleteTarget.date,
+            })
+      onChange(res.suivi)
+      setDeleteTarget(null)
+      setLightboxIdx(null)
+    } catch (e) {
+      setActionError(errMessage(e, 'Suppression impossible.'))
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const lightboxPhoto = lightboxIdx != null ? sorted[lightboxIdx] ?? null : null
+
   return (
     <PostOpSection title="Photos" note={photos.length > 0 ? String(photos.length) : undefined}>
-      {!suivi || photos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Aucune photo.</p>
-      ) : (
-        <>
-          {compare && (
-            <div className="rounded-xl border p-3">
-              <p className="text-xs font-semibold mb-2 text-slate-700">Comparaison première / dernière photo</p>
-              <div className="grid grid-cols-2 gap-3 max-w-md">
-                {([['Première', compare.before], ['Dernière', compare.after]] as const).map(([label, p]) => (
-                  <div key={label} className="space-y-1">
-                    <img
-                      src={resolveProtectedUploadUrl(p.url)}
-                      alt={label}
-                      className="w-full aspect-square object-cover rounded-lg border"
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      {label} · J+{photoDayOffset(suivi, p)} ({formatDate(p.date)})
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* Barre d’actions (si déjà des photos) */}
+      {photos.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {onUploadFiles && (
+            <label className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-brand-200 bg-brand-50 text-brand-800 text-sm font-medium cursor-pointer hover:bg-brand-100">
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {uploading ? 'Envoi…' : 'Ajouter des photos'}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) => {
+                  const input = e.currentTarget
+                  void handlePick(input.files).finally(() => {
+                    input.value = ''
+                  })
+                }}
+              />
+            </label>
           )}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-            {sorted.map((photo, i) => (
-              <a
-                key={`${photo.url}-${i}`}
-                href={resolveProtectedUploadUrl(photo.url)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="relative rounded-xl overflow-hidden border bg-muted group"
-              >
-                <img
-                  src={resolveProtectedUploadUrl(photo.url)}
-                  alt={`Photo de suivi ${i + 1}`}
-                  className="w-full aspect-square object-cover"
-                />
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                  <p className="text-white text-[11px] font-semibold">J+{photoDayOffset(suivi, photo)}</p>
-                  {photo.note && <p className="text-white/80 text-[10px] truncate">{photo.note}</p>}
-                </div>
-              </a>
-            ))}
-          </div>
-        </>
+          {canManage && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 gap-1.5 border-red-200 text-red-700 hover:bg-red-50"
+              disabled={busyKey !== null}
+              onClick={() => setDeleteTarget('all')}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Tout supprimer
+            </Button>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto">
+            {photos.length} photo{photos.length > 1 ? 's' : ''}
+          </span>
+        </div>
       )}
-      {onUploadFiles && (
-        <div className="space-y-2">
+
+      {(uploadError || actionError) && (
+        <InlineError message={uploadError ?? actionError ?? ''} />
+      )}
+
+      {!suivi || photos.length === 0 ? (
+        onUploadFiles ? (
           <label
-            className={`block border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+            className={`block border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
               uploading ? 'border-brand-300 bg-brand-50/50 pointer-events-none' : 'border-border hover:border-brand-400'
             }`}
           >
             {uploading ? (
-              <Loader2 className="h-5 w-5 text-brand-600 mx-auto mb-1.5 animate-spin" />
+              <Loader2 className="h-6 w-6 text-brand-600 mx-auto mb-2 animate-spin" />
             ) : (
-              <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1.5" />
+              <Upload className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
             )}
-            <p className="text-sm font-medium">
-              {uploading ? 'Envoi en cours…' : 'Ajouter des photos'}
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Photos reçues de la patiente (WhatsApp, e-mail…) — visibles aussi dans son suivi
+            <p className="text-sm font-medium">{uploading ? 'Envoi en cours…' : 'Déposer ou choisir des photos'}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              WhatsApp, e-mail, téléphone… visibles aussi dans le suivi patiente
             </p>
             <input
               type="file"
@@ -370,14 +430,170 @@ export function PostOpPhotosGallery({
               }}
             />
           </label>
-          {uploadError && (
-            <p className="text-xs text-destructive flex items-center gap-1">
-              <X className="h-3 w-3" /> {uploadError}
-            </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">Aucune photo.</p>
+        )
+      ) : (
+        <>
+          {groups.map((group) => (
+            <div key={group.day} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold text-slate-800">
+                  {group.label}
+                </p>
+                <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-[10px]">
+                  J+{group.jPlus}
+                </Badge>
+                <span className="text-[11px] text-muted-foreground">
+                  {group.items.length} photo{group.items.length > 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {group.items.map((photo) => {
+                  const key = photoIdentity(photo)
+                  const idx = sorted.findIndex((x) => photoIdentity(x) === key)
+                  const deleting = busyKey === key
+                  return (
+                    <div
+                      key={key}
+                      className="relative rounded-xl overflow-hidden border bg-muted group"
+                    >
+                      <button
+                        type="button"
+                        className="block w-full text-left"
+                        onClick={() => setLightboxIdx(idx)}
+                      >
+                        <img
+                          src={resolveProtectedUploadUrl(photo.url)}
+                          alt={`Photo J+${photoDayOffset(suivi!, photo)}`}
+                          className="w-full aspect-square object-cover"
+                        />
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
+                          <p className="text-white text-[11px] font-semibold">J+{photoDayOffset(suivi!, photo)}</p>
+                          {photo.note && <p className="text-white/80 text-[10px] truncate">{photo.note}</p>}
+                        </div>
+                      </button>
+                      {canManage && (
+                        <button
+                          type="button"
+                          title="Supprimer cette photo"
+                          disabled={deleting || busyKey !== null}
+                          className="absolute top-1.5 right-1.5 h-7 w-7 rounded-full bg-white/95 border border-red-100 text-red-600 shadow-sm flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity disabled:opacity-40"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setDeleteTarget(photo)
+                          }}
+                        >
+                          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {children}
+
+      {/* Lightbox */}
+      {lightboxPhoto && lightboxIdx != null && suivi && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightboxIdx(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center"
+            onClick={() => setLightboxIdx(null)}
+            aria-label="Fermer"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {sorted.length > 1 && (
+            <>
+              <button
+                type="button"
+                className="absolute left-3 sm:left-6 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setLightboxIdx((lightboxIdx - 1 + sorted.length) % sorted.length)
+                }}
+                aria-label="Précédente"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                className="absolute right-3 sm:right-6 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setLightboxIdx((lightboxIdx + 1) % sorted.length)
+                }}
+                aria-label="Suivante"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </>
           )}
+          <div
+            className="max-w-3xl w-full space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={resolveProtectedUploadUrl(lightboxPhoto.url)}
+              alt="Photo post-op"
+              className="w-full max-h-[75vh] object-contain rounded-xl bg-black"
+            />
+            <div className="flex flex-wrap items-center gap-2 text-white text-sm">
+              <span className="font-semibold">J+{photoDayOffset(suivi, lightboxPhoto)}</span>
+              <span className="text-white/70">{formatDate(lightboxPhoto.date)}</span>
+              <span className="text-white/50">{lightboxIdx + 1}/{sorted.length}</span>
+              {canManage && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto h-8 gap-1.5 border-red-300/40 bg-red-500/20 text-white hover:bg-red-500/40"
+                  onClick={() => setDeleteTarget(lightboxPhoto)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Supprimer
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       )}
-      {children}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => {
+          if (busyKey) return
+          setDeleteTarget(null)
+          setActionError(null)
+        }}
+        title={deleteTarget === 'all' ? 'Supprimer toutes les photos ?' : 'Supprimer cette photo ?'}
+        description={
+          deleteTarget === 'all'
+            ? `Les ${photos.length} photos seront retirées du suivi (patiente et équipe).`
+            : 'La photo sera retirée du suivi post-opératoire.'
+        }
+        confirmLabel="Supprimer"
+        confirmVariant="destructive"
+        loading={busyKey !== null}
+        error={actionError}
+        onConfirm={() => void confirmDelete()}
+        icon={
+          <div className="h-11 w-11 rounded-full bg-red-50 border border-red-100 flex items-center justify-center">
+            <Trash2 className="h-5 w-5 text-red-600" />
+          </div>
+        }
+      />
     </PostOpSection>
   )
 }

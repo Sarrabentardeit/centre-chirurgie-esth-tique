@@ -52,6 +52,8 @@ const patientListInclude = {
   formulaires: { orderBy: { createdAt: 'desc' as const }, take: 1 },
   /** Tous les devis actifs : le filtre KPI utilise le statut prioritaire (accepte > envoye > …). */
   devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' as const } },
+  /** Date de passage — tri « acceptés à venir » vs « déjà opérées ». */
+  logistique: { select: { dateIntervention: true } },
   _count: { select: { rapports: true } },
 } as const
 
@@ -423,23 +425,23 @@ export async function getPatients(
   const statusWhere = buildPatientStatusWhere(status, 'gestionnaire')
   const [patients, counts] = await Promise.all([
     prisma.patient.findMany({
-      where: {
+    where: {
         ...statusWhere,
         ...creeParWhere(creePar),
-        ...(search
-          ? {
-              OR: [
-                { user: { fullName: { contains: search, mode: 'insensitive' } } },
-                { user: { email: { contains: search, mode: 'insensitive' } } },
-                { dossierNumber: { contains: search, mode: 'insensitive' } },
-                { phone: { contains: search, mode: 'insensitive' } },
+      ...(search
+        ? {
+            OR: [
+              { user: { fullName: { contains: search, mode: 'insensitive' } } },
+              { user: { email: { contains: search, mode: 'insensitive' } } },
+              { dossierNumber: { contains: search, mode: 'insensitive' } },
+              { phone: { contains: search, mode: 'insensitive' } },
                 { devis: { some: { deletedAt: null, numeroDevis: { contains: search, mode: 'insensitive' } } } },
-              ],
-            }
-          : {}),
-      },
-      include: patientListInclude,
-      orderBy: { updatedAt: 'desc' },
+            ],
+          }
+        : {}),
+    },
+    include: patientListInclude,
+    orderBy: { updatedAt: 'desc' },
     }),
     countDossierBuckets('gestionnaire', creePar),
   ])
@@ -456,8 +458,8 @@ export async function getPatients(
 export async function getPatientById(patientId: string) {
   const [patient, rapportSnapshots, logistiqueRow, planningRow] = await Promise.all([
     prisma.patient.findUnique({
-      where: { id: patientId },
-      include: {
+    where: { id: patientId },
+    include: {
         user: { select: { id: true, fullName: true, email: true, createdAt: true } },
         formulaires: { orderBy: { createdAt: 'desc' } },
         devis: { where: devisActiveWhere, orderBy: { dateCreation: 'desc' } },
@@ -639,11 +641,11 @@ async function dispatchTemplateMessage(input: {
 
   if (input.template.channel === 'notification' || input.template.channel === 'both') {
     await createUserNotification({
-      userId: input.patientUserId,
-      type: 'info',
-      titre: input.notifTitle,
-      message: content,
-      lienAction: input.notifLink,
+        userId: input.patientUserId,
+        type: 'info',
+        titre: input.notifTitle,
+        message: content,
+        lienAction: input.notifLink,
       kind: 'system',
     })
   }
@@ -686,13 +688,13 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
 
   const applyDevisUpdate = async (targetId: string, currentNumero: string | null, currentRapportId: string | null) => {
     const updateData: Parameters<typeof prisma.devis.update>[0]['data'] = {
-      gestionnaireId,
-      lignes: lignesJson,
-      total: input.total,
-      planningMedical: input.planningMedical ?? null,
-      notesSejour: input.notesSejour ?? null,
-      currency: input.currency ?? 'EUR',
-      ...(dateValidite ? { dateValidite } : {}),
+        gestionnaireId,
+        lignes: lignesJson,
+        total: input.total,
+        planningMedical: input.planningMedical ?? null,
+        notesSejour: input.notesSejour ?? null,
+        currency: input.currency ?? 'EUR',
+        ...(dateValidite ? { dateValidite } : {}),
       ...(rapportId && !currentRapportId ? { rapportId } : {}),
     }
     if (!currentNumero) {
@@ -749,16 +751,16 @@ export async function upsertDevisDraft(gestionnaireId: string, patientId: string
     })
     const version = (last?.version ?? 0) + 1
     devis = await assignNumeroDevisWithRetry({
-      patientId,
-      gestionnaireId,
-      statut: 'brouillon',
-      version,
-      lignes: lignesJson,
-      total: input.total,
-      planningMedical: input.planningMedical ?? null,
-      notesSejour: input.notesSejour ?? null,
-      currency: input.currency ?? 'EUR',
-      dateValidite,
+        patientId,
+        gestionnaireId,
+        statut: 'brouillon',
+        version,
+        lignes: lignesJson,
+        total: input.total,
+        planningMedical: input.planningMedical ?? null,
+        notesSejour: input.notesSejour ?? null,
+        currency: input.currency ?? 'EUR',
+        dateValidite,
       rapportId: rapportId ?? undefined,
     }, patient.dossierNumber)
 
@@ -842,10 +844,10 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
     'suivi_termine',
   ]
   if (!keepStatus.includes(patient.status)) {
-    await prisma.patient.update({
-      where: { id: patient.id },
-      data: { status: 'devis_envoye' },
-    })
+  await prisma.patient.update({
+    where: { id: patient.id },
+    data: { status: 'devis_envoye' },
+  })
   }
 
   const templates = await getTemplateMap()
@@ -2060,13 +2062,13 @@ export async function upsertLogistique(gestionnaireId: string, patientId: string
   if (complete) {
     // Quand la checklist est complète, le dossier passe à l'étape intervention.
     if (patient.status !== 'intervention') {
-      await prisma.patient.update({
-        where: { id: patientId },
+    await prisma.patient.update({
+      where: { id: patientId },
         data: { status: 'intervention' },
-      })
+    })
 
-      const med = await prisma.user.findFirst({ where: { role: 'medecin' }, select: { id: true } })
-      if (med) {
+    const med = await prisma.user.findFirst({ where: { role: 'medecin' }, select: { id: true } })
+    if (med) {
         await createUserNotification({
           userId: med.id,
           type: 'info',
@@ -2706,9 +2708,9 @@ export async function getAnalytics() {
 
   const statusDistribution = statusRows
     .map((s) => ({
-      status: s.status,
-      count: s._count._all,
-    }))
+    status: s.status,
+    count: s._count._all,
+  }))
     .sort((a, b) => b.count - a.count)
 
   const monthlyDevis: Array<{ key: string; mois: string; total: number; envoye: number; accepte: number }> = []
@@ -3125,16 +3127,16 @@ export async function getAgendaForGestionnaire(from?: string, to?: string, medec
       const debut = formatAgendaSlot(e.dateDebut)
       const fin = formatAgendaSlot(e.dateFin)
       return {
-        id: e.id,
+      id: e.id,
         date: debut.date,
         heure: debut.heure,
         heureFin: fin.heure,
-        type: e.title ?? 'RDV',
-        motif: e.motif ?? null,
-        statut: e.statut ?? 'planifie',
-        patient: e.patient
-          ? { id: e.patient.id, dossierNumber: e.patient.dossierNumber, user: { fullName: e.patient.user.fullName } }
-          : null,
+      type: e.title ?? 'RDV',
+      motif: e.motif ?? null,
+      statut: e.statut ?? 'planifie',
+      patient: e.patient
+        ? { id: e.patient.id, dossierNumber: e.patient.dossierNumber, user: { fullName: e.patient.user.fullName } }
+        : null,
       }
     })
 

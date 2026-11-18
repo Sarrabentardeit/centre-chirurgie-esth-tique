@@ -804,6 +804,8 @@ export interface PatientListItem {
   user: { id?: string; fullName: string; email: string; createdAt: string }
   formulaires: Array<{ id: string; status: string; submittedAt: string | null }>
   devis: Array<{ id: string; statut: string; total: number; dateCreation: string; numeroDevis?: string | null; updatedAt?: string; vuParPatientAt?: string | null }>
+  /** Pour tri acceptés : date de passage (logistique). */
+  logistique?: { dateIntervention: string | null } | null
   rapports?: Array<{
     id: string
     diagnostic: string | null

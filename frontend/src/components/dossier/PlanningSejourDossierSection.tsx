@@ -5,8 +5,9 @@ import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
 import { gestionnaireApi, type GestionnairePlanningSejourSummary } from '@/lib/api'
 import { ensurePlanningDocShell } from '@/lib/planningSejourBranding'
 import { buildPlanningSejourPrintPage } from '@/lib/planningSejourPrint'
+import { ensurePlanningContentUpToDate } from '@/lib/planningSejourMigrate'
 import { cn, formatDateTime } from '@/lib/utils'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type PlanningSejourDossierSectionProps = {
   patientId: string
@@ -31,10 +32,44 @@ export function PlanningSejourDossierSection({
   const hasContent = planning?.hasContent === true
   const [sendChannel, setSendChannel] = useState<'chat' | 'whatsapp' | null>(null)
 
+  // Met à jour silencieusement les anciens plannings vers le modèle PDF courant
+  useEffect(() => {
+    if (!hasContent) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const [{ patient }, detail] = await Promise.all([
+          gestionnaireApi.getPatient(patientId),
+          gestionnaireApi.getPlanningSejourDetail(patientId),
+        ])
+        if (cancelled || !detail.planning?.content?.trim()) return
+        await ensurePlanningContentUpToDate(
+          patientId,
+          patient,
+          detail.logistique,
+          detail.planning.content,
+          detail.planning.statut === 'finalise' ? 'finalise' : 'brouillon',
+        )
+      } catch {
+        /* silencieux */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [patientId, hasContent])
+
   const getHtml = async () => {
-    const detail = await gestionnaireApi.getPlanningSejourDetail(patientId)
-    const content = detail.planning?.content ?? ''
-    const wrapped = ensurePlanningDocShell(content, window.location.origin)
+    const [{ patient }, detail] = await Promise.all([
+      gestionnaireApi.getPatient(patientId),
+      gestionnaireApi.getPlanningSejourDetail(patientId),
+    ])
+    const { html } = await ensurePlanningContentUpToDate(
+      patientId,
+      patient,
+      detail.logistique,
+      detail.planning?.content,
+      detail.planning?.statut === 'finalise' ? 'finalise' : 'brouillon',
+    )
+    const wrapped = ensurePlanningDocShell(html, window.location.origin)
     return buildPlanningSejourPrintPage(wrapped, `Planning séjour — ${patientName}`)
   }
 

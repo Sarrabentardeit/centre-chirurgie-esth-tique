@@ -587,7 +587,7 @@ export default function ChatPage() {
       setSelectedPatientId(EQUIPE_THREAD_ID)
       setMobileShowThread(true)
       setError(null)
-      setInput('')
+    setInput('')
       setThreadSearch('')
       setShowThreadSearch(false)
       clearPendingFile()
@@ -1049,10 +1049,10 @@ export default function ChatPage() {
         </div>
 
         <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100/80">
-          <button
+              <button
             type="button"
             onClick={() => goToStaffTab(isMedecin ? 'equipe' : 'patient')}
-            className={cn(
+                className={cn(
               'h-9 rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center justify-center',
               (isMedecin ? staffTab === 'equipe' : staffTab === 'patient')
                 ? 'bg-white text-slate-900 shadow-sm'
@@ -1061,7 +1061,7 @@ export default function ChatPage() {
           >
             {isMedecin ? 'Demandes' : 'Patientes'}
             <UnreadBadge count={isMedecin ? equipeUnread : patientUnread} />
-          </button>
+              </button>
           <button
             type="button"
             onClick={() => goToStaffTab(isMedecin ? 'patient' : 'equipe')}
@@ -1087,7 +1087,7 @@ export default function ChatPage() {
           >
             Nouvelle
           </button>
-        </div>
+          </div>
 
         {staffTab === 'patient' && (
           <div className="flex items-center gap-1.5 mt-2.5">
@@ -1116,8 +1116,8 @@ export default function ChatPage() {
             >
               Non lus
             </button>
-          </div>
-        )}
+        </div>
+      )}
 
         {directoryError && (
           <p className="text-[11px] text-destructive mt-2">
@@ -1127,7 +1127,7 @@ export default function ChatPage() {
             </button>
           </p>
         )}
-      </div>
+        </div>
 
       <div className="flex-1 overflow-y-auto p-2 min-h-0">
         {staffTab === 'patient' || staffTab === 'equipe' ? (
@@ -1209,7 +1209,7 @@ export default function ChatPage() {
                         <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
                           {relativeTime(c.lastMessageAt)}
                         </span>
-                      </div>
+          </div>
                       <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
                         {fromDoctor && (
                           <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-sky-800 bg-sky-100 px-1.5 py-0.5 rounded-md">
@@ -1222,11 +1222,11 @@ export default function ChatPage() {
                             ? (sender ? `Dernier : ${sender}` : (isMedecin ? 'Gestionnaire' : 'Médecin'))
                             : c.dossierNumber}
                         </p>
-                      </div>
+        </div>
                       <p className={cn('text-[12px] truncate mt-1', c.unreadCount > 0 ? 'text-slate-700 font-medium' : 'text-muted-foreground')}>
                         {sender ? `${sender} : ` : ''}{c.lastMessagePreview || '—'}
                       </p>
-                    </div>
+      </div>
                     {c.unreadCount > 0 && (
                       <span className={cn(
                         'shrink-0 mt-1 rounded-full text-white text-[10px] font-bold min-w-5 h-5 px-1.5 flex items-center justify-center',
@@ -1254,11 +1254,11 @@ export default function ChatPage() {
         ) : (
           <div className="space-y-0.5">
             {newPatients.map((p) => (
-              <button
+          <button
                 key={p.id}
-                type="button"
+            type="button"
                 onClick={() => selectPatient(p.id)}
-                className={cn(
+            className={cn(
                   'w-full text-left rounded-xl px-3 py-3 transition-all',
                   selectedPatientId === p.id ? 'bg-brand-50 ring-1 ring-brand-200' : 'hover:bg-slate-50',
                 )}
@@ -1274,7 +1274,7 @@ export default function ChatPage() {
                     <p className="text-[11px] text-muted-foreground truncate">{p.dossierNumber} · {p.email}</p>
                   </div>
                 </div>
-              </button>
+          </button>
             ))}
           </div>
         )}
@@ -1459,8 +1459,8 @@ export default function ChatPage() {
                     : isMedecin
                       ? 'Fil privé avec la patiente. Les messages de Houda ne s’affichent pas ici. Utilisez « Nouvelle » pour lui écrire.'
                       : 'Échanges avec la patiente. Les demandes internes sont dans « Dr ».'}
-              </p>
-            </div>
+                    </p>
+                  </div>
           ) : (
             threadItems.map((item) => {
               if (item.type === 'day') {
@@ -1524,7 +1524,7 @@ export default function ChatPage() {
                       {dossierAction && (m.patientNom || m.dossierNumber) && (
                         <button
                           type="button"
-                          className={cn(
+                    className={cn(
                             'text-[10px] px-1.5 py-0.5 rounded-md font-medium border transition-colors',
                             equipeFocusPatientId === m.patientId
                               ? 'bg-brand-100 border-brand-300 text-brand-900'
@@ -1635,7 +1635,7 @@ export default function ChatPage() {
                                     <Download className={cn('h-4 w-4 shrink-0', own ? 'text-white/90' : 'text-[#81572d]')} />
                                   </button>
                                 )}
-                              </div>
+                  </div>
                             )}
                             {m.contenu && !m.contenu.startsWith('Pièce jointe') && (
                               <p className="whitespace-pre-wrap">{m.contenu}</p>
@@ -1660,7 +1660,7 @@ export default function ChatPage() {
                             )}
                           </>
                         )}
-                      </div>
+                </div>
                       <div className="relative shrink-0 pt-0.5 flex flex-col gap-0.5">
                         {!deleted && (
                           <button
@@ -1693,8 +1693,8 @@ export default function ChatPage() {
                         >
                           <MoreVertical className="h-3.5 w-3.5" />
                         </button>
-                      </div>
-                    </div>
+              </div>
+                </div>
                     <div className={cn('flex items-center gap-1 px-1', own ? 'justify-end' : 'justify-start')}>
                       <span className="text-[10px] text-muted-foreground">{formatDateTime(m.dateEnvoi)}</span>
                       {own && !deleted && (
@@ -1702,8 +1702,8 @@ export default function ChatPage() {
                           ? <CheckCheck className="h-3.5 w-3.5 text-brand-600 animate-success-pop" aria-label="Lu" />
                           : <Check className="h-3.5 w-3.5 text-muted-foreground" aria-label="Envoyé" />
                       )}
-                    </div>
-                  </div>
+              </div>
+            </div>
                 </div>
               )
             })
@@ -1765,8 +1765,8 @@ export default function ChatPage() {
           </Button>
           <Textarea
             ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
             onPaste={onPasteFromClipboard}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -1789,18 +1789,18 @@ export default function ChatPage() {
             className="min-h-11 max-h-32 resize-none flex-1 rounded-xl text-sm py-2.5"
             rows={1}
             maxLength={4000}
-          />
-          <Button
-            variant="brand"
-            size="icon"
+        />
+        <Button
+          variant="brand"
+          size="icon"
             className="h-11 w-11 shrink-0 rounded-xl"
             onClick={() => void handleSend()}
             disabled={sending || uploading || (!input.trim() && !pendingFile) || (isStaff && !selectedPatientId)}
             aria-label="Envoyer"
           >
             {uploading ? <ImageIcon className="h-4 w-4 animate-pulse" /> : <Send className="h-4 w-4" />}
-          </Button>
-        </div>
+        </Button>
+      </div>
         <p className="text-[10px] text-muted-foreground mt-1.5 px-1">
           Ctrl+V pour coller une capture · JPG, PNG, WEBP, PDF · max 12 Mo
         </p>
@@ -1954,7 +1954,7 @@ export default function ChatPage() {
                 Supprimer pour tout le monde
               </button>
             )}
-          </div>
+      </div>
         ),
         document.body,
       )}

@@ -17,16 +17,16 @@ import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
 import { DEVIS_ACCENT } from '@/lib/devisCharte'
 import { ensurePlanningDocShell, PLANNING_HIGHLIGHT_COLORS } from '@/lib/planningSejourBranding'
 import { buildPlanningSejourPrintPage, buildPlanningSejourPrintStyles } from '@/lib/planningSejourPrint'
-import { DEFAULT_TND_PER_EUR } from '@/lib/moneyWords'
 import {
-  acceptedDevisPlanningRef,
-  buildPlanningSejourHtml,
   moisLabelFromDate,
-  refreshPlanningDevisRef,
   type PlanningLogistiqueHint,
 } from '@/lib/planningSejourTemplate'
+import { ensurePlanningContentUpToDate } from '@/lib/planningSejourMigrate'
 import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { PlanningSendDialog } from '@/components/dossier/PlanningSendDialog'
+import { PlanningField } from '@/lib/planningFieldExtension'
+import { PlanningConsignesBox } from '@/lib/planningConsignesBoxExtension'
+import { PlanningDoc } from '@/lib/planningDocExtension'
 
 const GLOBAL_CSS = buildPlanningSejourPrintStyles()
 
@@ -38,6 +38,9 @@ const PLANNING_EDITOR_EXTENSIONS = [
   Color,
   Highlight.configure({ multicolor: true }),
   Image.configure({ inline: true, allowBase64: false }),
+  PlanningField,
+  PlanningConsignesBox,
+  PlanningDoc,
 ]
 
 export default function PlanningSejourEditorPage() {
@@ -86,23 +89,15 @@ export default function PlanningSejourEditorPage() {
       moisLabelRef.current = ml
       setStatut(detail.planning?.statut === 'finalise' ? 'finalise' : 'brouillon')
 
-      let tndPerEur = DEFAULT_TND_PER_EUR
-      try {
-        const taux = await gestionnaireApi.getTauxEur()
-        if (taux.tndPerEur > 0) tndPerEur = taux.tndPerEur
-      } catch {
-        /* taux par défaut */
-      }
-
-      if (detail.planning?.content?.trim()) {
-        const withAcceptedRef = refreshPlanningDevisRef(
-          detail.planning.content,
-          acceptedDevisPlanningRef(p),
-        )
-        setInitialHtml(ensurePlanningDocShell(withAcceptedRef))
-      } else {
-        setInitialHtml(buildPlanningSejourHtml(p, log, { tndPerEur }))
-      }
+      // Anciens documents → régénération auto au modèle PDF (sans « Réinitialiser »)
+      const { html } = await ensurePlanningContentUpToDate(
+        patientId,
+        p,
+        log,
+        detail.planning?.content,
+        detail.planning?.statut === 'finalise' ? 'finalise' : 'brouillon',
+      )
+      setInitialHtml(html)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
     } finally {
@@ -154,30 +149,30 @@ export default function PlanningSejourEditorPage() {
   editorRef.current = editor
 
   useEffect(() => {
-    if (editor && initialHtml && !editor.getText().trim()) {
+    if (editor && initialHtml) {
       editor.commands.setContent(initialHtml)
+      setSaved(true)
     }
   }, [editor, initialHtml])
 
   const handleReset = async () => {
-    if (!patient) return
-    if (!window.confirm('Réinitialiser le planning avec les données actuelles du dossier (modèle Word) ?')) return
-    let tndPerEur = DEFAULT_TND_PER_EUR
-    try {
-      const taux = await gestionnaireApi.getTauxEur()
-      if (taux.tndPerEur > 0) tndPerEur = taux.tndPerEur
-    } catch {
-      /* taux par défaut */
-    }
-    const html = buildPlanningSejourHtml(patient, logistique, { tndPerEur })
+    if (!patient || !patientId) return
+    if (!window.confirm('Réinitialiser le planning avec les données actuelles du dossier (modèle PDF) ?')) return
+    const { html } = await ensurePlanningContentUpToDate(
+      patientId,
+      patient,
+      logistique,
+      '', // force rebuild
+      'brouillon',
+    )
     editor?.commands.setContent(html)
     const ml = moisLabelFromDate(
       logistique?.dateArrivee ? new Date(logistique.dateArrivee) : null,
     )
     setMoisLabel(ml)
     moisLabelRef.current = ml
-    setSaved(false)
-    void persist('brouillon')
+    setStatut('brouillon')
+    setSaved(true)
   }
 
   const handlePrint = () => {

@@ -1476,14 +1476,49 @@ export default function DevisGestionnairePage() {
     const bySearch = !q ? all : all.filter((p) =>
       p.user.fullName.toLowerCase().includes(q) || p.dossierNumber.toLowerCase().includes(q)
     )
-    if (devisFilter === 'all') return bySearch
-    return bySearch.filter((p) => {
-      if (devisFilter === 'non_consulte') return isDevisNonConsulte(p.devis)
-      if (devisFilter === 'consulte') return isDevisConsulte(p.devis)
-      const statut = primaryDevisStatut(p.devis)
-      if (devisFilter === 'aucun') return !statut
-      return statut === devisFilter
-    })
+    const filtered =
+      devisFilter === 'all'
+        ? bySearch
+        : bySearch.filter((p) => {
+            if (devisFilter === 'non_consulte') return isDevisNonConsulte(p.devis)
+            if (devisFilter === 'consulte') return isDevisConsulte(p.devis)
+            const statut = primaryDevisStatut(p.devis)
+            if (devisFilter === 'aucun') return !statut
+            return statut === devisFilter
+          })
+
+    // Acceptés : à venir (par date de passage) en haut — déjà opérées en bas.
+    if (devisFilter === 'accepte') {
+      const startOfToday = new Date()
+      startOfToday.setHours(0, 0, 0, 0)
+      const ts = (p: (typeof filtered)[number]) => {
+        const raw = p.logistique?.dateIntervention
+        if (!raw) return null
+        const d = new Date(raw)
+        return Number.isNaN(d.getTime()) ? null : d.getTime()
+      }
+      const isOperated = (p: (typeof filtered)[number]) => {
+        if (p.status === 'post_op' || p.status === 'suivi_termine') return true
+        const t = ts(p)
+        return t != null && t < startOfToday.getTime()
+      }
+      return [...filtered].sort((a, b) => {
+        const aDone = isOperated(a)
+        const bDone = isOperated(b)
+        if (aDone !== bDone) return aDone ? 1 : -1
+        const ta = ts(a)
+        const tb = ts(b)
+        if (ta == null && tb == null) {
+          return +new Date(b.updatedAt) - +new Date(a.updatedAt)
+        }
+        if (ta == null) return 1
+        if (tb == null) return -1
+        // À venir : plus proche en premier ; opérées : plus récentes d’abord
+        return aDone ? tb - ta : ta - tb
+      })
+    }
+
+    return filtered
   }, [patients, search, devisFilter])
 
   const deletedFiltered = useMemo(() => {
@@ -1619,7 +1654,7 @@ export default function DevisGestionnairePage() {
   const goBackToList = () => {
     setView('list')
     setSelectedPatient('')
-    setPatientDetail(null)
+      setPatientDetail(null)
     setShowModal(false)
     setEditingIdentity(false)
     setEditingFormulaire(false)
@@ -1939,8 +1974,8 @@ export default function DevisGestionnairePage() {
 
     if (source && effectiveIntent !== 'create') {
       const baseLignes = source.lignes.map((l) => ({
-        description: l.description,
-        quantite: l.quantite,
+          description: l.description,
+          quantite: l.quantite,
         prixUnitaire: normalizeTndDinars(l.prixUnitaire),
       }))
       setLignes(baseLignes)
@@ -2022,7 +2057,7 @@ export default function DevisGestionnairePage() {
         setExclutIds(p.exclutIds ?? defaultExclutIds())
         setContentionDetail(p.contentionDetail ?? '')
       } else {
-        setLignes(
+    setLignes(
           buildDefaultLignes({
             honorairesChirCliniquePu: honoraires,
             qteSuppCliniqueAccomp: qteAccomp,
@@ -2032,7 +2067,7 @@ export default function DevisGestionnairePage() {
         )
         setCliniqueChoice(''); setCliniqueAutre('')
         setHotelChoice(''); setHotelAutre('')
-        setNotesSejour('')
+    setNotesSejour('')
         setInclutIds(defaultInclutIds())
         setExclutIds(defaultExclutIds())
         setContentionDetail('')
@@ -3004,9 +3039,9 @@ export default function DevisGestionnairePage() {
     const refreshList = () => {
       if (showingDeleted) void loadDeletedDevis()
       else void loadPatients()
-    }
+  }
 
-    return (
+  return (
     <div className="flex-1 overflow-y-auto">
       <PullToRefresh onRefresh={async () => {
         if (showingDeleted) await loadDeletedDevis()
@@ -3020,7 +3055,7 @@ export default function DevisGestionnairePage() {
           actions={
             <Button variant="outline" size="sm" className="gap-1.5" onClick={refreshList} disabled={listBusy}>
               <RefreshCw className={`h-3.5 w-3.5 ${listBusy ? 'animate-spin' : ''}`} /> Actualiser
-            </Button>
+          </Button>
           }
         />
 
@@ -3067,8 +3102,8 @@ export default function DevisGestionnairePage() {
                   {label}
                 </button>
               ))}
-            </div>
           </div>
+        </div>
 
           <div className="flex items-center justify-between px-4 py-2 bg-muted/10">
             <p className="text-xs text-muted-foreground">
@@ -3088,7 +3123,7 @@ export default function DevisGestionnairePage() {
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={refreshList} disabled={listBusy}>
               <RefreshCw className={`h-3.5 w-3.5 ${listBusy ? 'animate-spin' : ''}`} /> Actualiser
             </Button>
-          </div>
+      </div>
 
           {/* Skeleton loading */}
           {listBusy && (
@@ -3103,8 +3138,8 @@ export default function DevisGestionnairePage() {
                   <Skeleton className="h-6 w-24 rounded-lg hidden sm:block" />
                 </div>
               ))}
-            </div>
-          )}
+        </div>
+      )}
 
           {/* Vide — devis supprimés */}
           {!listBusy && showingDeleted && deletedFiltered.length === 0 && (
@@ -3178,7 +3213,7 @@ export default function DevisGestionnairePage() {
                     <p className="text-[10px] text-muted-foreground mt-1">
                       {formatDateTime(d.deletedAt)}
                     </p>
-                  </div>
+              </div>
                   <Button
                     type="button"
                     variant="ghost"
@@ -3218,7 +3253,7 @@ export default function DevisGestionnairePage() {
                   className="flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-muted/20 group transition-colors"
                 >
                   <button
-                    type="button"
+                  type="button"
                     onClick={() => openDetail(p.id)}
                     className="flex-1 min-w-0 flex items-center gap-3 text-left"
                   >
@@ -3232,12 +3267,12 @@ export default function DevisGestionnairePage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-slate-900 truncate">{p.user.fullName}</p>
                       <span className="text-[10px] font-mono text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">{p.dossierNumber}</span>
-                    </div>
+                  </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <StatusBadge kind="dossier" value={p.status} />
                       {p.user.email && <span className="text-[11px] text-slate-400 hidden md:inline truncate max-w-[180px]">{p.user.email}</span>}
-                    </div>
-                  </div>
+          </div>
+        </div>
 
                   <div className="hidden sm:flex flex-col items-end gap-1 shrink-0 min-w-[190px]">
                     <div className="flex items-center gap-1.5">
@@ -3274,8 +3309,8 @@ export default function DevisGestionnairePage() {
                   </button>
 
                   {devisStatut === 'envoye' && lastDevis && (
-                    <button
-                      type="button"
+            <button
+              type="button"
                       title="Envoyer un rappel devis"
                       disabled={actionLoading || rappelSending}
                       onClick={(e) =>
@@ -3304,7 +3339,7 @@ export default function DevisGestionnairePage() {
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
-                </div>
+              </div>
               )
             })}
             </div>
@@ -3559,7 +3594,7 @@ export default function DevisGestionnairePage() {
                       <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border bg-white/90 text-slate-800 border-slate-200">
                         {workStatusLabel}
                       </span>
-                    </div>
+              </div>
                   </div>
                 </div>
 
@@ -3604,8 +3639,8 @@ export default function DevisGestionnairePage() {
                           Ouvrir le chat
                         </Button>
                       </>
-                    ) : (
-                      <>
+                ) : (
+                  <>
                         <Button
                           variant="brand"
                           className="gap-2 h-10 text-sm font-semibold"
@@ -3732,7 +3767,7 @@ export default function DevisGestionnairePage() {
                     </p>
                   ) : null}
                 </div>
-              </div>
+                    </div>
 
               {!dossierClos && needsNewDevisFromRapport && latestRapportNumero > 0 ? (
                 <div className="border-t border-amber-100 bg-amber-50/90 px-4 sm:px-6 py-3">
@@ -3743,7 +3778,7 @@ export default function DevisGestionnairePage() {
                     Créez le devis R{latestRapportNumero} : le tableau est prérempli depuis ce rapport.
                     Les devis précédents restent dans l’historique.
                   </p>
-                </div>
+                      </div>
               ) : patientRow.status === 'rapport_modifie' ? (
                 <div className="border-t border-amber-100 bg-amber-50/90 px-4 sm:px-6 py-3">
                   <p className="text-sm font-semibold text-amber-950">
@@ -3751,8 +3786,8 @@ export default function DevisGestionnairePage() {
                   </p>
                   <p className="mt-0.5 text-[13px] text-amber-900/90">
                     Ouvrez Modifier : le brouillon lié à ce rapport reprend le forfait, les nuits et le drainage mis à jour.
-                  </p>
-                </div>
+                      </p>
+                    </div>
               ) : null}
 
               <div className="border-t border-slate-200/80 px-4 sm:px-6 py-3 bg-white space-y-2">
@@ -3792,8 +3827,8 @@ export default function DevisGestionnairePage() {
                         Abstention
                       </Button>
                     )}
-                  </div>
-                </div>
+                        </div>
+                        </div>
                 {statusError && (
                   <p className="text-xs text-destructive flex items-center gap-1.5">
                     <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -3809,7 +3844,7 @@ export default function DevisGestionnairePage() {
                 <div className="flex items-start gap-3 pl-1">
                   <div className="h-10 w-10 rounded-xl bg-amber-100 border border-amber-200/80 flex items-center justify-center shrink-0">
                     <Ban className="h-5 w-5 text-amber-700" />
-                  </div>
+                        </div>
                   <div className="min-w-0 space-y-1">
                     <p className="text-sm font-semibold text-slate-900">
                       Parcours interrompu — abstention médicale
@@ -3819,8 +3854,8 @@ export default function DevisGestionnairePage() {
                     </p>
                   </div>
                 </div>
-              </div>
-            )}
+                      </div>
+                    )}
 
             <DossierParcoursNav
               steps={parcoursSteps}
@@ -3850,7 +3885,7 @@ export default function DevisGestionnairePage() {
                     <h3 className="text-sm font-semibold text-slate-900 flex-1">Identité & coordonnées</h3>
                     {!editingIdentity && (
                       <Button
-                        type="button"
+                          type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => { setFicheError(null); setEditingIdentity(true); setEditingFormulaire(false) }}
@@ -3897,8 +3932,8 @@ export default function DevisGestionnairePage() {
                         </div>
                       </div>
                     ))}
-                  </div>
-                  )}
+                      </div>
+                    )}
                 </section>
 
                 <Section
@@ -3935,7 +3970,7 @@ export default function DevisGestionnairePage() {
                         <Pencil className="h-3.5 w-3.5 mr-1.5" />
                         Saisir le formulaire
                       </Button>
-                    </div>
+                      </div>
                   ) : (
                     <div className="space-y-6">
                       {(() => {
@@ -4027,8 +4062,8 @@ export default function DevisGestionnairePage() {
                           </p>
                         </div>
                       </div>
-                    </div>
-                  )}
+              </div>
+            )}
                   {!rapportsList.length && !isAbstention ? (
                     <p className="text-sm text-slate-400 text-center py-4">Aucun rapport disponible.</p>
                   ) : rapportsList.length > 0 ? (
@@ -4050,9 +4085,9 @@ export default function DevisGestionnairePage() {
                             <p className="text-sm font-semibold text-slate-600">
                               {formatDate(r.createdAt)}
                             </p>
-                          </div>
+          </div>
                           <RapportView r={r} currency={currency} />
-                        </div>
+        </div>
                         )
                       })}
                     </div>
@@ -4186,11 +4221,11 @@ export default function DevisGestionnairePage() {
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
                               )}
-                            </div>
-                          </div>
+                </div>
+                    </div>
                         )
                       })}
-                    </div>
+                  </div>
                   )}
                 </Section>
 
@@ -4235,8 +4270,8 @@ export default function DevisGestionnairePage() {
                         onOpenEditor={(id) => navigate(`/gestionnaire/planning-sejour/${id}/personnaliser`)}
                       />
                     </Section>
-                  </>
-                )}
+                    </>
+                  )}
 
                 {showPostOpSection && (
                   <Section
@@ -4265,9 +4300,9 @@ export default function DevisGestionnairePage() {
                 )}
               </>
 
-            )}
-          </div>
-        </div>
+                  )}
+                </div>
+                      </div>
       </div>
     )
   }
@@ -4474,8 +4509,8 @@ export default function DevisGestionnairePage() {
       {/* Choix de la version à supprimer */}
       {deletePicker && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <button
-            type="button"
+                          <button
+                            type="button"
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => !deletePicker.loading && setDeletePicker(null)}
             aria-label="Fermer"
@@ -4495,14 +4530,14 @@ export default function DevisGestionnairePage() {
                 disabled={deletePicker.loading}
               >
                 <X className="h-4 w-4" />
-              </button>
-            </div>
+                          </button>
+                        </div>
             <div className="px-3 py-3 flex-1 min-h-0 overflow-y-auto space-y-1">
               {deletePicker.loading && (
                 <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
                   <RefreshCw className="h-4 w-4 animate-spin" />
                   Chargement des versions…
-                </div>
+                    </div>
               )}
               {!deletePicker.loading && deletePicker.versions.map((d) => {
                 const sc = {
@@ -4543,7 +4578,7 @@ export default function DevisGestionnairePage() {
                           {formatDate(d.dateCreation)}
                           {typeof d.total === 'number' ? ` · ${formatCurrency(d.total, (d.currency as CurrencyUnit) || 'TND')}` : ''}
                         </p>
-                      </div>
+                  </div>
                       <span className={cn('shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full', badge.cls)}>
                         {badge.label}
                       </span>
@@ -4565,9 +4600,9 @@ export default function DevisGestionnairePage() {
                 <Trash2 className="h-4 w-4" />
                 Continuer
                 {deletePicker.selectedIds.length > 1 ? ` (${deletePicker.selectedIds.length})` : ''}
-              </Button>
-            </div>
-          </div>
+                  </Button>
+                </div>
+                </div>
         </div>
       )}
 
@@ -4598,7 +4633,7 @@ export default function DevisGestionnairePage() {
               </button>
             </div>
             <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto space-y-3">
-              <Textarea
+                  <Textarea
                 value={abstentionMsg}
                 onChange={(e) => setAbstentionMsg(e.target.value)}
                 rows={14}
@@ -4611,7 +4646,7 @@ export default function DevisGestionnairePage() {
                   {abstentionMsgError}
                 </p>
               )}
-            </div>
+                </div>
             <div className="px-5 py-4 border-t border-border flex flex-col-reverse sm:flex-row gap-2 sm:justify-end shrink-0">
               <Button
                 type="button"
@@ -4673,7 +4708,7 @@ export default function DevisGestionnairePage() {
               <p className="text-[12px] text-slate-500 rounded-lg border border-sky-100 bg-sky-50/80 px-3 py-2">
                 Ce message sera envoyé dans le chat, accompagné du PDF de la dernière version de devis envoyée.
               </p>
-              <Textarea
+                  <Textarea
                 value={rappelMsg}
                 onChange={(e) => setRappelMsg(e.target.value)}
                 rows={14}
@@ -4686,7 +4721,7 @@ export default function DevisGestionnairePage() {
                   {rappelError}
                 </p>
               )}
-            </div>
+                </div>
             <div className="px-5 py-4 border-t border-border flex flex-col-reverse sm:flex-row gap-2 sm:justify-end shrink-0">
               <Button
                 type="button"
@@ -4695,7 +4730,7 @@ export default function DevisGestionnairePage() {
                 onClick={() => setRappelOpen(false)}
               >
                 Annuler
-              </Button>
+                  </Button>
               <Button
                 type="button"
                 variant="brand"
@@ -4706,10 +4741,10 @@ export default function DevisGestionnairePage() {
                 {rappelSending ? (
                   <RefreshCw className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4" />
-                )}
+                        <Send className="h-4 w-4" />
+                    )}
                 Envoyer le rappel
-              </Button>
+                  </Button>
             </div>
           </div>
         </div>
@@ -4783,7 +4818,7 @@ export default function DevisGestionnairePage() {
                 onClick={() => setMajRapportOpen(false)}
               >
                 Annuler
-              </Button>
+                    </Button>
               <Button
                 type="button"
                 variant="brand"
@@ -4798,9 +4833,9 @@ export default function DevisGestionnairePage() {
                 )}
                 Envoyer au médecin
               </Button>
-            </div>
-          </div>
+                </div>
         </div>
+      </div>
       )}
     </div>
   )

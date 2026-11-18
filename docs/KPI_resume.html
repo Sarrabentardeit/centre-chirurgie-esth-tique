@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Résumé des KPI — Centre Est</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      color: #1e293b;
+      font-size: 11.5pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1 {
+      font-size: 18pt;
+      color: #7c2d12;
+      margin: 0 0 4px;
+    }
+    .sub {
+      color: #64748b;
+      font-size: 10pt;
+      margin-bottom: 18px;
+    }
+    h2 {
+      font-size: 12.5pt;
+      color: #9a3412;
+      border-bottom: 2px solid #f3e8d8;
+      padding-bottom: 4px;
+      margin: 18px 0 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 6px;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 8px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #faf6f1;
+      color: #7c2d12;
+      font-size: 10pt;
+      width: 34%;
+    }
+    td { font-size: 10.5pt; }
+    .note {
+      margin-top: 20px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-left: 3px solid #c4a484;
+      font-size: 9.5pt;
+      color: #475569;
+    }
+    .footer {
+      margin-top: 24px;
+      font-size: 9pt;
+      color: #94a3b8;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Résumé des KPI</h1>
+  <p class="sub">Cabinet Dr Mehdi Chennoufi — plateforme Centre Est</p>
+
+  <h2>1. Tableau de bord</h2>
+  <table>
+    <tr><th>Patients actifs</th><td>Dossiers en cours (hors abstention)</td></tr>
+    <tr><th>Devis sans réponse</th><td>Devis envoyés, pas encore acceptés ni refusés</td></tr>
+    <tr><th>RDV à confirmer</th><td>Rendez-vous planifiés à valider</td></tr>
+    <tr><th>Logistique</th><td>Séjours à préparer après devis accepté</td></tr>
+  </table>
+
+  <h2>2. Analytics — taux</h2>
+  <table>
+    <tr><th>Taux acceptation devis</th><td>Part des devis traités qui sont <strong>acceptés</strong></td></tr>
+    <tr><th>Taux de réponse devis</th><td>Part des devis traités avec une réponse (<strong>accepté ou refusé</strong>)</td></tr>
+    <tr><th>Patients avec RDV</th><td>Part des patients actifs qui ont <strong>au moins 1 RDV</strong></td></tr>
+  </table>
+
+  <h2>3. Entonnoir (patients uniques)</h2>
+  <table>
+    <tr><th>Patients actifs</th><td>Tous les dossiers actifs</td></tr>
+    <tr><th>Formulaires</th><td>Ont soumis le formulaire</td></tr>
+    <tr><th>Devis traités</th><td>Ont un devis envoyé / accepté / refusé</td></tr>
+    <tr><th>RDV</th><td>Ont un rendez-vous</td></tr>
+    <tr><th>Interventions</th><td>Opérées ou en suivi post-op</td></tr>
+  </table>
+
+  <h2>4. Autres indicateurs</h2>
+  <table>
+    <tr><th>Statuts de dossier</th><td>Où en est chaque dossier aujourd’hui</td></tr>
+    <tr><th>Évolution devis</th><td>Devis créés vs acceptés par mois</td></tr>
+    <tr><th>Nouveaux patients</th><td>Nouveaux dossiers par mois</td></tr>
+    <tr><th>Sources</th><td>D’où viennent les patientes (Instagram, amie…)</td></tr>
+  </table>
+
+  <div class="note">
+    <strong>Rappel :</strong> l’entonnoir et les taux Analytics comptent en <em>patients uniques</em>
+    (sauf « Évolution devis » = nombre de devis créés). Le KPI « Devis sans réponse » du tableau de bord compte des <em>devis</em>, pas des patients.
+  </div>
+
+  <p class="footer">Document interne — résumé KPI Centre Est</p>
+</body>
+</html>

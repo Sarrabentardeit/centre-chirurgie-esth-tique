@@ -4,7 +4,7 @@
  * Version du modèle PDF. Incrémenter pour migrer auto tous les anciens plannings
  * (éditeur / dossier / envoi) sans clic « Réinitialiser ».
  */
-export const PLANNING_TEMPLATE_VERSION = 4
+export const PLANNING_TEMPLATE_VERSION = 5
 
 export const PLANNING_DOC = {
   fontFamily: "Calibri, 'Segoe UI', Arial, Helvetica, sans-serif",
@@ -129,6 +129,14 @@ export function paraConsignesTitle(text: string): string {
 /** Cadre noir PDF autour du titre + lignes de consignes. */
 export function consignesBoxHtml(...innerParagraphs: string[]): string {
   return `<div class="planning-consignes-box">\n${innerParagraphs.filter(Boolean).join('\n')}\n</div>`
+}
+
+/**
+ * Dernière page seule (PDF Type séjour) : logo + consignes + Bon séjour.
+ * Saut de page forcé à l’impression / export PDF.
+ */
+export function planningLastPageHtml(...innerBlocks: string[]): string {
+  return `<div class="planning-last-page">\n${innerBlocks.filter(Boolean).join('\n')}\n</div>`
 }
 
 /** Paragraphe composé de plusieurs runs (HTML inline déjà construit). */

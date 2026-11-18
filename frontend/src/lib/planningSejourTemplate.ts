@@ -26,6 +26,7 @@ import {
   paraMixed,
   paraRed,
   paraSalmonHi,
+  planningLastPageHtml,
   salmon,
   salmonHi,
   salmonHiHtml,
@@ -496,17 +497,21 @@ export function buildPlanningSejourHtml(
     paraContact(`Votre Kinésithérapeute : ${CONTACTS.kine}`),
     paraContact(`Votre infirmière : ${CONTACTS.infirmiere}`),
     paraContact(`Cabinet : ${CONTACTS.cabinet}`),
-    consignesBoxHtml(
-      paraConsignesTitle('CONSIGNES POSTOPÉRATOIRES'),
-      paraGray('Port des bas de contention pendant les 15 premiers jours et pendant le vol'),
-      paraGray('Port des vêtements de contention pendant 6 semaines'),
-      paraGray('Continuer le drainage lymphatique 2/3 séances par semaine pendant 6 semaines'),
-      paraGray(
-        'Douche et soins tous les jours mais sans immersion dans l’eau (bain ou baignade) pendant 6 semaines',
+    // PDF : page 3 seule — logo + cadre consignes + Bon séjour
+    planningLastPageHtml(
+      headerLogoHtml(),
+      consignesBoxHtml(
+        paraConsignesTitle('CONSIGNES POSTOPÉRATOIRES'),
+        paraGray('Port des bas de contention pendant les 15 premiers jours et pendant le vol'),
+        paraGray('Port des vêtements de contention pendant 6 semaines'),
+        paraGray('Continuer le drainage lymphatique 2/3 séances par semaine pendant 6 semaines'),
+        paraGray(
+          'Douche et soins tous les jours mais sans immersion dans l’eau (bain ou baignade) pendant 6 semaines',
+        ),
+        paraGray('Reprise progressive de l’activité sportive à partir de 8 semaines'),
       ),
-      paraGray('Reprise progressive de l’activité sportive à partir de 8 semaines'),
+      footerImageHtml(),
     ),
-    footerImageHtml(),
   )
 
   return `<div class="planning-doc" data-planning-template="${PLANNING_TEMPLATE_VERSION}">\n${chunks.filter(Boolean).join('\n')}\n</div>`

@@ -26,6 +26,7 @@ import { RichDocToolbar } from '@/components/editor/RichDocToolbar'
 import { PlanningSendDialog } from '@/components/dossier/PlanningSendDialog'
 import { PlanningField } from '@/lib/planningFieldExtension'
 import { PlanningConsignesBox } from '@/lib/planningConsignesBoxExtension'
+import { PlanningLastPage } from '@/lib/planningLastPageExtension'
 import { PlanningDoc } from '@/lib/planningDocExtension'
 
 const GLOBAL_CSS = buildPlanningSejourPrintStyles()
@@ -40,6 +41,7 @@ const PLANNING_EDITOR_EXTENSIONS = [
   Image.configure({ inline: true, allowBase64: false }),
   PlanningField,
   PlanningConsignesBox,
+  PlanningLastPage,
   PlanningDoc,
 ]
 

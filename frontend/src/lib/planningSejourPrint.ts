@@ -54,12 +54,29 @@ export function buildPlanningSejourPrintStyles(): string {
       line-height: 1;
     }
 
+    /* Dernière page seule (PDF) : consignes + Bon séjour */
+    .planning-doc .planning-last-page {
+      break-before: page;
+      page-break-before: always;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      margin-top: 0;
+      padding-top: 0;
+    }
+    .planning-doc .planning-last-page > p:has(img[src*="planning-header-logo"]) {
+      margin: 0 0 28pt;
+    }
+    .planning-doc .planning-last-page > p:has(img[src*="planning-bon-sejour"]) {
+      margin: 22pt auto 0;
+    }
+
     /* Cadre noir « CONSIGNES POSTOPÉRATOIRES » */
     .planning-doc .planning-consignes-box {
       border: 0.5pt solid #000000;
       padding: 8pt 12pt 10pt;
-      margin: ${D.paraAfter} 0 0;
+      margin: 0;
       page-break-inside: avoid;
+      break-inside: avoid;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
@@ -108,10 +125,15 @@ export function buildPlanningSejourPrintStyles(): string {
       margin: 14pt 0 8pt;
       line-height: 1;
     }
+    .ProseMirror.planning-editor .planning-last-page {
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px dashed ${D.hiDark};
+    }
     .ProseMirror.planning-editor .planning-consignes-box {
       border: 0.5pt solid #000000;
       padding: 8pt 12pt 10pt;
-      margin: ${D.paraAfter} 0 0;
+      margin: 0;
     }
     .ProseMirror.planning-editor .planning-consignes-box > p {
       margin: 0 0 ${D.paraAfter};

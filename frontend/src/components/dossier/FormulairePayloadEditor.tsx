@@ -92,6 +92,10 @@ export function FormulairePayloadEditor({
   )
 
   const [dateNaissance, setDateNaissance] = useState(asString(p.dateNaissance))
+  const sexeInit = asString(p.sexe).toLowerCase()
+  const [sexe, setSexe] = useState<'femme' | 'homme' | ''>(
+    sexeInit === 'homme' || sexeInit === 'femme' ? sexeInit : '',
+  )
   const [poids, setPoids] = useState(parseNumString(p.poids))
   const [taille, setTaille] = useState(parseNumString(p.taille))
   const [groupeSanguin, setGroupeSanguin] = useState(asString(p.groupeSanguin))
@@ -186,6 +190,7 @@ export function FormulairePayloadEditor({
     const payload: Record<string, unknown> = {
       ...initialPayload,
       dateNaissance: dateNaissance || undefined,
+      sexe: sexe || undefined,
       poids: poids.trim() ? Number.parseInt(poids, 10) : undefined,
       taille: taille.trim() ? Number.parseInt(taille, 10) : undefined,
       groupeSanguin: groupeSanguin || undefined,
@@ -241,6 +246,17 @@ export function FormulairePayloadEditor({
           <CardContent className="space-y-3">
             <Field label="Date de naissance">
               <Input type="date" value={dateNaissance} onChange={(e) => setDateNaissance(e.target.value)} className="h-9 text-sm" />
+            </Field>
+            <Field label="Sexe">
+              <select
+                value={sexe}
+                onChange={(e) => setSexe(e.target.value === 'homme' || e.target.value === 'femme' ? e.target.value : '')}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">—</option>
+                <option value="femme">Femme</option>
+                <option value="homme">Homme</option>
+              </select>
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Poids (kg)">

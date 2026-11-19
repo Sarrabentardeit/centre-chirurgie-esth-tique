@@ -42,7 +42,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/gestionnaire/patients': 'Patients',
   '/gestionnaire/agenda': 'Agenda Médecin',
   '/gestionnaire/devis': 'Gestion Devis',
-  '/gestionnaire/planning-sejour': 'Planning Séjour',
+  '/gestionnaire/planning-sejour': 'Patients Confirmés',
   '/gestionnaire/chat': 'Messages',
   '/gestionnaire/communications': 'Communication & Templates',
   '/gestionnaire/logistique': 'Logistique Séjours',

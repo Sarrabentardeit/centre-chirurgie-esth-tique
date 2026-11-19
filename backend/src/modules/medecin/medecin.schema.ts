@@ -104,3 +104,9 @@ export const postOpNoteSchema = z.object({
   montant: z.number().finite().min(-1000000).max(1000000).nullable().optional(),
 })
 
+export const postOpStaffFieldsSchema = z.object({
+  questionsStaff: z.string().max(8000).nullable().optional(),
+  avisStaff: z.string().max(8000).nullable().optional(),
+  compteRendu: z.string().max(4000).nullable().optional(),
+})
+

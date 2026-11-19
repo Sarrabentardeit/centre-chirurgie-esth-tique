@@ -52,8 +52,8 @@ const patientListInclude = {
   formulaires: { orderBy: { createdAt: 'desc' as const }, take: 1 },
   /** Tous les devis actifs : le filtre KPI utilise le statut prioritaire (accepte > envoye > …). */
   devis: { where: { deletedAt: null }, orderBy: { dateCreation: 'desc' as const } },
-  /** Date de passage — tri « acceptés à venir » vs « déjà opérées ». */
-  logistique: { select: { dateIntervention: true } },
+  /** Dates séjour — tri acceptés / mois (arrivée + intervention). */
+  logistique: { select: { dateIntervention: true, dateArrivee: true } },
   _count: { select: { rapports: true } },
 } as const
 
@@ -2650,16 +2650,14 @@ async function buildPatientFunnel(): Promise<Array<{ step: string; count: number
 
 export async function getAnalytics() {
   const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+  // Évolution devis : depuis septembre (année en cours, ou septembre N-1 si avant sept.).
+  const septYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1
+  const monthStart = new Date(septYear, 8, 1) // 1er septembre
 
   const [
     statusRows,
     devisRows,
     patientsWithDevis,
-    funnel,
-    totalPatientsActifs,
-    patientsWithRdv,
-    newPatientsRows,
     sourceRows,
   ] = await Promise.all([
     prisma.patient.groupBy({
@@ -2670,7 +2668,7 @@ export async function getAnalytics() {
       where: { deletedAt: null, dateCreation: { gte: monthStart } },
       select: { statut: true, dateCreation: true },
     }),
-    // Même base que Gestion des devis → plus d’écart 80 vs 77
+    // Même base que Gestion des devis
     prisma.patient.findMany({
       where: { status: { in: [...ANALYTICS_DEVIS_STATUSES] } },
       select: {
@@ -2680,28 +2678,20 @@ export async function getAnalytics() {
         },
       },
     }),
-    buildPatientFunnel(),
-    prisma.patient.count({ where: { status: { not: 'abstention' } } }),
-    prisma.patient.count({
-      where: {
-        status: { not: 'abstention' },
-        agendaEvents: {
-          some: { type: 'rdv', OR: [{ statut: null }, { statut: { not: 'annule' } }] },
-        },
-      },
-    }),
-    prisma.patient.findMany({
-      where: { createdAt: { gte: monthStart } },
-      select: { createdAt: true },
-    }),
-    // Source = ce que la patiente a coché dans le formulaire soumis (pas patient.sourceContact / rôle staff).
+    // Profil formulaire (dernier soumis) — sources, âge, sexe, interventions, pays.
     prisma.formulaire.findMany({
       where: { status: 'submitted' },
       orderBy: { submittedAt: 'desc' },
       select: {
         patientId: true,
         payload: true,
-        patient: { select: { status: true } },
+        patient: {
+          select: {
+            status: true,
+            dateNaissance: true,
+            pays: true,
+          },
+        },
       },
     }),
   ])
@@ -2714,9 +2704,10 @@ export async function getAnalytics() {
     .sort((a, b) => b.count - a.count)
 
   const monthlyDevis: Array<{ key: string; mois: string; total: number; envoye: number; accepte: number }> = []
-  const monthlyPatients: Array<{ key: string; mois: string; total: number }> = []
-  for (let i = 5; i >= 0; i -= 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+  const monthsFromSept =
+    (now.getFullYear() - septYear) * 12 + (now.getMonth() - 8) + 1
+  for (let i = 0; i < monthsFromSept; i += 1) {
+    const d = new Date(septYear, 8 + i, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const mois = d.toLocaleDateString('fr-FR', { month: 'short' })
     const rows = devisRows.filter((r) => {
@@ -2724,82 +2715,161 @@ export async function getAnalytics() {
       const m = r.dateCreation.getMonth() + 1
       return `${y}-${String(m).padStart(2, '0')}` === key
     })
+    // « Traités » = envoyé / accepté / refusé (hors brouillon / remplacé)
+    const traites = rows.filter((r) =>
+      r.statut === 'envoye' || r.statut === 'accepte' || r.statut === 'refuse',
+    )
     monthlyDevis.push({
       key,
       mois,
-      // nombre de devis créés ce mois (pas la somme des montants)
-      total: rows.length,
-      envoye: rows.filter((r) => r.statut === 'envoye').length,
-      accepte: rows.filter((r) => r.statut === 'accepte').length,
+      total: traites.length,
+      envoye: traites.filter((r) => r.statut === 'envoye').length,
+      accepte: traites.filter((r) => r.statut === 'accepte').length,
     })
-    const newInMonth = newPatientsRows.filter((r) => {
-      const y = r.createdAt.getFullYear()
-      const m = r.createdAt.getMonth() + 1
-      return `${y}-${String(m).padStart(2, '0')}` === key
-    }).length
-    monthlyPatients.push({ key, mois, total: newInMonth })
   }
 
-  // Taux acceptation + taux de réponse : même périmètre que Gestion des devis.
-  let acceptedPatients = 0
-  let refusedPatients = 0
-  let treatedPatients = 0
+  // Partition complète du périmètre devis + abstention (mêmes libellés que Gestion des devis).
+  // Non traiter = sans devis / brouillon / remplacé / refusé → aucun dossier « perdu » entre KPI et tableau.
+  let nonTraiter = 0
+  let traiter = 0 // devis envoyé
+  let accepte = 0
   for (const p of patientsWithDevis) {
     const primary = primaryDevisStatutOf(p.devis)
-    if (primary === 'accepte' || primary === 'envoye' || primary === 'refuse') {
-      treatedPatients += 1
-      if (primary === 'accepte') acceptedPatients += 1
-      if (primary === 'refuse') refusedPatients += 1
-    }
+    if (primary === 'envoye') traiter += 1
+    else if (primary === 'accepte') accepte += 1
+    else nonTraiter += 1
   }
-  const respondedPatients = acceptedPatients + refusedPatients
-  const acceptanceRate = treatedPatients > 0
-    ? Math.round((acceptedPatients / treatedPatients) * 100)
-    : 0
-  const responseRate = treatedPatients > 0
-    ? Math.round((respondedPatients / treatedPatients) * 100)
-    : 0
+  const abstentionCount =
+    statusRows.find((s) => s.status === 'abstention')?._count._all ?? 0
 
-  // Patients actifs avec ≥ 1 RDV ÷ patients actifs (hors abstention).
-  const rdvRate = totalPatientsActifs > 0
-    ? Math.round((patientsWithRdv / totalPatientsActifs) * 100)
-    : 0
+  const devisBase = nonTraiter + traiter + accepte // = patientsWithDevis.length
+  const totalBase = devisBase + abstentionCount
+
+  const nonTraiterRate = devisBase > 0 ? Math.round((nonTraiter / devisBase) * 100) : 0
+  const treatedRate = devisBase > 0 ? Math.round((traiter / devisBase) * 100) : 0
+  const abstentionRate = totalBase > 0 ? Math.round((abstentionCount / totalBase) * 100) : 0
+
+  const devisBuckets = [
+    { key: 'non_traiter', label: 'Non traiter', count: nonTraiter },
+    { key: 'traiter', label: 'Traiter', count: traiter },
+    { key: 'accepte', label: 'Accepté', count: accepte },
+    { key: 'abstention', label: 'Abstention', count: abstentionCount },
+  ]
 
   const sourceCounts = new Map<string, number>()
-  const sourceSeenPatients = new Set<string>()
+  const ageCounts = new Map<string, number>()
+  const sexeCounts = new Map<string, number>()
+  const interventionCounts = new Map<string, number>()
+  const paysCounts = new Map<string, number>()
+  const profileSeenPatients = new Set<string>()
+
+  const ageBracketOf = (birth: Date, ref: Date): string => {
+    let age = ref.getFullYear() - birth.getFullYear()
+    const m = ref.getMonth() - birth.getMonth()
+    if (m < 0 || (m === 0 && ref.getDate() < birth.getDate())) age -= 1
+    if (age < 0 || age > 120) return 'non_renseigne'
+    if (age < 25) return '<25'
+    if (age < 35) return '25-34'
+    if (age < 45) return '35-44'
+    if (age < 55) return '45-54'
+    return '55+'
+  }
+
+  const parseBirthDate = (raw: unknown, fallback: Date | null): Date | null => {
+    if (fallback) return fallback
+    if (typeof raw !== 'string' || !raw.trim()) return null
+    const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (!m) return null
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
+  const bump = (map: Map<string, number>, key: string) => {
+    map.set(key, (map.get(key) ?? 0) + 1)
+  }
+
   for (const form of sourceRows) {
-    if (sourceSeenPatients.has(form.patientId)) continue
+    if (profileSeenPatients.has(form.patientId)) continue
     if (form.patient.status === 'abstention') continue
-    sourceSeenPatients.add(form.patientId)
+    profileSeenPatients.add(form.patientId)
+
     const payload = (form.payload && typeof form.payload === 'object')
       ? (form.payload as Record<string, unknown>)
       : null
-    const raw = typeof payload?.sourceContact === 'string'
+
+    const sourceRaw = typeof payload?.sourceContact === 'string'
       ? payload.sourceContact.trim().toLowerCase()
       : ''
-    const key = raw || 'non_renseigne'
-    sourceCounts.set(key, (sourceCounts.get(key) ?? 0) + 1)
+    bump(sourceCounts, sourceRaw || 'non_renseigne')
+
+    const birth = parseBirthDate(payload?.dateNaissance, form.patient.dateNaissance)
+    bump(ageCounts, birth ? ageBracketOf(birth, now) : 'non_renseigne')
+
+    const sexeRaw = typeof payload?.sexe === 'string' ? payload.sexe.trim().toLowerCase() : ''
+    bump(
+      sexeCounts,
+      sexeRaw === 'femme' || sexeRaw === 'homme' ? sexeRaw : 'non_renseigne',
+    )
+
+    const interventions = Array.isArray(payload?.typeIntervention)
+      ? payload.typeIntervention.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      : []
+    if (interventions.length === 0) {
+      bump(interventionCounts, 'non_renseigne')
+    } else {
+      const uniq = new Set(interventions.map((x) => x.trim()))
+      for (const label of uniq) bump(interventionCounts, label)
+    }
+
+    const paysRaw = typeof form.patient.pays === 'string' ? form.patient.pays.trim() : ''
+    // Clé normalisée (casse) pour fusionner « France » / « france »
+    bump(paysCounts, paysRaw ? paysRaw.toLocaleLowerCase('fr-FR') : 'non_renseigne')
   }
+
+  const toSortedDist = (map: Map<string, number>) =>
+    [...map.entries()]
+      .map(([key, count]) => ({ key, count }))
+      .sort((a, b) => {
+        if (a.key === 'non_renseigne') return 1
+        if (b.key === 'non_renseigne') return -1
+        return b.count - a.count || a.key.localeCompare(b.key, 'fr')
+      })
+
+  const AGE_ORDER = ['<25', '25-34', '35-44', '45-54', '55+', 'non_renseigne']
+  const ageDistribution = toSortedDist(ageCounts).sort(
+    (a, b) => AGE_ORDER.indexOf(a.key) - AGE_ORDER.indexOf(b.key),
+  )
+  const sexeDistribution = toSortedDist(sexeCounts).sort((a, b) => {
+    const order = ['femme', 'homme', 'non_renseigne']
+    return order.indexOf(a.key) - order.indexOf(b.key)
+  })
   const sourceDistribution = [...sourceCounts.entries()]
     .map(([source, count]) => ({ source, count }))
     .sort((a, b) => b.count - a.count)
+  const interventionDistribution = toSortedDist(interventionCounts)
+  const paysDistribution = toSortedDist(paysCounts)
 
   return {
-    funnel,
+    funnel: [],
     statusDistribution,
+    devisBuckets,
     monthlyDevis,
-    monthlyPatients,
+    monthlyPatients: [], // courbe retirée — champ conservé pour compat API
     sourceDistribution,
+    ageDistribution,
+    sexeDistribution,
+    interventionDistribution,
+    paysDistribution,
     kpis: {
-      acceptanceRate,
-      acceptanceAccepted: acceptedPatients,
-      acceptanceBase: treatedPatients,
-      responseRate,
-      responseResponded: respondedPatients,
-      responseBase: treatedPatients,
-      rdvRate,
-      rdvPatients: patientsWithRdv,
-      rdvBase: totalPatientsActifs,
+      nonTraiterRate,
+      nonTraiterCount: nonTraiter,
+      nonTraiterBase: devisBase,
+      treatedRate,
+      treatedCount: traiter,
+      treatedBase: devisBase,
+      abstentionRate,
+      abstentionCount,
+      abstentionBase: totalBase,
     },
   }
 }

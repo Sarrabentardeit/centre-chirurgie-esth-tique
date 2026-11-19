@@ -6,91 +6,113 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useEffect, useMemo, useState } from 'react'
 import {
   gestionnaireApi,
+  type GestionnaireAnalyticsBucket,
+  type GestionnaireAnalyticsDevisBucket,
   type GestionnaireAnalyticsMonthly,
-  type GestionnaireAnalyticsMonthlyPatients,
   type GestionnaireAnalyticsSource,
-  type GestionnaireAnalyticsStatus,
-  type GestionnaireFunnelStep,
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
-import { dossierStatusLabel } from '@/lib/utils'
 import { formatSourceConnaissanceLabel } from '@/lib/sourceConnaissance'
 import { RefreshCw } from 'lucide-react'
 
-const SOURCE_BAR_COLORS = ['#81572d', '#0284c7', '#059669', '#c44828', '#7c3aed', '#d97706', '#64748b', '#be123c']
+const CHART_COLORS = ['#81572d', '#0284c7', '#059669', '#c44828', '#7c3aed', '#d97706', '#64748b', '#be123c', '#0d9488', '#a16207']
 
-/** Ordre métier du parcours (affichage détaillé). */
-const STATUS_ORDER = [
-  'nouveau',
-  'formulaire_en_cours',
-  'formulaire_complete',
-  'en_analyse',
-  'rapport_genere',
-  'rapport_modifie',
-  'devis_preparation',
-  'devis_envoye',
-  'devis_accepte',
-  'date_reservee',
-  'logistique',
-  'intervention',
-  'post_op',
-  'suivi_termine',
-] as const
+const DEVIS_BUCKET_COLORS: Record<string, string> = {
+  non_traiter: '#7c3aed',
+  traiter: '#0284c7',
+  accepte: '#059669',
+  abstention: '#d97706',
+}
 
-const STATUS_BAR_COLORS: Record<string, string> = {
-  nouveau: '#94a3b8',
-  formulaire_en_cours: '#64748b',
-  formulaire_complete: '#475569',
-  en_analyse: '#2563eb',
-  rapport_genere: '#81572d',
-  rapport_modifie: '#a16207',
-  devis_preparation: '#d97706',
-  devis_envoye: '#0284c7',
-  devis_accepte: '#059669',
-  date_reservee: '#0d9488',
-  logistique: '#c44828',
-  intervention: '#be123c',
-  post_op: '#7c3aed',
-  suivi_termine: '#166534',
-  abstention: '#78716c',
+const AGE_LABELS: Record<string, string> = {
+  '<25': 'Moins de 25 ans',
+  '25-34': '25–34 ans',
+  '35-44': '35–44 ans',
+  '45-54': '45–54 ans',
+  '55+': '55 ans et plus',
+  non_renseigne: 'Non renseigné',
+}
+
+const SEXE_LABELS: Record<string, string> = {
+  femme: 'Femme',
+  homme: 'Homme',
+  non_renseigne: 'Non renseigné',
 }
 
 type AnalyticsKpis = {
-  acceptanceRate: number
-  acceptanceAccepted: number
-  acceptanceBase: number
-  responseRate: number
-  responseResponded: number
-  responseBase: number
-  rdvRate: number
-  rdvPatients: number
-  rdvBase: number
+  nonTraiterRate: number
+  nonTraiterCount: number
+  nonTraiterBase: number
+  treatedRate: number
+  treatedCount: number
+  treatedBase: number
+  abstentionRate: number
+  abstentionCount: number
+  abstentionBase: number
 }
 
 const EMPTY_KPIS: AnalyticsKpis = {
-  acceptanceRate: 0,
-  acceptanceAccepted: 0,
-  acceptanceBase: 0,
-  responseRate: 0,
-  responseResponded: 0,
-  responseBase: 0,
-  rdvRate: 0,
-  rdvPatients: 0,
-  rdvBase: 0,
+  nonTraiterRate: 0,
+  nonTraiterCount: 0,
+  nonTraiterBase: 0,
+  treatedRate: 0,
+  treatedCount: 0,
+  treatedBase: 0,
+  abstentionRate: 0,
+  abstentionCount: 0,
+  abstentionBase: 0,
 }
 
-function statusRank(status: string): number {
-  const i = STATUS_ORDER.indexOf(status as (typeof STATUS_ORDER)[number])
-  return i === -1 ? 999 : i
+type DistRow = {
+  key: string
+  label: string
+  count: number
+  pct: number
+  fill: string
+}
+
+type ProfilTab = 'sources' | 'age' | 'sexe' | 'interventions' | 'pays'
+
+const PROFIL_TABS: Array<{ id: ProfilTab; label: string; column: string }> = [
+  { id: 'sources', label: 'Sources', column: 'Source' },
+  { id: 'age', label: 'Âge', column: 'Tranche' },
+  { id: 'sexe', label: 'Sexe', column: 'Sexe' },
+  { id: 'interventions', label: 'Interventions', column: 'Intervention' },
+  { id: 'pays', label: 'Pays', column: 'Pays' },
+]
+
+function toDistRows(
+  items: Array<{ key: string; count: number }>,
+  labelOf: (key: string) => string,
+): DistRow[] {
+  const total = items.reduce((n, s) => n + s.count, 0)
+  return items.map((s, i) => ({
+    key: s.key,
+    label: labelOf(s.key),
+    count: s.count,
+    pct: total > 0 ? Math.round((s.count / total) * 100) : 0,
+    fill: CHART_COLORS[i % CHART_COLORS.length],
+  }))
+}
+
+function formatPaysLabel(key: string): string {
+  if (key === 'non_renseigne') return 'Non renseigné'
+  return key
+    .split(/\s+/)
+    .map((w) => (w ? w.charAt(0).toLocaleUpperCase('fr-FR') + w.slice(1) : w))
+    .join(' ')
 }
 
 export default function AnalyticsPage() {
-  const [funnel, setFunnel] = useState<GestionnaireFunnelStep[]>([])
-  const [statusDistribution, setStatusDistribution] = useState<GestionnaireAnalyticsStatus[]>([])
+  const [devisBuckets, setDevisBuckets] = useState<GestionnaireAnalyticsDevisBucket[]>([])
   const [monthlyDevis, setMonthlyDevis] = useState<GestionnaireAnalyticsMonthly[]>([])
-  const [monthlyPatients, setMonthlyPatients] = useState<GestionnaireAnalyticsMonthlyPatients[]>([])
   const [sourceDistribution, setSourceDistribution] = useState<GestionnaireAnalyticsSource[]>([])
+  const [ageDistribution, setAgeDistribution] = useState<GestionnaireAnalyticsBucket[]>([])
+  const [sexeDistribution, setSexeDistribution] = useState<GestionnaireAnalyticsBucket[]>([])
+  const [interventionDistribution, setInterventionDistribution] = useState<GestionnaireAnalyticsBucket[]>([])
+  const [paysDistribution, setPaysDistribution] = useState<GestionnaireAnalyticsBucket[]>([])
   const [kpis, setKpis] = useState<AnalyticsKpis>(EMPTY_KPIS)
+  const [profilTab, setProfilTab] = useState<ProfilTab>('sources')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -99,21 +121,23 @@ export default function AnalyticsPage() {
     setError(null)
     try {
       const res = await gestionnaireApi.getAnalytics()
-      setFunnel(res.funnel)
-      setStatusDistribution(res.statusDistribution)
+      setDevisBuckets(res.devisBuckets ?? [])
       setMonthlyDevis(res.monthlyDevis)
-      setMonthlyPatients(res.monthlyPatients ?? [])
       setSourceDistribution(res.sourceDistribution ?? [])
+      setAgeDistribution(res.ageDistribution ?? [])
+      setSexeDistribution(res.sexeDistribution ?? [])
+      setInterventionDistribution(res.interventionDistribution ?? [])
+      setPaysDistribution(res.paysDistribution ?? [])
       setKpis({
-        acceptanceRate: res.kpis.acceptanceRate,
-        acceptanceAccepted: res.kpis.acceptanceAccepted ?? 0,
-        acceptanceBase: res.kpis.acceptanceBase ?? 0,
-        responseRate: res.kpis.responseRate ?? 0,
-        responseResponded: res.kpis.responseResponded ?? 0,
-        responseBase: res.kpis.responseBase ?? 0,
-        rdvRate: res.kpis.rdvRate,
-        rdvPatients: res.kpis.rdvPatients ?? 0,
-        rdvBase: res.kpis.rdvBase ?? 0,
+        nonTraiterRate: res.kpis.nonTraiterRate ?? 0,
+        nonTraiterCount: res.kpis.nonTraiterCount ?? 0,
+        nonTraiterBase: res.kpis.nonTraiterBase ?? 0,
+        treatedRate: res.kpis.treatedRate ?? 0,
+        treatedCount: res.kpis.treatedCount ?? 0,
+        treatedBase: res.kpis.treatedBase ?? 0,
+        abstentionRate: res.kpis.abstentionRate ?? 0,
+        abstentionCount: res.kpis.abstentionCount ?? 0,
+        abstentionBase: res.kpis.abstentionBase ?? 0,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de chargement.')
@@ -126,39 +150,67 @@ export default function AnalyticsPage() {
     void load()
   }, [])
 
-  const { actifsRows, abstentionCount, totalActifs, totalAll, chartData } = useMemo(() => {
-    const abstention = statusDistribution.find((s) => s.status === 'abstention')?.count ?? 0
-    const actifs = statusDistribution
-      .filter((s) => s.status !== 'abstention' && s.count > 0)
-      .sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.count - a.count)
-    const sumActifs = actifs.reduce((n, s) => n + s.count, 0)
-    const rows = actifs.map((s) => ({
-      status: s.status,
-      label: dossierStatusLabel(s.status),
-      count: s.count,
-      pct: sumActifs > 0 ? Math.round((s.count / sumActifs) * 100) : 0,
-      fill: STATUS_BAR_COLORS[s.status] ?? '#81572d',
+  const { bucketRows, totalBuckets, chartData } = useMemo(() => {
+    const total = devisBuckets.reduce((n, b) => n + b.count, 0)
+    const rows = devisBuckets.map((b) => ({
+      key: b.key,
+      label: b.label,
+      count: b.count,
+      pct: total > 0 ? Math.round((b.count / total) * 100) : 0,
+      fill: DEVIS_BUCKET_COLORS[b.key] ?? '#81572d',
     }))
     return {
-      actifsRows: rows,
-      abstentionCount: abstention,
-      totalActifs: sumActifs,
-      totalAll: sumActifs + abstention,
+      bucketRows: rows,
+      totalBuckets: total,
       chartData: [...rows].reverse(),
     }
-  }, [statusDistribution])
+  }, [devisBuckets])
 
-  const chartHeight = Math.max(220, chartData.length * 28 + 40)
+  const chartHeight = Math.max(220, chartData.length * 36 + 40)
 
-  const sourceRows = useMemo(() => {
-    const total = sourceDistribution.reduce((n, s) => n + s.count, 0)
-    return sourceDistribution.map((s, i) => ({
-      ...s,
-      label: s.source === 'non_renseigne' ? 'Non renseigné' : formatSourceConnaissanceLabel(s.source),
-      pct: total > 0 ? Math.round((s.count / total) * 100) : 0,
-      fill: SOURCE_BAR_COLORS[i % SOURCE_BAR_COLORS.length],
-    }))
-  }, [sourceDistribution])
+  const sourceRows = useMemo(
+    () =>
+      toDistRows(
+        sourceDistribution.map((s) => ({ key: s.source, count: s.count })),
+        (key) => (key === 'non_renseigne' ? 'Non renseigné' : formatSourceConnaissanceLabel(key)),
+      ),
+    [sourceDistribution],
+  )
+
+  const ageRows = useMemo(
+    () => toDistRows(ageDistribution, (key) => AGE_LABELS[key] ?? key),
+    [ageDistribution],
+  )
+
+  const sexeRows = useMemo(
+    () => toDistRows(sexeDistribution, (key) => SEXE_LABELS[key] ?? key),
+    [sexeDistribution],
+  )
+
+  const interventionRows = useMemo(
+    () =>
+      toDistRows(interventionDistribution, (key) =>
+        key === 'non_renseigne' ? 'Non renseigné' : key,
+      ),
+    [interventionDistribution],
+  )
+
+  const paysRows = useMemo(
+    () => toDistRows(paysDistribution, formatPaysLabel),
+    [paysDistribution],
+  )
+
+  const profilByTab: Record<ProfilTab, DistRow[]> = {
+    sources: sourceRows,
+    age: ageRows,
+    sexe: sexeRows,
+    interventions: interventionRows,
+    pays: paysRows,
+  }
+
+  const activeProfil = PROFIL_TABS.find((t) => t.id === profilTab) ?? PROFIL_TABS[0]
+  const profilRows = profilByTab[activeProfil.id]
+  const profilTotal = profilRows.reduce((n, r) => n + r.count, 0)
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
@@ -166,7 +218,7 @@ export default function AnalyticsPage() {
         <div>
           <h2 className="text-lg font-semibold">Analytics</h2>
           <p className="text-sm text-muted-foreground">
-            Chiffres en patients uniques (sauf évolution devis = nombre de devis créés).
+            Chiffres alignés sur Gestion des devis (patients uniques).
           </p>
         </div>
         <button className="inline-flex items-center rounded-lg border px-3 py-2 text-sm" onClick={() => void load()} disabled={loading}>
@@ -179,79 +231,46 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Card>
           <CardContent className="pt-5">
-            <p className="text-sm text-muted-foreground">Taux acceptation devis</p>
-            <p className="text-2xl font-bold mt-1">{kpis.acceptanceRate}%</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {kpis.acceptanceAccepted} / {kpis.acceptanceBase} traités (comme Gestion des devis)
-            </p>
+            <p className="text-sm text-muted-foreground">Taux devis non traiter</p>
+            <p className="text-2xl font-bold mt-1">{kpis.nonTraiterRate}%</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-5">
-            <p className="text-sm text-muted-foreground">Taux de réponse devis</p>
-            <p className="text-2xl font-bold mt-1">{kpis.responseRate}%</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {kpis.responseResponded} / {kpis.responseBase} ont répondu (accepté ou refusé)
-            </p>
+            <p className="text-sm text-muted-foreground">Taux devis traité</p>
+            <p className="text-2xl font-bold mt-1">{kpis.treatedRate}%</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-5">
-            <p className="text-sm text-muted-foreground">Patients avec RDV</p>
-            <p className="text-2xl font-bold mt-1">{kpis.rdvRate}%</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {kpis.rdvPatients} / {kpis.rdvBase} patients actifs
-            </p>
+            <p className="text-sm text-muted-foreground">Taux devis abstention</p>
+            <p className="text-2xl font-bold mt-1">{kpis.abstentionRate}%</p>
           </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Entonnoir (patients uniques)</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal">
-            Chaque patient compte au plus une fois à chaque étape.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={funnel} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-              <YAxis dataKey="step" type="category" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={110} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
-              <Bar dataKey="count" name="Patients" fill="#81572d" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Statuts de dossier (détail)</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal">
-            Répartition des patients par étape du parcours — actifs séparés de l’abstention.
-          </p>
+          <CardTitle className="text-base">Statuts devis</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Total dossiers</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">{totalAll}</p>
-            </div>
-            <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">Actifs</p>
-              <p className="text-2xl font-bold text-sky-950 mt-1 tabular-nums">{totalActifs}</p>
-            </div>
-            <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-600">Abstention</p>
-              <p className="text-2xl font-bold text-stone-800 mt-1 tabular-nums">{abstentionCount}</p>
-              <p className="text-[11px] text-stone-500 mt-1">Hors parcours actif</p>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {bucketRows.map((row) => (
+              <div
+                key={row.key}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                  {row.label}
+                </p>
+                <p className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">{row.count}</p>
+                <p className="text-[11px] text-slate-500 mt-1">{row.pct}%</p>
+              </div>
+            ))}
           </div>
 
-          {actifsRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">Aucun dossier actif à afficher.</p>
+          {bucketRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">Aucun dossier à afficher.</p>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <ResponsiveContainer width="100%" height={chartHeight}>
@@ -261,7 +280,7 @@ export default function AnalyticsPage() {
                   <YAxis
                     dataKey="label"
                     type="category"
-                    width={150}
+                    width={110}
                     tick={{ fontSize: 11 }}
                     tickLine={false}
                     axisLine={false}
@@ -272,7 +291,7 @@ export default function AnalyticsPage() {
                   />
                   <Bar dataKey="count" name="Patients" radius={[0, 4, 4, 0]}>
                     {chartData.map((row) => (
-                      <Cell key={row.status} fill={row.fill} />
+                      <Cell key={row.key} fill={row.fill} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -284,9 +303,9 @@ export default function AnalyticsPage() {
                   <span className="tabular-nums">Nb</span>
                   <span className="tabular-nums w-10 text-right">%</span>
                 </div>
-                <ul className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
-                  {actifsRows.map((row) => (
-                    <li key={row.status} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-3 py-2.5 text-sm">
+                <ul className="divide-y divide-slate-100">
+                  {bucketRows.map((row) => (
+                    <li key={row.key} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-3 py-2.5 text-sm">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: row.fill }} />
                         <span className="truncate font-medium text-slate-800">{row.label}</span>
@@ -297,8 +316,8 @@ export default function AnalyticsPage() {
                   ))}
                 </ul>
                 <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 bg-slate-50 border-t text-xs font-semibold text-slate-700">
-                  <span>Total actifs</span>
-                  <span className="tabular-nums">{totalActifs}</span>
+                  <span>Total</span>
+                  <span className="tabular-nums">{totalBuckets}</span>
                   <span className="tabular-nums w-10 text-right">100%</span>
                 </div>
               </div>
@@ -307,97 +326,98 @@ export default function AnalyticsPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Évolution devis (6 mois)</CardTitle>
-            <p className="text-xs text-muted-foreground font-normal">
-              Nombre de devis créés chaque mois (hors supprimés).
-            </p>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={monthlyDevis}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="mois" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Line type="monotone" dataKey="total" name="Créés" stroke="#81572d" strokeWidth={2} />
-                <Line type="monotone" dataKey="accepte" name="Acceptés" stroke="#10b981" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
-            <div className="mt-3 flex gap-2 flex-wrap">
-              <Badge variant="outline">Marron : créés</Badge>
-              <Badge variant="outline">Vert : acceptés</Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Nouveaux patients (6 mois)</CardTitle>
-            <p className="text-xs text-muted-foreground font-normal">
-              Dossiers créés chaque mois.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={monthlyPatients}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="mois" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Line type="monotone" dataKey="total" name="Nouveaux" stroke="#0284c7" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
-
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Sources des patients</CardTitle>
+          <CardTitle className="text-base">Évolution devis</CardTitle>
           <p className="text-xs text-muted-foreground font-normal">
-            D’après le formulaire rempli par la patiente (dernier soumis, hors abstention).
+            Nombre de devis traités chaque mois depuis septembre (hors supprimés).
           </p>
         </CardHeader>
         <CardContent>
-          {sourceRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">Aucune source renseignée.</p>
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={monthlyDevis}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="mois" />
+              <YAxis allowDecimals={false} />
+              <Tooltip />
+              <Line type="monotone" dataKey="total" name="Traités" stroke="#81572d" strokeWidth={2} />
+              <Line type="monotone" dataKey="accepte" name="Acceptés" stroke="#10b981" strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+          <div className="mt-3 flex gap-2 flex-wrap">
+            <Badge variant="outline">Marron : traités</Badge>
+            <Badge variant="outline">Vert : acceptés</Badge>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Profil des patients</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal">
+            Formulaire soumis (hors abstention) — sources, âge, sexe, interventions et pays.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-1.5 p-1 rounded-xl bg-slate-100 border border-slate-200">
+            {PROFIL_TABS.map((tab) => {
+              const active = profilTab === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setProfilTab(tab.id)}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                    active
+                      ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {profilRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">Aucune donnée pour ce KPI.</p>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-center">
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={sourceRows}
-                    dataKey="count"
-                    nameKey="label"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={58}
-                    outerRadius={95}
-                    paddingAngle={2}
-                  >
-                    {sourceRows.map((row) => (
-                      <Cell key={row.source} fill={row.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value) => [`${value} patient${Number(value) > 1 ? 's' : ''}`, 'Effectif']}
-                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }}
-                  />
-                  <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div className="rounded-xl border border-slate-200 bg-white p-2 min-h-[280px]">
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie
+                      data={profilRows}
+                      dataKey="count"
+                      nameKey="label"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={58}
+                      outerRadius={95}
+                      paddingAngle={2}
+                    >
+                      {profilRows.map((row) => (
+                        <Cell key={row.key} fill={row.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => [`${value} patient${Number(value) > 1 ? 's' : ''}`, 'Effectif']}
+                      contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }}
+                    />
+                    <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 12 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
               <div className="rounded-xl border border-slate-200 overflow-hidden">
                 <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 bg-slate-50 border-b text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  <span>Source</span>
+                  <span>{activeProfil.column}</span>
                   <span className="tabular-nums">Nb</span>
                   <span className="tabular-nums w-10 text-right">%</span>
                 </div>
-                <ul className="divide-y divide-slate-100">
-                  {sourceRows.map((row) => (
-                    <li key={row.source} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-3 py-2.5 text-sm">
+                <ul className="divide-y divide-slate-100 max-h-[320px] overflow-y-auto">
+                  {profilRows.map((row) => (
+                    <li key={row.key} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-3 py-2.5 text-sm">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: row.fill }} />
                         <span className="truncate font-medium text-slate-800">{row.label}</span>
@@ -407,6 +427,11 @@ export default function AnalyticsPage() {
                     </li>
                   ))}
                 </ul>
+                <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 bg-slate-50 border-t text-xs font-semibold text-slate-700">
+                  <span>Total</span>
+                  <span className="tabular-nums">{profilTotal}</span>
+                  <span className="tabular-nums w-10 text-right">100%</span>
+                </div>
               </div>
             </div>
           )}

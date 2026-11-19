@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { PostOpSection } from '@/components/dossier/PostOpSection'
 import {
   PostOpAvisSection,
   PostOpClotureSection,
+  PostOpCompteRenduStaffSection,
   PostOpDemandesSection,
   PostOpNotesSection,
   PostOpPhotosGallery,
@@ -102,17 +102,9 @@ export function PostOpDossierSection({ patientId, patientName, onStatusChange }:
 
       <PostOpDemandesSection patientId={patientId} suivi={suivi} api={gestionnairePostOpApi} onChange={setSuivi} />
 
-      <PostOpSection title="Compte rendu">
-        <p className="text-sm text-slate-700">
-          {suivi?.compteRendu
-            ? 'Rédigé, visible par la patiente.'
-            : suivi?.compteRenduDemandeAt
-              ? `Demandé le ${formatDate(suivi.compteRenduDemandeAt)}. À rédiger par le médecin.`
-              : 'Pas demandé. Il n’est rédigé que si la patiente le demande.'}
-        </p>
-      </PostOpSection>
+      <PostOpCompteRenduStaffSection patientId={patientId} suivi={suivi} onChange={setSuivi} />
 
-      <PostOpAvisSection suivi={suivi} />
+      <PostOpAvisSection patientId={patientId} suivi={suivi} onChange={setSuivi} />
 
       <PostOpNotesSection patientId={patientId} suivi={suivi} api={gestionnairePostOpApi} onChange={setSuivi} />
 

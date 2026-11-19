@@ -29,6 +29,7 @@ import {
   postOpNoteSchema,
   postOpReponseSchema,
   postOpRetourSchema,
+  postOpStaffFieldsSchema,
   updateAgendaEventSchema,
   updatePatientStatusSchema,
   updatePatientEspaceSchema,
@@ -59,6 +60,25 @@ const uploadPostOp = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     cb(null, file.mimetype.startsWith('image/'))
+  },
+})
+
+const uploadCompteRendu = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename: (_req, file, cb) => {
+      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+      cb(null, `cr-${Date.now()}-${safe}`)
+    },
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok =
+      file.mimetype === 'application/pdf'
+      || file.mimetype.startsWith('image/')
+      || file.mimetype === 'application/msword'
+      || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    cb(null, ok)
   },
 })
 
@@ -251,6 +271,46 @@ gestionnaireRouter.post(
         req.body,
       )
       res.status(201).json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.patch(
+  '/post-op/:patientId/staff-fields',
+  validate(postOpStaffFieldsSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await postOpService.updateStaffPostOpFields(
+        { id: req.auth!.sub, role: 'gestionnaire' },
+        pid(req.params.patientId),
+        req.body,
+      )
+      res.json({ ok: true, ...result })
+    } catch (e) {
+      next(e)
+    }
+  },
+)
+
+gestionnaireRouter.post(
+  '/post-op/:patientId/compte-rendu',
+  uploadCompteRendu.single('file'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ ok: false, code: 'NO_FILE', message: 'Aucun fichier reçu.' })
+        return
+      }
+      const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
+      const url = `${baseUrl}/uploads/${req.file.filename}`
+      const result = await postOpService.updateStaffPostOpFields(
+        { id: req.auth!.sub, role: 'gestionnaire' },
+        pid(req.params.patientId),
+        { compteRendu: url },
+      )
+      res.json({ ok: true, url, ...result })
     } catch (e) {
       next(e)
     }

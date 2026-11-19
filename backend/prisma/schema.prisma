@@ -334,6 +334,10 @@ model SuiviPostOp {
   patientId         String   @unique @map("patient_id")
   dateIntervention  DateTime @map("date_intervention") @db.Date
   compteRendu       String?  @map("compte_rendu")
+  /** Saisie gestionnaire — questions (texte). */
+  questionsStaff    String?  @map("questions_staff")
+  /** Saisie gestionnaire — avis (texte). */
+  avisStaff         String?  @map("avis_staff")
   photos            Json     @default("[]")
   questionnaire     Json?
   retourMessageAt       DateTime? @map("retour_message_at")

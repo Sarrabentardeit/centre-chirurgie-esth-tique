@@ -375,21 +375,21 @@ export function LogistiqueDossierSection({
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-600">Date et heure départ</label>
-          <input
-            type="datetime-local"
-            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm"
-            value={dateDepart}
-            onChange={(e) => setDateDepart(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
           <label className="text-xs font-semibold text-slate-600">Date et heure intervention</label>
           <input
             type="datetime-local"
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm"
             value={dateIntervention}
             onChange={(e) => setDateIntervention(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-semibold text-slate-600">Date et heure départ</label>
+          <input
+            type="datetime-local"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm"
+            value={dateDepart}
+            onChange={(e) => setDateDepart(e.target.value)}
           />
         </div>
       </div>

@@ -18,6 +18,7 @@ import type { MeResponse } from '@/lib/api'
 
 interface FormulairePayload {
   dateNaissance?: string
+  sexe?: string
   poids?: number
   taille?: number
   groupeSanguin?: string
@@ -443,6 +444,12 @@ export default function FormulaireRecapPage() {
           {/* Section 2 — Données personnelles */}
           <SectionCard icon={Calendar} title="Données personnelles" color="bg-violet-500">
             <Row label="Date de naissance" value={formatIsoDateFrLong(p.dateNaissance ?? patient?.dateNaissance)} />
+            <Row
+              label="Sexe"
+              value={
+                p.sexe === 'homme' ? 'Homme' : p.sexe === 'femme' ? 'Femme' : p.sexe || undefined
+              }
+            />
             <Row label="Poids" value={p.poids ? `${p.poids} kg` : undefined} />
             <Row label="Taille" value={p.taille ? `${p.taille} cm` : undefined} />
             {p.poids != null && p.taille != null && Number(p.taille) > 0 ? (

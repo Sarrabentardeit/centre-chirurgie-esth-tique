@@ -598,12 +598,23 @@ export function PostOpPhotosGallery({
   )
 }
 
-// ─── 4 · Questions et demandes ───────────────────────────────────────────────
+// ─── 4 · Questions (saisie gestionnaire) + demandes patiente ─────────────────
 
-export function PostOpDemandesSection({ patientId, suivi, api, onChange }: StaffSectionProps) {
+export function PostOpDemandesSection({
+  patientId,
+  suivi,
+  api,
+  onChange,
+}: StaffSectionProps) {
   const [error, setError] = useState<string | null>(null)
   const [replyDraft, setReplyDraft] = useState<Record<string, string>>({})
   const [replyingId, setReplyingId] = useState<string | null>(null)
+  const [questionsDraft, setQuestionsDraft] = useState(suivi?.questionsStaff ?? '')
+  const [savingQuestions, setSavingQuestions] = useState(false)
+
+  useEffect(() => {
+    setQuestionsDraft(suivi?.questionsStaff ?? '')
+  }, [suivi?.questionsStaff, suivi?.updatedAt])
 
   const demandes = suivi?.demandes ?? []
   const pendingCount = demandes.filter((d) => !d.reponse).length
@@ -624,84 +635,291 @@ export function PostOpDemandesSection({ patientId, suivi, api, onChange }: Staff
     }
   }
 
+  const saveQuestions = async () => {
+    setSavingQuestions(true)
+    setError(null)
+    try {
+      const { gestionnaireApi } = await import('@/lib/api')
+      const res = await gestionnaireApi.updatePostOpStaffFields(patientId, {
+        questionsStaff: questionsDraft,
+      })
+      onChange(res.suivi)
+    } catch (e) {
+      setError(errMessage(e, 'Enregistrement impossible.'))
+    } finally {
+      setSavingQuestions(false)
+    }
+  }
+
+  const questionsDirty = questionsDraft !== (suivi?.questionsStaff ?? '')
+
   return (
     <PostOpSection title="Questions de la patiente" note={pendingCount > 0 ? `${pendingCount} sans réponse` : undefined}>
       {error && <InlineError message={error} />}
-      {demandes.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Aucune question.</p>
-      ) : (
-        [...demandes].reverse().map((d) => (
-          <div key={d.id} className="rounded-xl border p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] text-muted-foreground">Patiente · {formatRelative(d.createdAt)}</p>
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4 space-y-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Saisie équipe
+        </p>
+        <Textarea
+          rows={4}
+          value={questionsDraft}
+          onChange={(e) => setQuestionsDraft(e.target.value)}
+          placeholder="Questions, points à suivre, remarques…"
+          className="resize-y text-sm min-h-[88px] bg-white"
+        />
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-slate-400">
+            {questionsDirty ? 'Modifications non enregistrées' : (suivi?.questionsStaff ? 'Enregistré' : 'Aucun texte')}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="brand"
+            className="gap-2 h-9 px-4"
+            disabled={savingQuestions || !questionsDirty}
+            onClick={() => void saveQuestions()}
+          >
+            {savingQuestions ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Enregistrer
+          </Button>
+        </div>
+      </div>
+      {demandes.length > 0 && (
+        <div className="space-y-2 pt-2 border-t border-slate-100">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Messages patiente</p>
+          {[...demandes].reverse().map((d) => (
+            <div key={d.id} className="rounded-xl border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] text-muted-foreground">Patiente · {formatRelative(d.createdAt)}</p>
+                {d.reponse ? (
+                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Répondu</Badge>
+                ) : (
+                  <Badge className="bg-amber-100 text-amber-800 border-amber-200">À traiter</Badge>
+                )}
+              </div>
+              <p className="text-sm whitespace-pre-wrap leading-relaxed">{d.message}</p>
               {d.reponse ? (
-                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Répondu</Badge>
+                <div className="rounded-lg bg-emerald-50/70 border border-emerald-100 px-3 py-2">
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed text-emerald-900">{d.reponse}</p>
+                  <p className="text-[11px] text-emerald-700 mt-1">
+                    {d.reponsePar ?? 'Équipe'}
+                    {d.reponseAt ? ` · ${formatRelative(d.reponseAt)}` : ''}
+                  </p>
+                </div>
               ) : (
-                <Badge className="bg-amber-100 text-amber-800 border-amber-200">À traiter</Badge>
+                <div className="space-y-2">
+                  <Textarea
+                    rows={2}
+                    value={replyDraft[d.id] ?? ''}
+                    onChange={(e) => setReplyDraft((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                    placeholder="Votre réponse à la patiente…"
+                    className="resize-none text-sm"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="brand"
+                    className="gap-2"
+                    disabled={replyingId === d.id || !(replyDraft[d.id] ?? '').trim()}
+                    onClick={() => void handleReply(d.id)}
+                  >
+                    {replyingId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Répondre
+                  </Button>
+                </div>
               )}
             </div>
-            <p className="text-sm whitespace-pre-wrap leading-relaxed">{d.message}</p>
-            {d.reponse ? (
-              <div className="rounded-lg bg-emerald-50/70 border border-emerald-100 px-3 py-2">
-                <p className="text-sm whitespace-pre-wrap leading-relaxed text-emerald-900">{d.reponse}</p>
-                <p className="text-[11px] text-emerald-700 mt-1">
-                  {d.reponsePar ?? 'Équipe'}
-                  {d.reponseAt ? ` · ${formatRelative(d.reponseAt)}` : ''}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <Textarea
-                  rows={2}
-                  value={replyDraft[d.id] ?? ''}
-                  onChange={(e) => setReplyDraft((prev) => ({ ...prev, [d.id]: e.target.value }))}
-                  placeholder="Votre réponse à la patiente…"
-                  className="resize-none text-sm"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="brand"
-                  className="gap-2"
-                  disabled={replyingId === d.id || !(replyDraft[d.id] ?? '').trim()}
-                  onClick={() => void handleReply(d.id)}
-                >
-                  {replyingId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Répondre
-                </Button>
-              </div>
-            )}
-          </div>
-        ))
+          ))}
+        </div>
       )}
     </PostOpSection>
   )
 }
 
-// ─── 6 · Avis (lecture) ──────────────────────────────────────────────────────
+// ─── Compte rendu (upload gestionnaire) ──────────────────────────────────────
 
-export function PostOpAvisSection({ suivi }: { suivi: SuiviPostOp | null }) {
-  const q = suivi?.questionnaire
+export function PostOpCompteRenduStaffSection({
+  patientId,
+  suivi,
+  onChange,
+}: {
+  patientId: string
+  suivi: SuiviPostOp | null
+  onChange: (suivi: SuiviPostOp) => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const cr = suivi?.compteRendu?.trim() || null
+  const isUrl = Boolean(cr && (/^https?:\/\//i.test(cr) || cr.startsWith('/uploads/')))
+
+  const onFile = async (file: File | null) => {
+    if (!file) return
+    setUploading(true)
+    setError(null)
+    try {
+      const { gestionnaireApi } = await import('@/lib/api')
+      const res = await gestionnaireApi.uploadPostOpCompteRendu(patientId, file)
+      onChange(res.suivi)
+    } catch (e) {
+      setError(errMessage(e, 'Upload impossible.'))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const removeFile = async () => {
+    setRemoving(true)
+    setError(null)
+    try {
+      const { gestionnaireApi } = await import('@/lib/api')
+      const res = await gestionnaireApi.updatePostOpStaffFields(patientId, { compteRendu: null })
+      onChange(res.suivi)
+    } catch (e) {
+      setError(errMessage(e, 'Suppression impossible.'))
+    } finally {
+      setRemoving(false)
+    }
+  }
+
   return (
-    <PostOpSection title="Avis" note={q ? `${q.note}/5` : 'Pas encore répondu'}>
+    <PostOpSection title="Compte rendu" note={cr ? 'Fichier joint' : 'À déposer'}>
+      {error && <InlineError message={error} />}
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4 space-y-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Document (PDF, Word ou image)
+        </p>
+        {cr && isUrl ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            <a
+              href={resolveProtectedUploadUrl(cr)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-semibold text-emerald-800 underline underline-offset-2 flex-1 min-w-0 truncate"
+            >
+              Ouvrir le compte rendu
+            </a>
+            <Button type="button" size="sm" variant="ghost" className="text-destructive gap-1 h-8" disabled={removing} onClick={() => void removeFile()}>
+              {removing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Retirer
+            </Button>
+          </div>
+        ) : cr ? (
+          <p className="text-sm text-slate-700 whitespace-pre-wrap rounded-lg border bg-white px-3 py-2">{cr}</p>
+        ) : (
+          <p className="text-[11px] text-slate-400">Aucun fichier pour l’instant — déposez-en un ci-dessous.</p>
+        )}
+        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-600 hover:border-brand-300 hover:bg-brand-50/40 transition-colors">
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          {uploading ? 'Envoi en cours…' : 'Déposer ou choisir un fichier'}
+          <input
+            type="file"
+            className="hidden"
+            accept=".pdf,.doc,.docx,image/*"
+            disabled={uploading}
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null
+              e.target.value = ''
+              void onFile(f)
+            }}
+          />
+        </label>
+      </div>
+    </PostOpSection>
+  )
+}
+
+// ─── 6 · Avis (saisie gestionnaire + questionnaire patiente) ─────────────────
+
+export function PostOpAvisSection({
+  suivi,
+  patientId,
+  onChange,
+}: {
+  suivi: SuiviPostOp | null
+  patientId?: string
+  onChange?: (suivi: SuiviPostOp) => void
+}) {
+  const q = suivi?.questionnaire
+  const editable = Boolean(patientId && onChange)
+  const [draft, setDraft] = useState(suivi?.avisStaff ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setDraft(suivi?.avisStaff ?? '')
+  }, [suivi?.avisStaff, suivi?.updatedAt])
+
+  const save = async () => {
+    if (!patientId || !onChange) return
+    setSaving(true)
+    setError(null)
+    try {
+      const { gestionnaireApi } = await import('@/lib/api')
+      const res = await gestionnaireApi.updatePostOpStaffFields(patientId, { avisStaff: draft })
+      onChange(res.suivi)
+    } catch (e) {
+      setError(errMessage(e, 'Enregistrement impossible.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const avisDirty = draft !== (suivi?.avisStaff ?? '')
+
+  return (
+    <PostOpSection title="Avis" note={q ? `${q.note}/5` : suivi?.avisStaff ? 'Saisi' : 'À remplir'}>
+      {error && <InlineError message={error} />}
+      {editable ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4 space-y-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Saisie équipe
+          </p>
+          <Textarea
+            rows={4}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Avis / retour d’expérience…"
+            className="resize-y text-sm min-h-[88px] bg-white"
+          />
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] text-slate-400">
+              {avisDirty ? 'Modifications non enregistrées' : (suivi?.avisStaff ? 'Enregistré' : 'Aucun texte')}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="brand"
+              className="gap-2 h-9 px-4"
+              disabled={saving || !avisDirty}
+              onClick={() => void save()}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Enregistrer
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {q ? (
-        <div className="flex items-start gap-4">
+        <div className={`flex items-start gap-4 rounded-xl border border-amber-100 bg-amber-50/40 px-3 py-3 ${editable ? 'mt-3' : ''}`}>
           <div className="flex gap-0.5 pt-0.5">
             {[1, 2, 3, 4, 5].map((s) => (
               <Star key={s} className={`h-5 w-5 ${s <= q.note ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground/40'}`} />
             ))}
           </div>
           <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800/80 mb-1">Avis patiente</p>
             <p className="text-sm font-semibold">{q.note}/5</p>
             {q.commentaire && <p className="text-sm text-muted-foreground italic mt-0.5">« {q.commentaire} »</p>}
-            <p className="text-[11px] text-muted-foreground mt-1">Répondu {formatRelative(q.reponduAt)}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">{formatRelative(q.reponduAt)}</p>
           </div>
         </div>
-      ) : (
+      ) : !editable ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Clock className="h-4 w-4 shrink-0" /> La patiente n’a pas encore rempli le questionnaire.
         </div>
-      )}
+      ) : null}
     </PostOpSection>
   )
 }

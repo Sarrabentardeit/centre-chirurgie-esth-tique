@@ -34,11 +34,75 @@ function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
 }
 
-/** Suivi tel que vu par la patiente : les notes internes du back-office ne sont jamais exposées. */
+/** Suivi tel que vu par la patiente : notes / saisies internes back-office jamais exposées. */
 export function toPatientSuivi(suivi: SuiviPostOp | null) {
   if (!suivi) return null
-  const { notesInternes: _notes, clotureRemarques: _remarques, cloturePar: _par, ...rest } = suivi
+  const {
+    notesInternes: _notes,
+    clotureRemarques: _remarques,
+    cloturePar: _par,
+    questionsStaff: _questionsStaff,
+    avisStaff: _avisStaff,
+    ...rest
+  } = suivi
   return rest
+}
+
+/** Crée le suivi si absent (date logistique ou aujourd’hui). */
+export async function ensureSuiviPostOp(patientId: string): Promise<SuiviPostOp> {
+  const existing = await prisma.suiviPostOp.findUnique({ where: { patientId } })
+  if (existing) return existing
+  const logistique = await prisma.logistique.findUnique({
+    where: { patientId },
+    select: { dateIntervention: true },
+  })
+  const base = logistique?.dateIntervention ?? new Date()
+  const day = formatAgendaSlot(base).date
+  return prisma.suiviPostOp.create({
+    data: { patientId, dateIntervention: new Date(`${day}T00:00:00.000Z`), photos: [] },
+  })
+}
+
+/** Met à jour les champs saisis par le staff (questions / avis / compte rendu). */
+export async function updateStaffPostOpFields(
+  actor: { id: string; role: StaffRole },
+  patientId: string,
+  input: { questionsStaff?: string | null; avisStaff?: string | null; compteRendu?: string | null },
+) {
+  await ensureSuiviPostOp(patientId)
+  const data: {
+    questionsStaff?: string | null
+    avisStaff?: string | null
+    compteRendu?: string | null
+  } = {}
+  if (input.questionsStaff !== undefined) {
+    data.questionsStaff = input.questionsStaff?.trim() || null
+  }
+  if (input.avisStaff !== undefined) {
+    data.avisStaff = input.avisStaff?.trim() || null
+  }
+  if (input.compteRendu !== undefined) {
+    data.compteRendu = input.compteRendu?.trim() || null
+  }
+  const updated = await prisma.suiviPostOp.update({
+    where: { patientId },
+    data,
+  })
+
+  await prisma.auditLog
+    .create({
+      data: {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: 'update',
+        entity: 'post_op_staff_fields',
+        entityId: patientId,
+        after: data as never,
+      },
+    })
+    .catch(() => undefined)
+
+  return { suivi: updated }
 }
 
 async function buildRetourWhatsappUrl(phone: string | null | undefined, text: string) {

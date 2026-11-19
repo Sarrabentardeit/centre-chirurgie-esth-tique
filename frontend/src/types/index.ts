@@ -49,6 +49,7 @@ export interface FormulaireMedical {
   id: string
   patientId: string
   // Etape 1 - Infos personnelles
+  sexe?: 'femme' | 'homme'
   poids: number
   taille: number
   groupeSanguin: string

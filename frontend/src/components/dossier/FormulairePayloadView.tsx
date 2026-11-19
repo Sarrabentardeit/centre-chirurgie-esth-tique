@@ -264,6 +264,16 @@ export function FormulairePayloadView({
           <CardHeader><CardTitle className="text-sm">Données personnelles</CardTitle></CardHeader>
           <CardContent>
             <InfoRow label="Date de naissance" value={asString(p.dateNaissance)} />
+            <InfoRow
+              label="Sexe"
+              value={
+                asString(p.sexe) === 'homme'
+                  ? 'Homme'
+                  : asString(p.sexe) === 'femme'
+                    ? 'Femme'
+                    : asString(p.sexe) || null
+              }
+            />
             <InfoRow label="Poids" value={asString(p.poids) ? `${String(p.poids)} kg` : null} />
             <InfoRow label="Taille" value={asString(p.taille) ? `${String(p.taille)} cm` : null} />
             <InfoRow label="Groupe sanguin" value={asString(p.groupeSanguin)} />

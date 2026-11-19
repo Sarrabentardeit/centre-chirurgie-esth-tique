@@ -446,6 +446,10 @@ export interface SuiviPostOp {
   patientId: string
   dateIntervention: string
   compteRendu: string | null
+  /** Saisie gestionnaire (interne). */
+  questionsStaff?: string | null
+  /** Saisie gestionnaire (interne). */
+  avisStaff?: string | null
   photos: PostOpPhoto[]
   questionnaire: PostOpQuestionnaire | null
   retourMessageAt?: string | null
@@ -804,8 +808,8 @@ export interface PatientListItem {
   user: { id?: string; fullName: string; email: string; createdAt: string }
   formulaires: Array<{ id: string; status: string; submittedAt: string | null }>
   devis: Array<{ id: string; statut: string; total: number; dateCreation: string; numeroDevis?: string | null; updatedAt?: string; vuParPatientAt?: string | null }>
-  /** Pour tri acceptés : date de passage (logistique). */
-  logistique?: { dateIntervention: string | null } | null
+  /** Tri acceptés / chronologique : arrivée + intervention (logistique). */
+  logistique?: { dateIntervention: string | null; dateArrivee?: string | null } | null
   rapports?: Array<{
     id: string
     diagnostic: string | null
@@ -1389,6 +1393,12 @@ export interface GestionnaireAnalyticsStatus {
   count: number
 }
 
+export interface GestionnaireAnalyticsDevisBucket {
+  key: string
+  label: string
+  count: number
+}
+
 export interface GestionnaireAnalyticsMonthly {
   key: string
   mois: string
@@ -1405,6 +1415,11 @@ export interface GestionnaireAnalyticsMonthlyPatients {
 
 export interface GestionnaireAnalyticsSource {
   source: string
+  count: number
+}
+
+export interface GestionnaireAnalyticsBucket {
+  key: string
   count: number
 }
 
@@ -1514,6 +1529,38 @@ export const gestionnaireApi = {
       patient: { id: string; status: string; fullName: string }
       dateInterventionLogistique: string | null
     }>(`/gestionnaire/post-op/${patientId}`),
+
+  updatePostOpStaffFields: (
+    patientId: string,
+    body: { questionsStaff?: string | null; avisStaff?: string | null; compteRendu?: string | null },
+  ) =>
+    request<{ ok: true; suivi: SuiviPostOp }>(`/gestionnaire/post-op/${patientId}/staff-fields`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  uploadPostOpCompteRendu: async (patientId: string, file: File) => {
+    const { access } = getTokens()
+    const formData = new FormData()
+    formData.append('file', file)
+    const headers: Record<string, string> = {}
+    if (access) headers.Authorization = `Bearer ${access}`
+    const url = `${BASE_URL}/gestionnaire/post-op/${encodeURIComponent(patientId)}/compte-rendu`
+    const res = await fetch(url, { method: 'POST', headers, body: formData })
+    if (res.status === 401) {
+      const newToken = await tryRefreshToken()
+      if (newToken) {
+        headers.Authorization = `Bearer ${newToken}`
+        const retry = await fetch(url, { method: 'POST', headers, body: formData })
+        if (!retry.ok) await readUploadError(retry)
+        return (await retry.json()) as { ok: true; suivi: SuiviPostOp; url: string }
+      }
+      forceSessionExpired()
+      throw new ApiRequestError(401, 'SESSION_EXPIRED', SESSION_EXPIRED_MSG)
+    }
+    if (!res.ok) await readUploadError(res)
+    return (await res.json()) as { ok: true; suivi: SuiviPostOp; url: string }
+  },
 
   /** Taux TND → EUR (cache 24 h côté serveur, gestionnaire uniquement). */
   getTauxEur: () => request<TndEurRateResponse>('/gestionnaire/taux-eur'),
@@ -1866,19 +1913,24 @@ export const gestionnaireApi = {
       ok: true
       funnel: GestionnaireFunnelStep[]
       statusDistribution: GestionnaireAnalyticsStatus[]
+      devisBuckets: GestionnaireAnalyticsDevisBucket[]
       monthlyDevis: GestionnaireAnalyticsMonthly[]
       monthlyPatients: GestionnaireAnalyticsMonthlyPatients[]
       sourceDistribution: GestionnaireAnalyticsSource[]
+      ageDistribution: GestionnaireAnalyticsBucket[]
+      sexeDistribution: GestionnaireAnalyticsBucket[]
+      interventionDistribution: GestionnaireAnalyticsBucket[]
+      paysDistribution: GestionnaireAnalyticsBucket[]
       kpis: {
-        acceptanceRate: number
-        acceptanceAccepted: number
-        acceptanceBase: number
-        responseRate: number
-        responseResponded: number
-        responseBase: number
-        rdvRate: number
-        rdvPatients: number
-        rdvBase: number
+        nonTraiterRate: number
+        nonTraiterCount: number
+        nonTraiterBase: number
+        treatedRate: number
+        treatedCount: number
+        treatedBase: number
+        abstentionRate: number
+        abstentionCount: number
+        abstentionBase: number
       }
     }>('/gestionnaire/analytics'),
 

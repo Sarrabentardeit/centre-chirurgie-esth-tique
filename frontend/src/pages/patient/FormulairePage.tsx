@@ -182,6 +182,12 @@ const step1Schema = z.object({
       return d <= endToday
     }, { message: 'La date de naissance ne peut pas être dans le futur.' }),
 
+  sexe: z
+    .string()
+    .refine((s) => s === '' || s === 'femme' || s === 'homme', {
+      message: 'Option non valide.',
+    }),
+
   sourceContact: z
     .string()
     .min(1, 'Indiquez comment vous avez eu connaissance des prestations du Dr Chennoufi.')
@@ -193,6 +199,7 @@ type Step1Data = {
   poids: string
   taille: string
   dateNaissance: string
+  sexe: 'femme' | 'homme' | ''
   sourceContact: string
 }
 
@@ -325,6 +332,7 @@ export default function FormulairePage() {
       poids: '',
       taille: '',
       dateNaissance: '',
+      sexe: '',
       sourceContact: '',
     },
   })
@@ -377,6 +385,7 @@ export default function FormulairePage() {
         const formulaire = latest.formulaire as {
           payload?: {
             dateNaissance?: string
+            sexe?: string
             poids?: number | string
             taille?: number | string
             periodeSouhaitee?: string
@@ -440,10 +449,12 @@ export default function FormulairePage() {
           payload.sourceContact && isSourceConnaissance(String(payload.sourceContact))
             ? String(payload.sourceContact)
             : ''
+        const sexeRaw = typeof payload.sexe === 'string' ? payload.sexe.trim().toLowerCase() : ''
         step1Form.reset({
           poids: payload.poids != null ? String(payload.poids) : '',
           taille: payload.taille != null ? String(payload.taille) : '',
           dateNaissance: payload.dateNaissance ?? '',
+          sexe: sexeRaw === 'homme' || sexeRaw === 'femme' ? sexeRaw : '',
           sourceContact: src,
         })
 
@@ -785,6 +796,7 @@ export default function FormulairePage() {
       .join('\n')
     const payload = {
       dateNaissance: step1.dateNaissance,
+      ...(step1.sexe === 'femme' || step1.sexe === 'homme' ? { sexe: step1.sexe } : {}),
       poids: parseInt(step1.poids, 10),
       taille: parseInt(step1.taille, 10),
       sourceContact: step1.sourceContact,
@@ -1397,6 +1409,41 @@ export default function FormulairePage() {
                     )}
                   </div>
                   <div className="space-y-2 sm:col-span-2">
+                    <Label className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
+                      Sexe
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      {(
+                        [
+                          { value: 'femme', label: 'Femme' },
+                          { value: 'homme', label: 'Homme' },
+                        ] as const
+                      ).map((opt) => {
+                        const selected = step1Form.watch('sexe') === opt.value
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              step1Form.setValue('sexe', opt.value, { shouldValidate: true, shouldDirty: true })
+                            }}
+                            className="rounded-full px-4 py-2 text-sm font-medium border transition-colors"
+                            style={{
+                              borderColor: selected ? '#81572d' : 'rgba(228,200,189,0.7)',
+                              background: selected ? 'rgba(129,87,45,0.12)' : '#fff',
+                              color: selected ? '#81572d' : '#282727',
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {step1Form.formState.errors.sexe && (
+                      <p className="text-xs text-destructive">{step1Form.formState.errors.sexe.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="sourceContact" className="text-xs tracking-wide uppercase" style={{ color: '#282727' }}>
                       Comment avez-vous eu connaissance des prestations du Dr Chennoufi ? <span className="text-destructive">*</span>
                     </Label>
@@ -1923,6 +1970,15 @@ export default function FormulairePage() {
                           {
                             label: 'Date de naissance',
                             value: formatIsoDateFrLong(step1Form.getValues('dateNaissance')),
+                          },
+                          {
+                            label: 'Sexe',
+                            value:
+                              step1Form.getValues('sexe') === 'homme'
+                                ? 'Homme'
+                                : step1Form.getValues('sexe') === 'femme'
+                                  ? 'Femme'
+                                  : '—',
                           },
                           {
                             label: 'Poids / taille',

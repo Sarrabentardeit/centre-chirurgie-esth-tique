@@ -86,7 +86,7 @@ const GESTIONNAIRE_GROUPS: NavGroup[] = [
       { label: 'Patients cabinet', href: '/gestionnaire/patients-cabinet', icon: Building2 },
       { label: 'Devis', href: '/gestionnaire/devis', icon: FileCheck },
       { label: 'Agenda', href: '/gestionnaire/agenda', icon: Calendar },
-      { label: 'Planning séjour', href: '/gestionnaire/planning-sejour', icon: CalendarDays },
+      { label: 'Patients Confirmés', href: '/gestionnaire/planning-sejour', icon: CalendarDays },
       { label: 'Chat', href: '/gestionnaire/chat', icon: MessageSquare, badgeKey: 'chat' },
     ],
   },

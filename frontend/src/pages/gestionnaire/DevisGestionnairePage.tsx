@@ -267,6 +267,14 @@ function primaryDevisStatut(
   return null
 }
 
+/** « Non traiter » = pas encore envoyé / accepté (sans devis, brouillon, remplacé, refusé). */
+function isDevisNonTraiter(
+  devis: Array<{ statut?: string | null }> | undefined | null,
+): boolean {
+  const statut = primaryDevisStatut(devis)
+  return statut !== 'envoye' && statut !== 'accepte'
+}
+
 /** En attente et aucun devis envoyé consulté par la patiente. */
 function isDevisNonConsulte(
   devis: Array<{ statut?: string | null; vuParPatientAt?: string | null }> | undefined | null,
@@ -1355,6 +1363,7 @@ export default function DevisGestionnairePage() {
 
   /* State global */
   const [patients, setPatients]           = useState<PatientListItem[]>([])
+  const [abstentionPatients, setAbstentionPatients] = useState<PatientListItem[]>([])
   const [listLoading, setListLoading]     = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [pageError, setPageError]         = useState<string | null>(null)
@@ -1362,7 +1371,7 @@ export default function DevisGestionnairePage() {
   const [cliniqueNomInvalid, setCliniqueNomInvalid] = useState(false)
   const [hotelNomInvalid, setHotelNomInvalid] = useState(false)
   const [search, setSearch]               = useState('')
-  const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'non_consulte' | 'consulte' | 'accepte' | 'refuse' | 'supprime'>('all')
+  const [devisFilter, setDevisFilter]     = useState<'all' | 'aucun' | 'brouillon' | 'envoye' | 'non_consulte' | 'consulte' | 'accepte' | 'refuse' | 'supprime' | 'abstention'>('all')
   const [page, setPage]                   = useState(1)
   const [view, setView]                   = useState<PageView>('list')
   const [selectedPatient, setSelectedPatient] = useState('')
@@ -1471,11 +1480,18 @@ export default function DevisGestionnairePage() {
 
   const patientsFiltered = useMemo(() => {
     if (devisFilter === 'supprime') return []
-    const all = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
     const q = search.trim().toLowerCase()
-    const bySearch = !q ? all : all.filter((p) =>
-      p.user.fullName.toLowerCase().includes(q) || p.dossierNumber.toLowerCase().includes(q)
-    )
+    const matchSearch = (p: PatientListItem) =>
+      !q
+      || p.user.fullName.toLowerCase().includes(q)
+      || p.dossierNumber.toLowerCase().includes(q)
+
+    if (devisFilter === 'abstention') {
+      return abstentionPatients.filter(matchSearch)
+    }
+
+    const all = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
+    const bySearch = all.filter(matchSearch)
     const filtered =
       devisFilter === 'all'
         ? bySearch
@@ -1483,43 +1499,51 @@ export default function DevisGestionnairePage() {
             if (devisFilter === 'non_consulte') return isDevisNonConsulte(p.devis)
             if (devisFilter === 'consulte') return isDevisConsulte(p.devis)
             const statut = primaryDevisStatut(p.devis)
-            if (devisFilter === 'aucun') return !statut
+            if (devisFilter === 'aucun') return isDevisNonTraiter(p.devis)
             return statut === devisFilter
           })
 
-    // Acceptés : à venir (par date de passage) en haut — déjà opérées en bas.
+    /**
+     * Tri demandé par la gestionnaire :
+     * — date d’arrivée patient (logistique), sinon date d’intervention
+     * — ordre chronologique / par mois
+     * — Acceptés : à venir en haut, déjà passées en bas
+     */
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+    const arrivalTs = (p: (typeof filtered)[number]) => {
+      const raw = p.logistique?.dateArrivee || p.logistique?.dateIntervention
+      if (!raw) return null
+      const d = new Date(raw)
+      return Number.isNaN(d.getTime()) ? null : d.getTime()
+    }
+    const byArrivalChrono = (a: (typeof filtered)[number], b: (typeof filtered)[number], desc = false) => {
+      const ta = arrivalTs(a)
+      const tb = arrivalTs(b)
+      if (ta == null && tb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
+      if (ta == null) return 1
+      if (tb == null) return -1
+      return desc ? tb - ta : ta - tb
+    }
+
     if (devisFilter === 'accepte') {
-      const startOfToday = new Date()
-      startOfToday.setHours(0, 0, 0, 0)
-      const ts = (p: (typeof filtered)[number]) => {
-        const raw = p.logistique?.dateIntervention
-        if (!raw) return null
-        const d = new Date(raw)
-        return Number.isNaN(d.getTime()) ? null : d.getTime()
-      }
-      const isOperated = (p: (typeof filtered)[number]) => {
+      const isPast = (p: (typeof filtered)[number]) => {
         if (p.status === 'post_op' || p.status === 'suivi_termine') return true
-        const t = ts(p)
+        const t = arrivalTs(p)
         return t != null && t < startOfToday.getTime()
       }
       return [...filtered].sort((a, b) => {
-        const aDone = isOperated(a)
-        const bDone = isOperated(b)
+        const aDone = isPast(a)
+        const bDone = isPast(b)
         if (aDone !== bDone) return aDone ? 1 : -1
-        const ta = ts(a)
-        const tb = ts(b)
-        if (ta == null && tb == null) {
-          return +new Date(b.updatedAt) - +new Date(a.updatedAt)
-        }
-        if (ta == null) return 1
-        if (tb == null) return -1
-        // À venir : plus proche en premier ; opérées : plus récentes d’abord
-        return aDone ? tb - ta : ta - tb
+        // À venir : mois proche d’abord ; passées : plus récentes d’abord
+        return byArrivalChrono(a, b, aDone)
       })
     }
 
-    return filtered
-  }, [patients, search, devisFilter])
+    // Autres filtres : chronologique par date d’arrivée (mois)
+    return [...filtered].sort((a, b) => byArrivalChrono(a, b, false))
+  }, [patients, abstentionPatients, search, devisFilter])
 
   const deletedFiltered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -1587,8 +1611,12 @@ export default function DevisGestionnairePage() {
     }
     setPageError(null)
     try {
-      const r = await cachedFetch(key, () => gestionnaireApi.getPatients(), { force })
+      const [r, abs] = await Promise.all([
+        cachedFetch(key, () => gestionnaireApi.getPatients(), { force }),
+        gestionnaireApi.getPatients({ status: 'abstention' }),
+      ])
       setPatients(r.patients)
+      setAbstentionPatients(abs.patients)
     } catch (e) {
       setPageError(e instanceof Error ? e.message : 'Impossible de charger.')
     } finally {
@@ -1775,12 +1803,30 @@ export default function DevisGestionnairePage() {
 
   const applyLocalPatientStatus = (status: string, extra?: { statusBeforeAbstention?: string | null }) => {
     if (!selectedPatient) return
+    const patch = { status, ...extra }
     setPatients((prev) =>
-      prev.map((p) => (p.id === selectedPatient ? { ...p, status, ...extra } : p)),
+      prev.map((p) => (p.id === selectedPatient ? { ...p, ...patch } : p)),
     )
     setPatientDetail((prev) =>
-      prev && prev.id === selectedPatient ? { ...prev, status, ...extra } : prev,
+      prev && prev.id === selectedPatient ? { ...prev, ...patch } : prev,
     )
+    if (status === 'abstention') {
+      setAbstentionPatients((prev) => {
+        const fromList = patients.find((p) => p.id === selectedPatient)
+        const fromDetail = patientDetail && patientDetail.id === selectedPatient
+          ? (patientDetail as unknown as PatientListItem)
+          : null
+        const base = fromList ?? fromDetail
+        if (!base) return prev
+        const next = { ...base, ...patch }
+        if (prev.some((p) => p.id === selectedPatient)) {
+          return prev.map((p) => (p.id === selectedPatient ? { ...p, ...patch } : p))
+        }
+        return [next, ...prev]
+      })
+    } else {
+      setAbstentionPatients((prev) => prev.filter((p) => p.id !== selectedPatient))
+    }
   }
 
   const handleConfirmAbstention = async () => {
@@ -3027,12 +3073,11 @@ export default function DevisGestionnairePage() {
   const renderList = () => {
     const allDevisPatients = patients.filter((p) => STATUTS_DEVIS.includes(p.status))
     const kpi = {
-      total:     allDevisPatients.length,
-      aucun:     allDevisPatients.filter((p) => !primaryDevisStatut(p.devis)).length,
-      envoye:    allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'envoye').length,
-      accepte:   allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'accepte').length,
-      refuse:    allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'refuse').length,
-      supprime:  deletedDevis.length,
+      total:       allDevisPatients.length,
+      aucun:       allDevisPatients.filter((p) => isDevisNonTraiter(p.devis)).length,
+      envoye:      allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'envoye').length,
+      accepte:     allDevisPatients.filter((p) => primaryDevisStatut(p.devis) === 'accepte').length,
+      abstention:  abstentionPatients.length,
     }
     const listBusy = devisFilter === 'supprime' ? deletedLoading : listLoading
     const showingDeleted = devisFilter === 'supprime'
@@ -3062,11 +3107,10 @@ export default function DevisGestionnairePage() {
         <KpiStrip
           items={[
             { key: 'all', label: 'Total', value: listLoading ? '—' : kpi.total, tone: 'slate', active: devisFilter === 'all', onClick: () => setDevisFilter('all') },
-            { key: 'aucun', label: 'Sans devis', value: listLoading ? '—' : kpi.aucun, tone: 'violet', active: devisFilter === 'aucun', onClick: () => setDevisFilter('aucun') },
-            { key: 'envoye', label: 'En attente', value: listLoading ? '—' : kpi.envoye, tone: 'sky', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
+            { key: 'aucun', label: 'Non traiter', value: listLoading ? '—' : kpi.aucun, tone: 'violet', active: devisFilter === 'aucun', onClick: () => setDevisFilter('aucun') },
+            { key: 'envoye', label: 'Traiter', value: listLoading ? '—' : kpi.envoye, tone: 'sky', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
             { key: 'accepte', label: 'Accepté', value: listLoading ? '—' : kpi.accepte, tone: 'emerald', active: devisFilter === 'accepte', onClick: () => setDevisFilter('accepte') },
-            { key: 'refuse', label: 'Refusé', value: listLoading ? '—' : kpi.refuse, tone: 'rose', active: devisFilter === 'refuse', onClick: () => setDevisFilter('refuse') },
-            { key: 'supprime', label: 'Supprimés', value: deletedLoading && deletedDevis.length === 0 ? '—' : kpi.supprime, tone: 'default', active: devisFilter === 'supprime', onClick: () => setDevisFilter('supprime') },
+            { key: 'abstention', label: 'Abstention', value: listLoading ? '—' : kpi.abstention, tone: 'amber', active: devisFilter === 'abstention', onClick: () => setDevisFilter('abstention') },
           ]}
         />
 
@@ -3164,9 +3208,11 @@ export default function DevisGestionnairePage() {
               description={
                 search
                   ? `Aucun résultat pour « ${search} »`
-                  : devisFilter !== 'all'
-                    ? 'Aucun devis dans cette catégorie'
-                    : 'Les patients apparaissent ici une fois leur rapport médical généré.'
+                  : devisFilter === 'abstention'
+                    ? 'Aucun dossier en abstention.'
+                    : devisFilter !== 'all'
+                      ? 'Aucun devis dans cette catégorie'
+                      : 'Les patients apparaissent ici une fois leur rapport médical généré.'
               }
               actionLabel={search || devisFilter !== 'all' ? 'Effacer les filtres' : undefined}
               onAction={

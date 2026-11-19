@@ -2658,6 +2658,7 @@ export async function getAnalytics() {
     statusRows,
     devisRows,
     patientsWithDevis,
+    abstentionCount,
     sourceRows,
   ] = await Promise.all([
     prisma.patient.groupBy({
@@ -2668,15 +2669,22 @@ export async function getAnalytics() {
       where: { deletedAt: null, dateCreation: { gte: monthStart } },
       select: { statut: true, dateCreation: true },
     }),
-    // Même base que Gestion des devis
+    // Même base que Gestion des devis (espace Patients = creePar patiente)
     prisma.patient.findMany({
-      where: { status: { in: [...ANALYTICS_DEVIS_STATUSES] } },
+      where: {
+        creePar: 'patiente',
+        status: { in: [...ANALYTICS_DEVIS_STATUSES] },
+      },
       select: {
         devis: {
           where: { deletedAt: null },
           select: { statut: true },
         },
       },
+    }),
+    // Abstention : même filtre que getPatients({ status: 'abstention' }) sur devis
+    prisma.patient.count({
+      where: { creePar: 'patiente', status: 'abstention' },
     }),
     // Profil formulaire (dernier soumis) — sources, âge, sexe, interventions, pays.
     prisma.formulaire.findMany({
@@ -2688,6 +2696,7 @@ export async function getAnalytics() {
         patient: {
           select: {
             status: true,
+            creePar: true,
             dateNaissance: true,
             pays: true,
           },
@@ -2728,8 +2737,7 @@ export async function getAnalytics() {
     })
   }
 
-  // Partition complète du périmètre devis + abstention (mêmes libellés que Gestion des devis).
-  // Non traiter = sans devis / brouillon / remplacé / refusé → aucun dossier « perdu » entre KPI et tableau.
+  // KPI identiques à Gestion des devis (filtre creePar=patiente + primaryDevisStatut).
   let nonTraiter = 0
   let traiter = 0 // devis envoyé
   let accepte = 0
@@ -2737,12 +2745,10 @@ export async function getAnalytics() {
     const primary = primaryDevisStatutOf(p.devis)
     if (primary === 'envoye') traiter += 1
     else if (primary === 'accepte') accepte += 1
-    else nonTraiter += 1
+    else nonTraiter += 1 // null / brouillon / refuse / remplace
   }
-  const abstentionCount =
-    statusRows.find((s) => s.status === 'abstention')?._count._all ?? 0
 
-  const devisBase = nonTraiter + traiter + accepte // = patientsWithDevis.length
+  const devisBase = nonTraiter + traiter + accepte // = Total page devis
   const totalBase = devisBase + abstentionCount
 
   const nonTraiterRate = devisBase > 0 ? Math.round((nonTraiter / devisBase) * 100) : 0
@@ -2791,6 +2797,7 @@ export async function getAnalytics() {
   for (const form of sourceRows) {
     if (profileSeenPatients.has(form.patientId)) continue
     if (form.patient.status === 'abstention') continue
+    if (form.patient.creePar !== 'patiente') continue
     profileSeenPatients.add(form.patientId)
 
     const payload = (form.payload && typeof form.payload === 'object')

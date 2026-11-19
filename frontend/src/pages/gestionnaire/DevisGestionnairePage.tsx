@@ -1504,45 +1504,64 @@ export default function DevisGestionnairePage() {
           })
 
     /**
-     * Tri demandé par la gestionnaire :
-     * — date d’arrivée patient (logistique), sinon date d’intervention
-     * — ordre chronologique / par mois
-     * — Acceptés : à venir en haut, déjà passées en bas
+     * Tri Acceptés (demande gestionnaire) :
+     * 1) À venir en haut — ordre de passage (date intervention, sinon arrivée), mois croissant
+     * 2) Dossiers déjà passés / opérées en bas — classés par mois croissant
+     * Autres filtres : même date de passage, croissante.
      */
     const startOfToday = new Date()
     startOfToday.setHours(0, 0, 0, 0)
-    const arrivalTs = (p: (typeof filtered)[number]) => {
-      const raw = p.logistique?.dateArrivee || p.logistique?.dateIntervention
+
+    const passageDate = (p: (typeof filtered)[number]): Date | null => {
+      const raw = p.logistique?.dateIntervention || p.logistique?.dateArrivee
       if (!raw) return null
       const d = new Date(raw)
-      return Number.isNaN(d.getTime()) ? null : d.getTime()
+      if (Number.isNaN(d.getTime())) return null
+      return d
     }
-    const byArrivalChrono = (a: (typeof filtered)[number], b: (typeof filtered)[number], desc = false) => {
-      const ta = arrivalTs(a)
-      const tb = arrivalTs(b)
-      if (ta == null && tb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
-      if (ta == null) return 1
-      if (tb == null) return -1
-      return desc ? tb - ta : ta - tb
+    const passageTs = (p: (typeof filtered)[number]) => {
+      const d = passageDate(p)
+      return d ? d.getTime() : null
+    }
+    /** Clé mois pour classer par mois (année × 12 + mois). */
+    const monthKey = (p: (typeof filtered)[number]) => {
+      const d = passageDate(p)
+      if (!d) return null
+      return d.getFullYear() * 12 + d.getMonth()
+    }
+    const byPassageMonth = (a: (typeof filtered)[number], b: (typeof filtered)[number]) => {
+      const ma = monthKey(a)
+      const mb = monthKey(b)
+      const ta = passageTs(a)
+      const tb = passageTs(b)
+      if (ma == null && mb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
+      if (ma == null) return 1
+      if (mb == null) return -1
+      if (ma !== mb) return ma - mb
+      // Même mois : jour croissant
+      if (ta == null || tb == null) return 0
+      return ta - tb
+    }
+
+    const isPastPassage = (p: (typeof filtered)[number]) => {
+      if (p.status === 'post_op' || p.status === 'suivi_termine') return true
+      const t = passageTs(p)
+      return t != null && t < startOfToday.getTime()
     }
 
     if (devisFilter === 'accepte') {
-      const isPast = (p: (typeof filtered)[number]) => {
-        if (p.status === 'post_op' || p.status === 'suivi_termine') return true
-        const t = arrivalTs(p)
-        return t != null && t < startOfToday.getTime()
-      }
       return [...filtered].sort((a, b) => {
-        const aDone = isPast(a)
-        const bDone = isPast(b)
+        const aDone = isPastPassage(a)
+        const bDone = isPastPassage(b)
+        // Passés / opérées → en bas
         if (aDone !== bDone) return aDone ? 1 : -1
-        // À venir : mois proche d’abord ; passées : plus récentes d’abord
-        return byArrivalChrono(a, b, aDone)
+        // Dans chaque groupe : ordre de passage par mois
+        return byPassageMonth(a, b)
       })
     }
 
-    // Autres filtres : chronologique par date d’arrivée (mois)
-    return [...filtered].sort((a, b) => byArrivalChrono(a, b, false))
+    // Autres filtres : chronologique par date de passage (mois)
+    return [...filtered].sort((a, b) => byPassageMonth(a, b))
   }, [patients, abstentionPatients, search, devisFilter])
 
   const deletedFiltered = useMemo(() => {
@@ -3107,9 +3126,9 @@ export default function DevisGestionnairePage() {
         <KpiStrip
           items={[
             { key: 'all', label: 'Total', value: listLoading ? '—' : kpi.total, tone: 'slate', active: devisFilter === 'all', onClick: () => setDevisFilter('all') },
-            { key: 'aucun', label: 'Non traiter', value: listLoading ? '—' : kpi.aucun, tone: 'violet', active: devisFilter === 'aucun', onClick: () => setDevisFilter('aucun') },
-            { key: 'envoye', label: 'Traiter', value: listLoading ? '—' : kpi.envoye, tone: 'sky', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
-            { key: 'accepte', label: 'Accepté', value: listLoading ? '—' : kpi.accepte, tone: 'emerald', active: devisFilter === 'accepte', onClick: () => setDevisFilter('accepte') },
+            { key: 'aucun', label: 'Non traités', value: listLoading ? '—' : kpi.aucun, tone: 'violet', active: devisFilter === 'aucun', onClick: () => setDevisFilter('aucun') },
+            { key: 'envoye', label: 'Traités', value: listLoading ? '—' : kpi.envoye, tone: 'sky', active: devisFilter === 'envoye', onClick: () => setDevisFilter('envoye') },
+            { key: 'accepte', label: 'Acceptés', value: listLoading ? '—' : kpi.accepte, tone: 'emerald', active: devisFilter === 'accepte', onClick: () => setDevisFilter('accepte') },
             { key: 'abstention', label: 'Abstention', value: listLoading ? '—' : kpi.abstention, tone: 'amber', active: devisFilter === 'abstention', onClick: () => setDevisFilter('abstention') },
           ]}
         />

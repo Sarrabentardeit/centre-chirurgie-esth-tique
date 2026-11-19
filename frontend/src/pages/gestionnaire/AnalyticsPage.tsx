@@ -381,6 +381,31 @@ export default function AnalyticsPage() {
 
           {profilRows.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">Aucune donnée pour ce KPI.</p>
+          ) : profilTab === 'interventions' ? (
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 bg-slate-50 border-b text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <span>{activeProfil.column}</span>
+                <span className="tabular-nums">Nb</span>
+                <span className="tabular-nums w-12 text-right">%</span>
+              </div>
+              <ul className="divide-y divide-slate-100 max-h-[480px] overflow-y-auto">
+                {profilRows.map((row) => (
+                  <li key={row.key} className="grid grid-cols-[1fr_auto_auto] gap-3 items-start px-3 py-2.5 text-sm">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <span className="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: row.fill }} />
+                      <span className="font-medium text-slate-800 leading-snug">{row.label}</span>
+                    </div>
+                    <span className="tabular-nums font-semibold text-slate-900">{row.count}</span>
+                    <span className="tabular-nums text-slate-500 w-12 text-right">{row.pct}%</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 bg-slate-50 border-t text-xs font-semibold text-slate-700">
+                <span>Total</span>
+                <span className="tabular-nums">{profilTotal}</span>
+                <span className="tabular-nums w-12 text-right">100%</span>
+              </div>
+            </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-center">
               <div className="rounded-xl border border-slate-200 bg-white p-2 min-h-[280px]">

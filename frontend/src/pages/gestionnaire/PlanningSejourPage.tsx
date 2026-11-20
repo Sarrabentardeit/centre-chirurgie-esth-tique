@@ -15,24 +15,20 @@ import {
   passageDateRaw,
   passageMonthMeta,
   passageTimestamp,
+  PASSAGE_BUCKET_LABEL,
   PASSAGE_BUCKET_ORDER,
   startOfTodayLocal,
+  type PassageBucket,
 } from '@/lib/passageDates'
 
-type PhaseKey = 'all' | 'accepte' | 'planning' | 'intervention' | 'post_op'
+type PhaseKey = 'all' | 'logistique' | 'planning' | 'intervention' | 'post_op'
 
-const PHASE_STATUSES: Record<Exclude<PhaseKey, 'all'>, string[]> = {
-  accepte: ['devis_accepte'],
-  planning: ['date_reservee', 'logistique'],
-  intervention: ['intervention'],
-  post_op: ['post_op', 'suivi_termine'],
-}
-
-function phaseOf(status: string): Exclude<PhaseKey, 'all'> {
-  if (PHASE_STATUSES.post_op.includes(status)) return 'post_op'
-  if (PHASE_STATUSES.intervention.includes(status)) return 'intervention'
-  if (PHASE_STATUSES.planning.includes(status)) return 'planning'
-  return 'accepte'
+function phaseOf(p: GestionnairePlanningSejourPatient): Exclude<PhaseKey, 'all'> {
+  if (p.status === 'post_op' || p.status === 'suivi_termine') return 'post_op'
+  if (p.status === 'intervention') return 'intervention'
+  // Avant l’intervention : planning finalisé vs encore en logistique
+  if (p.planning?.statut === 'finalise') return 'planning'
+  return 'logistique'
 }
 
 export default function PlanningSejourPage() {
@@ -48,40 +44,46 @@ export default function PlanningSejourPage() {
 
   const ordered = useMemo(() => {
     const today = startOfTodayLocal()
+    /** À venir puis Opérées — chaque bloc trié par date de passage croissante (ordre des mois). */
     return [...patients].sort((a, b) => {
       const ba = passageBucket(a, today)
       const bb = passageBucket(b, today)
       if (ba !== bb) return PASSAGE_BUCKET_ORDER[ba] - PASSAGE_BUCKET_ORDER[bb]
       const ta = passageTimestamp(a)
       const tb = passageTimestamp(b)
-      if (ba === 'upcoming') {
-        if (ta == null && tb == null) return a.user.fullName.localeCompare(b.user.fullName, 'fr')
-        if (ta == null) return 1
-        if (tb == null) return -1
-        return ta - tb
-      }
-      if (ba === 'past') {
-        if (ta == null && tb == null) return a.user.fullName.localeCompare(b.user.fullName, 'fr')
-        if (ta == null) return 1
-        if (tb == null) return -1
-        return tb - ta
-      }
-      return a.user.fullName.localeCompare(b.user.fullName, 'fr')
+      if (ta == null && tb == null) return a.user.fullName.localeCompare(b.user.fullName, 'fr')
+      if (ta == null) return 1
+      if (tb == null) return -1
+      return ta - tb
     })
   }, [patients])
 
   const phaseCounts = useMemo(() => {
-    const counts = { accepte: 0, planning: 0, intervention: 0, post_op: 0 }
+    const counts = { logistique: 0, planning: 0, intervention: 0, post_op: 0 }
     for (const p of patients) {
-      counts[phaseOf(p.status)] += 1
+      counts[phaseOf(p)] += 1
     }
     return counts
   }, [patients])
 
   const filtered = useMemo(() => {
     if (phaseFilter === 'all') return ordered
-    return ordered.filter((p) => phaseOf(p.status) === phaseFilter)
+    return ordered.filter((p) => phaseOf(p) === phaseFilter)
   }, [ordered, phaseFilter])
+
+  const passageCounts = useMemo(() => {
+    const today = startOfTodayLocal()
+    let upcoming = 0
+    let past = 0
+    let undated = 0
+    for (const p of filtered) {
+      const b = passageBucket(p, today)
+      if (b === 'upcoming') upcoming += 1
+      else if (b === 'past') past += 1
+      else undated += 1
+    }
+    return { upcoming, past, undated }
+  }, [filtered])
 
   const { slice: pagePatients, totalPages, page: safePage, total: listTotal } = useMemo(
     () => paginateSlice(filtered, page, LIST_PAGE_SIZE),
@@ -156,10 +158,10 @@ export default function PlanningSejourPage() {
       tone: 'border-slate-200 bg-slate-50 text-slate-700',
     },
     {
-      key: 'accepte',
-      label: 'Accepté',
-      value: phaseCounts.accepte,
-      tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+      key: 'logistique',
+      label: 'Logistique en cours',
+      value: phaseCounts.logistique,
+      tone: 'border-amber-200 bg-amber-50 text-amber-800',
     },
     {
       key: 'planning',
@@ -188,7 +190,7 @@ export default function PlanningSejourPage() {
           <div>
             <h2 className="text-xl font-semibold text-slate-900">Patients Confirmés</h2>
             <p className="text-sm text-muted-foreground">
-              Dossiers avec devis accepté — classés par date de passage.
+              Dossiers avec devis accepté — À venir puis Opérées, par mois chronologique.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -236,17 +238,33 @@ export default function PlanningSejourPage() {
           </div>
           <div className="divide-y divide-border/40 max-h-[75vh] overflow-y-auto">
             {pagePatients.map((p, idx) => {
+              const today = startOfTodayLocal()
               const passage = passageDateRaw(p)
+              const bucket = passageBucket(p, today)
               const month = passageMonthMeta(passage?.value)
               const globalIndex = (safePage - 1) * LIST_PAGE_SIZE + idx
               const prev = globalIndex > 0 ? filtered[globalIndex - 1] : null
+              const prevBucket = prev ? passageBucket(prev, today) : null
               const prevMonth = prev ? passageMonthMeta(passageDateRaw(prev)?.value) : null
-              const showMonthHeader = !!month && (prev == null || prevMonth?.key !== month.key)
+              const showBucketHeader = prev == null || prevBucket !== bucket
+              const showMonthHeader =
+                bucket !== 'undated'
+                && !!month
+                && (showBucketHeader || prevMonth?.key !== month.key)
+              const bucketCount =
+                bucket === 'upcoming'
+                  ? passageCounts.upcoming
+                  : bucket === 'past'
+                    ? passageCounts.past
+                    : passageCounts.undated
 
               return (
                 <div key={p.id}>
+                  {showBucketHeader && (
+                    <BucketHeader bucket={bucket} count={bucketCount} />
+                  )}
                   {showMonthHeader && month && (
-                    <div className="px-4 sm:px-5 py-1.5 bg-slate-50/80 border-b border-border/40">
+                    <div className="px-4 sm:px-5 py-1.5 bg-white border-b border-border/40">
                       <p className="text-[11px] font-medium text-slate-500">{month.label}</p>
                     </div>
                   )}
@@ -301,6 +319,31 @@ export default function PlanningSejourPage() {
           </div>
         )}
       </ConfirmDialog>
+    </div>
+  )
+}
+
+function BucketHeader({ bucket, count }: { bucket: PassageBucket; count: number }) {
+  return (
+    <div
+      className={cn(
+        'px-4 sm:px-5 py-2.5 border-b flex items-center justify-between gap-2',
+        bucket === 'upcoming' && 'bg-emerald-50/70 border-emerald-100',
+        bucket === 'past' && 'bg-slate-50 border-slate-200/80',
+        bucket === 'undated' && 'bg-amber-50/60 border-amber-100',
+      )}
+    >
+      <p
+        className={cn(
+          'text-xs font-semibold tracking-wide',
+          bucket === 'upcoming' && 'text-emerald-800',
+          bucket === 'past' && 'text-slate-600',
+          bucket === 'undated' && 'text-amber-800',
+        )}
+      >
+        {PASSAGE_BUCKET_LABEL[bucket]}
+      </p>
+      <span className="text-[11px] font-medium text-slate-500 tabular-nums">{count}</span>
     </div>
   )
 }

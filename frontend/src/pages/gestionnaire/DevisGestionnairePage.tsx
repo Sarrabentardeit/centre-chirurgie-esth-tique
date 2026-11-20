@@ -1524,9 +1524,9 @@ export default function DevisGestionnairePage() {
 
     /**
      * Tri Acceptés :
-     * 1) Prochains passages — date croissante (plus proche en premier), par mois
-     * 2) Historique en bas — date décroissante (plus récent en premier), par mois
-     * 3) Date à confirmer tout en bas
+     * 1) À venir — date croissante (ordre des mois)
+     * 2) Opérées en bas — date croissante (ordre des mois)
+     * 3) Sans date tout en bas
      */
     const startOfToday = startOfTodayLocal()
 
@@ -1544,27 +1544,32 @@ export default function DevisGestionnairePage() {
       if (tb == null) return -1
       return ta - tb
     }
-    const byPassageDesc = (a: (typeof filtered)[number], b: (typeof filtered)[number]) => {
-      const ta = passageTs(a)
-      const tb = passageTs(b)
-      if (ta == null && tb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
-      if (ta == null) return 1
-      if (tb == null) return -1
-      return tb - ta
-    }
 
     if (devisFilter === 'accepte') {
       return [...filtered].sort((a, b) => {
         const ba = passageBucket(a, startOfToday)
         const bb = passageBucket(b, startOfToday)
         if (ba !== bb) return PASSAGE_BUCKET_ORDER[ba] - PASSAGE_BUCKET_ORDER[bb]
-        if (ba === 'upcoming') return byPassageAsc(a, b)
-        if (ba === 'past') return byPassageDesc(a, b)
+        if (ba === 'upcoming' || ba === 'past') return byPassageAsc(a, b)
         return +new Date(b.updatedAt) - +new Date(a.updatedAt)
       })
     }
 
-    return [...filtered].sort((a, b) => byPassageAsc(a, b))
+    /** Tous / autres filtres : date de création du devis principal (affichée à droite), plus récent en haut. */
+    const devisCreationTs = (p: (typeof filtered)[number]) => {
+      const d = primaryDevisOf(p.devis) ?? p.devis[0]
+      if (!d?.dateCreation) return null
+      const t = +new Date(d.dateCreation)
+      return Number.isNaN(t) ? null : t
+    }
+    return [...filtered].sort((a, b) => {
+      const ta = devisCreationTs(a)
+      const tb = devisCreationTs(b)
+      if (ta == null && tb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
+      if (ta == null) return 1
+      if (tb == null) return -1
+      return tb - ta
+    })
   }, [patients, abstentionPatients, search, devisFilter])
 
   const deletedFiltered = useMemo(() => {

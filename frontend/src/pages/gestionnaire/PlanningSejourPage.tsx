@@ -54,11 +54,17 @@ export default function PlanningSejourPage() {
       if (ba !== bb) return PASSAGE_BUCKET_ORDER[ba] - PASSAGE_BUCKET_ORDER[bb]
       const ta = passageTimestamp(a)
       const tb = passageTimestamp(b)
-      if (ba === 'upcoming' || ba === 'past') {
+      if (ba === 'upcoming') {
         if (ta == null && tb == null) return a.user.fullName.localeCompare(b.user.fullName, 'fr')
         if (ta == null) return 1
         if (tb == null) return -1
         return ta - tb
+      }
+      if (ba === 'past') {
+        if (ta == null && tb == null) return a.user.fullName.localeCompare(b.user.fullName, 'fr')
+        if (ta == null) return 1
+        if (tb == null) return -1
+        return tb - ta
       }
       return a.user.fullName.localeCompare(b.user.fullName, 'fr')
     })

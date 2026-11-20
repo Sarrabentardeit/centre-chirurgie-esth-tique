@@ -81,7 +81,9 @@ import {
   passageDateRaw,
   passageDayLocal,
   passageMonthMeta,
+  PASSAGE_BUCKET_LABEL,
   PASSAGE_BUCKET_ORDER,
+  startOfTodayLocal,
 } from '@/lib/passageDates'
 import {
   buildGestionnaireDevisExportHtml,
@@ -1521,13 +1523,12 @@ export default function DevisGestionnairePage() {
           })
 
     /**
-     * Tri Acceptés (demande gestionnaire) :
-     * 1) À venir en haut — ordre de passage croissant (prochaine en premier)
-     * 2) Opérées / passées en bas — classées par mois croissant
-     * 3) Sans date tout en bas
+     * Tri Acceptés :
+     * 1) Prochains passages — date croissante (plus proche en premier), par mois
+     * 2) Historique en bas — date décroissante (plus récent en premier), par mois
+     * 3) Date à confirmer tout en bas
      */
-    const startOfToday = new Date()
-    startOfToday.setHours(0, 0, 0, 0)
+    const startOfToday = startOfTodayLocal()
 
     const passageTs = (p: (typeof filtered)[number]) => {
       const raw = passageDateRaw(p)?.value
@@ -1543,14 +1544,22 @@ export default function DevisGestionnairePage() {
       if (tb == null) return -1
       return ta - tb
     }
+    const byPassageDesc = (a: (typeof filtered)[number], b: (typeof filtered)[number]) => {
+      const ta = passageTs(a)
+      const tb = passageTs(b)
+      if (ta == null && tb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
+      if (ta == null) return 1
+      if (tb == null) return -1
+      return tb - ta
+    }
 
     if (devisFilter === 'accepte') {
       return [...filtered].sort((a, b) => {
         const ba = passageBucket(a, startOfToday)
         const bb = passageBucket(b, startOfToday)
         if (ba !== bb) return PASSAGE_BUCKET_ORDER[ba] - PASSAGE_BUCKET_ORDER[bb]
-        // À venir et opérées : même ordre chronologique de passage (mois croissant)
-        if (ba === 'upcoming' || ba === 'past') return byPassageAsc(a, b)
+        if (ba === 'upcoming') return byPassageAsc(a, b)
+        if (ba === 'past') return byPassageDesc(a, b)
         return +new Date(b.updatedAt) - +new Date(a.updatedAt)
       })
     }
@@ -1587,6 +1596,21 @@ export default function DevisGestionnairePage() {
   useEffect(() => {
     setPage(1)
   }, [search, devisFilter])
+
+  const accepteCounts = useMemo(() => {
+    if (devisFilter !== 'accepte') return { upcoming: 0, past: 0, undated: 0 }
+    const today = startOfTodayLocal()
+    let upcoming = 0
+    let past = 0
+    let undated = 0
+    for (const p of patientsFiltered) {
+      const b = passageBucket(p, today)
+      if (b === 'upcoming') upcoming += 1
+      else if (b === 'past') past += 1
+      else undated += 1
+    }
+    return { upcoming, past, undated }
+  }, [patientsFiltered, devisFilter])
 
   const { slice: pagePatients, totalPages: patientTotalPages, page: patientSafePage, total: patientListTotal } = useMemo(
     () => paginateSlice(patientsFiltered, page, LIST_PAGE_SIZE),
@@ -3174,8 +3198,11 @@ export default function DevisGestionnairePage() {
                 <>
                   <span className="font-semibold text-foreground">{patientsFiltered.length}</span>
                   {' '}accepté{patientsFiltered.length > 1 ? 's' : ''}
-                  {search ? ' (filtrés)' : ''}
-                  {' '}— classés par date de passage
+                  <> · <span className="font-semibold text-emerald-700">{accepteCounts.upcoming}</span> à venir</>
+                  <> · <span className="font-semibold text-slate-600">{accepteCounts.past}</span> opérée{accepteCounts.past > 1 ? 's' : ''}</>
+                  {accepteCounts.undated > 0 && (
+                    <> · <span className="font-semibold text-amber-700">{accepteCounts.undated}</span> sans date</>
+                  )}
                 </>
               ) : (
                 <>
@@ -3313,20 +3340,54 @@ export default function DevisGestionnairePage() {
               const devisStatut = primaryDevisStatut(p.devis) ?? lastDevis?.statut
               const hasDevis = !!devisStatut
               const isRead    = !!lastDevis?.vuParPatientAt
+              const today = startOfTodayLocal()
               const passage = passageDateRaw(p)
+              const bucket = passageBucket(p, today)
               const month = passageMonthMeta(passage?.value)
               const globalIndex = (safePage - 1) * LIST_PAGE_SIZE + idx
               const prev = globalIndex > 0 ? patientsFiltered[globalIndex - 1] : null
+              const prevBucket = prev ? passageBucket(prev, today) : null
               const prevMonth = prev ? passageMonthMeta(passageDateRaw(prev)?.value) : null
+              const showBucketHeader =
+                devisFilter === 'accepte' && (prev == null || prevBucket !== bucket)
               const showMonthHeader =
                 devisFilter === 'accepte'
+                && bucket !== 'undated'
                 && !!month
-                && (prev == null || prevMonth?.key !== month.key)
+                && (showBucketHeader || prevMonth?.key !== month.key)
+              const bucketCount =
+                bucket === 'upcoming'
+                  ? accepteCounts.upcoming
+                  : bucket === 'past'
+                    ? accepteCounts.past
+                    : accepteCounts.undated
 
               return (
                 <div key={p.id}>
+                {showBucketHeader && (
+                  <div
+                    className={cn(
+                      'px-4 sm:px-5 py-2.5 border-b flex items-center justify-between gap-2',
+                      bucket === 'upcoming' && 'bg-emerald-50/70 border-emerald-100',
+                      bucket === 'past' && 'bg-slate-50 border-slate-200/80',
+                      bucket === 'undated' && 'bg-amber-50/60 border-amber-100',
+                    )}
+                  >
+                    <p
+                      className={cn(
+                        'text-xs font-semibold tracking-wide',
+                        bucket === 'upcoming' && 'text-emerald-800',
+                        bucket === 'past' && 'text-slate-600',
+                        bucket === 'undated' && 'text-amber-800',
+                      )}
+                    >
+                      {PASSAGE_BUCKET_LABEL[bucket]}
+                    </p>
+                    <span className="text-[11px] font-medium text-slate-500 tabular-nums">{bucketCount}</span>
+                  </div>
+                )}
                 {showMonthHeader && month && (
-                  <div className="px-4 sm:px-5 py-1.5 bg-slate-50/80 border-b border-border/40">
+                  <div className="px-4 sm:px-5 py-1.5 bg-white border-b border-border/40">
                     <p className="text-[11px] font-medium text-slate-500">{month.label}</p>
                   </div>
                 )}

@@ -44,7 +44,10 @@ export default function PlanningSejourPage() {
 
   const ordered = useMemo(() => {
     const today = startOfTodayLocal()
-    /** À venir puis Opérées — chaque bloc trié par date de passage croissante (ordre des mois). */
+    /**
+     * À venir puis Opérées — même tri dans chaque bloc :
+     * décroissant (plus récent en premier), ex. nov → oct → sept.
+     */
     return [...patients].sort((a, b) => {
       const ba = passageBucket(a, today)
       const bb = passageBucket(b, today)
@@ -54,7 +57,7 @@ export default function PlanningSejourPage() {
       if (ta == null && tb == null) return a.user.fullName.localeCompare(b.user.fullName, 'fr')
       if (ta == null) return 1
       if (tb == null) return -1
-      return ta - tb
+      return tb - ta
     })
   }, [patients])
 
@@ -190,7 +193,7 @@ export default function PlanningSejourPage() {
           <div>
             <h2 className="text-xl font-semibold text-slate-900">Patients Confirmés</h2>
             <p className="text-sm text-muted-foreground">
-              Dossiers avec devis accepté — À venir puis Opérées, par mois chronologique.
+              À venir puis Opérées — plus récent en premier (ex. nov → oct → sept).
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>

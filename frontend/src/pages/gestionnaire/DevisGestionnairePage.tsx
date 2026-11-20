@@ -1523,10 +1523,8 @@ export default function DevisGestionnairePage() {
           })
 
     /**
-     * Tri Acceptés :
-     * 1) À venir — date croissante (ordre des mois)
-     * 2) Opérées en bas — date croissante (ordre des mois)
-     * 3) Sans date tout en bas
+     * Tri Acceptés — même règle haut et bas :
+     * décroissant (plus récent en premier), ex. nov → oct → sept.
      */
     const startOfToday = startOfTodayLocal()
 
@@ -1536,13 +1534,13 @@ export default function DevisGestionnairePage() {
       const d = passageDayLocal(raw)
       return d ? d.getTime() : null
     }
-    const byPassageAsc = (a: (typeof filtered)[number], b: (typeof filtered)[number]) => {
+    const byPassageDesc = (a: (typeof filtered)[number], b: (typeof filtered)[number]) => {
       const ta = passageTs(a)
       const tb = passageTs(b)
       if (ta == null && tb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
       if (ta == null) return 1
       if (tb == null) return -1
-      return ta - tb
+      return tb - ta
     }
 
     if (devisFilter === 'accepte') {
@@ -1550,7 +1548,7 @@ export default function DevisGestionnairePage() {
         const ba = passageBucket(a, startOfToday)
         const bb = passageBucket(b, startOfToday)
         if (ba !== bb) return PASSAGE_BUCKET_ORDER[ba] - PASSAGE_BUCKET_ORDER[bb]
-        if (ba === 'upcoming' || ba === 'past') return byPassageAsc(a, b)
+        if (ba === 'upcoming' || ba === 'past') return byPassageDesc(a, b)
         return +new Date(b.updatedAt) - +new Date(a.updatedAt)
       })
     }

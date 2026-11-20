@@ -81,7 +81,6 @@ import {
   passageDateRaw,
   passageDayLocal,
   passageMonthMeta,
-  PASSAGE_BUCKET_LABEL,
   PASSAGE_BUCKET_ORDER,
 } from '@/lib/passageDates'
 import {
@@ -1588,23 +1587,6 @@ export default function DevisGestionnairePage() {
   useEffect(() => {
     setPage(1)
   }, [search, devisFilter])
-
-  const accepteCounts = useMemo(() => {
-    const startOfToday = new Date()
-    startOfToday.setHours(0, 0, 0, 0)
-    let upcoming = 0
-    let past = 0
-    let undated = 0
-    if (devisFilter === 'accepte') {
-      for (const p of patientsFiltered) {
-        const b = passageBucket(p, startOfToday)
-        if (b === 'upcoming') upcoming += 1
-        else if (b === 'past') past += 1
-        else undated += 1
-      }
-    }
-    return { upcoming, past, undated }
-  }, [patientsFiltered, devisFilter])
 
   const { slice: pagePatients, totalPages: patientTotalPages, page: patientSafePage, total: patientListTotal } = useMemo(
     () => paginateSlice(patientsFiltered, page, LIST_PAGE_SIZE),
@@ -3192,11 +3174,8 @@ export default function DevisGestionnairePage() {
                 <>
                   <span className="font-semibold text-foreground">{patientsFiltered.length}</span>
                   {' '}accepté{patientsFiltered.length > 1 ? 's' : ''}
-                  <> · <span className="font-semibold text-emerald-700">{accepteCounts.upcoming}</span> à venir</>
-                  <> · <span className="font-semibold text-slate-600">{accepteCounts.past}</span> opérée{accepteCounts.past > 1 ? 's' : ''}</>
-                  {accepteCounts.undated > 0 && (
-                    <> · <span className="font-semibold text-amber-700">{accepteCounts.undated}</span> sans date</>
-                  )}
+                  {search ? ' (filtrés)' : ''}
+                  {' '}— classés par date de passage
                 </>
               ) : (
                 <>
@@ -3334,75 +3313,20 @@ export default function DevisGestionnairePage() {
               const devisStatut = primaryDevisStatut(p.devis) ?? lastDevis?.statut
               const hasDevis = !!devisStatut
               const isRead    = !!lastDevis?.vuParPatientAt
-              const startOfToday = new Date()
-              startOfToday.setHours(0, 0, 0, 0)
               const passage = passageDateRaw(p)
-              const bucket = passageBucket(p, startOfToday)
               const month = passageMonthMeta(passage?.value)
               const globalIndex = (safePage - 1) * LIST_PAGE_SIZE + idx
               const prev = globalIndex > 0 ? patientsFiltered[globalIndex - 1] : null
-              const prevBucket = prev ? passageBucket(prev, startOfToday) : null
               const prevMonth = prev ? passageMonthMeta(passageDateRaw(prev)?.value) : null
-              const showBucketHeader =
-                devisFilter === 'accepte' && (prev == null || prevBucket !== bucket)
               const showMonthHeader =
                 devisFilter === 'accepte'
-                && bucket !== 'undated'
                 && !!month
-                && (showBucketHeader || prevMonth?.key !== month.key)
-              const bucketCount =
-                bucket === 'upcoming'
-                  ? accepteCounts.upcoming
-                  : bucket === 'past'
-                    ? accepteCounts.past
-                    : accepteCounts.undated
-
-              const showEmptyUpcomingHeader =
-                devisFilter === 'accepte'
-                && accepteCounts.upcoming === 0
-                && idx === 0
-                && safePage === 1
-                && bucket !== 'upcoming'
+                && (prev == null || prevMonth?.key !== month.key)
 
               return (
                 <div key={p.id}>
-                {showEmptyUpcomingHeader && (
-                  <>
-                    <div className="px-4 sm:px-5 py-2.5 border-b flex items-center justify-between gap-2 bg-emerald-50/70 border-emerald-100">
-                      <p className="text-xs font-semibold tracking-wide uppercase text-emerald-800">
-                        {PASSAGE_BUCKET_LABEL.upcoming}
-                      </p>
-                      <span className="text-[11px] font-medium text-slate-500 tabular-nums">0</span>
-                    </div>
-                    <div className="px-4 sm:px-5 py-3 border-b border-border/40 bg-white">
-                      <p className="text-xs text-slate-500">
-                        Aucune intervention à venir — les dossiers opérés restent en bas du fil.
-                      </p>
-                    </div>
-                  </>
-                )}
-                {showBucketHeader && (
-                  <div className={cn(
-                    'px-4 sm:px-5 py-2.5 border-b flex items-center justify-between gap-2',
-                    bucket === 'upcoming' && 'bg-emerald-50/70 border-emerald-100',
-                    bucket === 'past' && 'bg-slate-50 border-slate-200/80',
-                    bucket === 'undated' && 'bg-amber-50/60 border-amber-100',
-                  )}>
-                    <p className={cn(
-                      'text-xs font-semibold tracking-wide uppercase',
-                      bucket === 'upcoming' && 'text-emerald-800',
-                      bucket === 'past' && 'text-slate-600',
-                      bucket === 'undated' && 'text-amber-800',
-                    )}>
-                      {PASSAGE_BUCKET_LABEL[bucket]}
-                    </p>
-                    <span className="text-[11px] font-medium text-slate-500 tabular-nums">
-                      {bucketCount}
-                    </span>
-                  </div>
-                )}
                 {showMonthHeader && month && (
-                  <div className="px-4 sm:px-5 py-1.5 bg-white border-b border-border/40">
+                  <div className="px-4 sm:px-5 py-1.5 bg-slate-50/80 border-b border-border/40">
                     <p className="text-[11px] font-medium text-slate-500">{month.label}</p>
                   </div>
                 )}
@@ -3426,21 +3350,7 @@ export default function DevisGestionnairePage() {
                       <span className="text-[10px] font-mono text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">{p.dossierNumber}</span>
                   </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      {devisFilter === 'accepte' ? (
-                        <span className={cn(
-                          'inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md border',
-                          passage?.kind === 'arrivee'
-                            ? 'bg-sky-50 text-sky-700 border-sky-100'
-                            : passage
-                              ? 'bg-violet-50 text-violet-700 border-violet-100'
-                              : 'bg-amber-50 text-amber-700 border-amber-100',
-                        )}>
-                          <CalendarDays className="h-3 w-3" />
-                          {passage?.kind === 'arrivee' ? 'Arrivée' : passage ? 'Intervention' : 'Date manquante'}
-                        </span>
-                      ) : (
-                        <StatusBadge kind="dossier" value={p.status} />
-                      )}
+                      <StatusBadge kind="dossier" value={p.status} />
                       {p.user.email && <span className="text-[11px] text-slate-400 hidden md:inline truncate max-w-[180px]">{p.user.email}</span>}
           </div>
         </div>

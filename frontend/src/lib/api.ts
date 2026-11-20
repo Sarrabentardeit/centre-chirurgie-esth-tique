@@ -1359,6 +1359,10 @@ export interface GestionnairePlanningSejourPatient {
   ville: string | null
   pays: string | null
   user: { fullName: string; email: string }
+  logistique?: {
+    dateIntervention?: string | null
+    dateArrivee?: string | null
+  } | null
   planning: GestionnairePlanningSejourSummary | null
 }
 
@@ -1922,6 +1926,8 @@ export const gestionnaireApi = {
       interventionDistribution: GestionnaireAnalyticsBucket[]
       paysDistribution: GestionnaireAnalyticsBucket[]
       kpis: {
+        formulairesRemplis: number
+        devisEnvoyes: number
         nonTraiterRate: number
         nonTraiterCount: number
         nonTraiterBase: number

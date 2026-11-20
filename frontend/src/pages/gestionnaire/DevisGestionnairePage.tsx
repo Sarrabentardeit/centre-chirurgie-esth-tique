@@ -77,6 +77,14 @@ import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/Pagin
 import { cachedFetch, hasCachedData, invalidateCache } from '@/lib/cachedFetch'
 import { queryKeys } from '@/lib/queryKeys'
 import {
+  passageBucket,
+  passageDateRaw,
+  passageDayLocal,
+  passageMonthMeta,
+  PASSAGE_BUCKET_LABEL,
+  PASSAGE_BUCKET_ORDER,
+} from '@/lib/passageDates'
+import {
   buildGestionnaireDevisExportHtml,
   mergeDevisCustomContentOnModalSave,
   applyModalInclutExclutDeltaToCustomContent,
@@ -265,6 +273,16 @@ function primaryDevisStatut(
   if (devis.some((d) => d.statut === 'refuse')) return 'refuse'
   if (devis.some((d) => d.statut === 'remplace')) return 'remplace'
   return null
+}
+
+/** Devis « principal » (même priorité que le KPI), pas forcément le plus récent créé. */
+function primaryDevisOf<T extends { statut?: string | null; dateCreation?: string }>(
+  devis: T[] | undefined | null,
+): T | null {
+  if (!devis?.length) return null
+  const statut = primaryDevisStatut(devis)
+  if (!statut) return devis[0] ?? null
+  return devis.find((d) => d.statut === statut) ?? devis[0] ?? null
 }
 
 /** « Non traiter » = pas encore envoyé / accepté (sans devis, brouillon, remplacé, refusé). */
@@ -1505,63 +1523,40 @@ export default function DevisGestionnairePage() {
 
     /**
      * Tri Acceptés (demande gestionnaire) :
-     * 1) À venir en haut — ordre de passage (date intervention, sinon arrivée), mois croissant
-     * 2) Dossiers déjà passés / opérées en bas — classés par mois croissant
-     * Autres filtres : même date de passage, croissante.
+     * 1) À venir en haut — ordre de passage croissant (prochaine en premier)
+     * 2) Opérées / passées en bas — classées par mois croissant
+     * 3) Sans date tout en bas
      */
     const startOfToday = new Date()
     startOfToday.setHours(0, 0, 0, 0)
 
-    const passageDate = (p: (typeof filtered)[number]): Date | null => {
-      const raw = p.logistique?.dateIntervention || p.logistique?.dateArrivee
-      if (!raw) return null
-      const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) return null
-      return d
-    }
     const passageTs = (p: (typeof filtered)[number]) => {
-      const d = passageDate(p)
+      const raw = passageDateRaw(p)?.value
+      if (!raw) return null
+      const d = passageDayLocal(raw)
       return d ? d.getTime() : null
     }
-    /** Clé mois pour classer par mois (année × 12 + mois). */
-    const monthKey = (p: (typeof filtered)[number]) => {
-      const d = passageDate(p)
-      if (!d) return null
-      return d.getFullYear() * 12 + d.getMonth()
-    }
-    const byPassageMonth = (a: (typeof filtered)[number], b: (typeof filtered)[number]) => {
-      const ma = monthKey(a)
-      const mb = monthKey(b)
+    const byPassageAsc = (a: (typeof filtered)[number], b: (typeof filtered)[number]) => {
       const ta = passageTs(a)
       const tb = passageTs(b)
-      if (ma == null && mb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
-      if (ma == null) return 1
-      if (mb == null) return -1
-      if (ma !== mb) return ma - mb
-      // Même mois : jour croissant
-      if (ta == null || tb == null) return 0
+      if (ta == null && tb == null) return +new Date(b.updatedAt) - +new Date(a.updatedAt)
+      if (ta == null) return 1
+      if (tb == null) return -1
       return ta - tb
-    }
-
-    const isPastPassage = (p: (typeof filtered)[number]) => {
-      if (p.status === 'post_op' || p.status === 'suivi_termine') return true
-      const t = passageTs(p)
-      return t != null && t < startOfToday.getTime()
     }
 
     if (devisFilter === 'accepte') {
       return [...filtered].sort((a, b) => {
-        const aDone = isPastPassage(a)
-        const bDone = isPastPassage(b)
-        // Passés / opérées → en bas
-        if (aDone !== bDone) return aDone ? 1 : -1
-        // Dans chaque groupe : ordre de passage par mois
-        return byPassageMonth(a, b)
+        const ba = passageBucket(a, startOfToday)
+        const bb = passageBucket(b, startOfToday)
+        if (ba !== bb) return PASSAGE_BUCKET_ORDER[ba] - PASSAGE_BUCKET_ORDER[bb]
+        // À venir et opérées : même ordre chronologique de passage (mois croissant)
+        if (ba === 'upcoming' || ba === 'past') return byPassageAsc(a, b)
+        return +new Date(b.updatedAt) - +new Date(a.updatedAt)
       })
     }
 
-    // Autres filtres : chronologique par date de passage (mois)
-    return [...filtered].sort((a, b) => byPassageMonth(a, b))
+    return [...filtered].sort((a, b) => byPassageAsc(a, b))
   }, [patients, abstentionPatients, search, devisFilter])
 
   const deletedFiltered = useMemo(() => {
@@ -1593,6 +1588,23 @@ export default function DevisGestionnairePage() {
   useEffect(() => {
     setPage(1)
   }, [search, devisFilter])
+
+  const accepteCounts = useMemo(() => {
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+    let upcoming = 0
+    let past = 0
+    let undated = 0
+    if (devisFilter === 'accepte') {
+      for (const p of patientsFiltered) {
+        const b = passageBucket(p, startOfToday)
+        if (b === 'upcoming') upcoming += 1
+        else if (b === 'past') past += 1
+        else undated += 1
+      }
+    }
+    return { upcoming, past, undated }
+  }, [patientsFiltered, devisFilter])
 
   const { slice: pagePatients, totalPages: patientTotalPages, page: patientSafePage, total: patientListTotal } = useMemo(
     () => paginateSlice(patientsFiltered, page, LIST_PAGE_SIZE),
@@ -3176,6 +3188,16 @@ export default function DevisGestionnairePage() {
                   {' '}devis supprimé{deletedFiltered.length > 1 ? 's' : ''}
                   {search ? ' (filtrés)' : ''}
                 </>
+              ) : devisFilter === 'accepte' ? (
+                <>
+                  <span className="font-semibold text-foreground">{patientsFiltered.length}</span>
+                  {' '}accepté{patientsFiltered.length > 1 ? 's' : ''}
+                  <> · <span className="font-semibold text-emerald-700">{accepteCounts.upcoming}</span> à venir</>
+                  <> · <span className="font-semibold text-slate-600">{accepteCounts.past}</span> opérée{accepteCounts.past > 1 ? 's' : ''}</>
+                  {accepteCounts.undated > 0 && (
+                    <> · <span className="font-semibold text-amber-700">{accepteCounts.undated}</span> sans date</>
+                  )}
+                </>
               ) : (
                 <>
                   <span className="font-semibold text-foreground">{patientsFiltered.length}</span> patient{patientsFiltered.length > 1 ? 's' : ''}
@@ -3306,15 +3328,85 @@ export default function DevisGestionnairePage() {
           {!listBusy && !showingDeleted && patientsFiltered.length > 0 && (
             <>
             <div className="divide-y divide-border/40">
-              {pagePatients.map((p) => {
-              const lastDevis = p.devis[0]
+              {pagePatients.map((p, idx) => {
+              const primaryDevis = primaryDevisOf(p.devis)
+              const lastDevis = primaryDevis ?? p.devis[0]
               const devisStatut = primaryDevisStatut(p.devis) ?? lastDevis?.statut
               const hasDevis = !!devisStatut
               const isRead    = !!lastDevis?.vuParPatientAt
+              const startOfToday = new Date()
+              startOfToday.setHours(0, 0, 0, 0)
+              const passage = passageDateRaw(p)
+              const bucket = passageBucket(p, startOfToday)
+              const month = passageMonthMeta(passage?.value)
+              const globalIndex = (safePage - 1) * LIST_PAGE_SIZE + idx
+              const prev = globalIndex > 0 ? patientsFiltered[globalIndex - 1] : null
+              const prevBucket = prev ? passageBucket(prev, startOfToday) : null
+              const prevMonth = prev ? passageMonthMeta(passageDateRaw(prev)?.value) : null
+              const showBucketHeader =
+                devisFilter === 'accepte' && (prev == null || prevBucket !== bucket)
+              const showMonthHeader =
+                devisFilter === 'accepte'
+                && bucket !== 'undated'
+                && !!month
+                && (showBucketHeader || prevMonth?.key !== month.key)
+              const bucketCount =
+                bucket === 'upcoming'
+                  ? accepteCounts.upcoming
+                  : bucket === 'past'
+                    ? accepteCounts.past
+                    : accepteCounts.undated
+
+              const showEmptyUpcomingHeader =
+                devisFilter === 'accepte'
+                && accepteCounts.upcoming === 0
+                && idx === 0
+                && safePage === 1
+                && bucket !== 'upcoming'
 
               return (
+                <div key={p.id}>
+                {showEmptyUpcomingHeader && (
+                  <>
+                    <div className="px-4 sm:px-5 py-2.5 border-b flex items-center justify-between gap-2 bg-emerald-50/70 border-emerald-100">
+                      <p className="text-xs font-semibold tracking-wide uppercase text-emerald-800">
+                        {PASSAGE_BUCKET_LABEL.upcoming}
+                      </p>
+                      <span className="text-[11px] font-medium text-slate-500 tabular-nums">0</span>
+                    </div>
+                    <div className="px-4 sm:px-5 py-3 border-b border-border/40 bg-white">
+                      <p className="text-xs text-slate-500">
+                        Aucune intervention à venir — les dossiers opérés restent en bas du fil.
+                      </p>
+                    </div>
+                  </>
+                )}
+                {showBucketHeader && (
+                  <div className={cn(
+                    'px-4 sm:px-5 py-2.5 border-b flex items-center justify-between gap-2',
+                    bucket === 'upcoming' && 'bg-emerald-50/70 border-emerald-100',
+                    bucket === 'past' && 'bg-slate-50 border-slate-200/80',
+                    bucket === 'undated' && 'bg-amber-50/60 border-amber-100',
+                  )}>
+                    <p className={cn(
+                      'text-xs font-semibold tracking-wide uppercase',
+                      bucket === 'upcoming' && 'text-emerald-800',
+                      bucket === 'past' && 'text-slate-600',
+                      bucket === 'undated' && 'text-amber-800',
+                    )}>
+                      {PASSAGE_BUCKET_LABEL[bucket]}
+                    </p>
+                    <span className="text-[11px] font-medium text-slate-500 tabular-nums">
+                      {bucketCount}
+                    </span>
+                  </div>
+                )}
+                {showMonthHeader && month && (
+                  <div className="px-4 sm:px-5 py-1.5 bg-white border-b border-border/40">
+                    <p className="text-[11px] font-medium text-slate-500">{month.label}</p>
+                  </div>
+                )}
                 <div
-                  key={p.id}
                   className="flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-muted/20 group transition-colors"
                 >
                   <button
@@ -3334,40 +3426,86 @@ export default function DevisGestionnairePage() {
                       <span className="text-[10px] font-mono text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">{p.dossierNumber}</span>
                   </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      <StatusBadge kind="dossier" value={p.status} />
+                      {devisFilter === 'accepte' ? (
+                        <span className={cn(
+                          'inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md border',
+                          passage?.kind === 'arrivee'
+                            ? 'bg-sky-50 text-sky-700 border-sky-100'
+                            : passage
+                              ? 'bg-violet-50 text-violet-700 border-violet-100'
+                              : 'bg-amber-50 text-amber-700 border-amber-100',
+                        )}>
+                          <CalendarDays className="h-3 w-3" />
+                          {passage?.kind === 'arrivee' ? 'Arrivée' : passage ? 'Intervention' : 'Date manquante'}
+                        </span>
+                      ) : (
+                        <StatusBadge kind="dossier" value={p.status} />
+                      )}
                       {p.user.email && <span className="text-[11px] text-slate-400 hidden md:inline truncate max-w-[180px]">{p.user.email}</span>}
           </div>
         </div>
 
-                  <div className="hidden sm:flex flex-col items-end gap-1 shrink-0 min-w-[190px]">
-                    <div className="flex items-center gap-1.5">
-                      {hasDevis && devisStatut
-                        ? <StatusBadge kind="devis" value={devisStatut} />
-                        : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">Pas de devis</span>}
-                      {lastDevis?.dateCreation && hasDevis && (
-                        <span className="text-[10px] text-muted-foreground">· {formatDate(lastDevis.dateCreation)}</span>
-                      )}
-                    </div>
-                    {devisStatut === 'envoye' && (
-                      <span className={`flex items-center gap-1 text-[11px] font-medium ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {isRead ? 'Consulté' : 'Non consulté'}
-                      </span>
-                    )}
-                    {devisStatut === 'accepte' && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">Accepté</span>
-                    )}
-                    {devisStatut === 'refuse' && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500">Refusé</span>
-                    )}
-                    {!hasDevis && (
-                      <span className="text-[11px] text-slate-400">Créer un devis →</span>
+                  <div className="hidden sm:flex flex-col items-end gap-1 shrink-0 min-w-[170px]">
+                    {devisFilter === 'accepte' ? (
+                      <>
+                        {passage ? (
+                          <p className="text-sm font-semibold text-slate-900 tabular-nums">
+                            {formatDate(passage.value)}
+                          </p>
+                        ) : (
+                          <p className="text-sm text-amber-700/80">À renseigner</p>
+                        )}
+                        <p className="text-[11px] text-slate-500">
+                          {passage?.kind === 'arrivee'
+                            ? 'Date d’arrivée'
+                            : passage
+                              ? 'Date d’intervention'
+                              : 'Logistique'}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          {hasDevis && devisStatut
+                            ? <StatusBadge kind="devis" value={devisStatut} />
+                            : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">Pas de devis</span>}
+                          {lastDevis?.dateCreation && hasDevis && (
+                            <span className="text-[10px] text-muted-foreground">· {formatDate(lastDevis.dateCreation)}</span>
+                          )}
+                        </div>
+                        {devisStatut === 'envoye' && (
+                          <span className={`flex items-center gap-1 text-[11px] font-medium ${isRead ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            {isRead ? 'Consulté' : 'Non consulté'}
+                          </span>
+                        )}
+                        {devisStatut === 'accepte' && (
+                          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">Accepté</span>
+                        )}
+                        {devisStatut === 'refuse' && (
+                          <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500">Refusé</span>
+                        )}
+                        {!hasDevis && (
+                          <span className="text-[11px] text-slate-400">Créer un devis →</span>
+                        )}
+                      </>
                     )}
                   </div>
 
-                  <div className="sm:hidden shrink-0">
-                    {hasDevis && devisStatut
-                      ? <StatusBadge kind="devis" value={devisStatut} />
-                      : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500">Sans devis</span>}
+                  <div className="sm:hidden shrink-0 text-right">
+                    {devisFilter === 'accepte' ? (
+                      <>
+                        <p className="text-xs font-semibold text-slate-900 tabular-nums">
+                          {passage ? formatDate(passage.value) : '—'}
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          {passage?.kind === 'arrivee' ? 'Arrivée' : passage ? 'Intervention' : 'Sans date'}
+                        </p>
+                      </>
+                    ) : hasDevis && devisStatut ? (
+                      <StatusBadge kind="devis" value={devisStatut} />
+                    ) : (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500">Sans devis</span>
+                    )}
                   </div>
 
                   <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 shrink-0 transition-colors" />
@@ -3405,6 +3543,7 @@ export default function DevisGestionnairePage() {
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
               </div>
+                </div>
               )
             })}
             </div>

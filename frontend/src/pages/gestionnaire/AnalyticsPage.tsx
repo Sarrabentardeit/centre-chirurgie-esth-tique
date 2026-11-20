@@ -40,6 +40,8 @@ const SEXE_LABELS: Record<string, string> = {
 }
 
 type AnalyticsKpis = {
+  formulairesRemplis: number
+  devisEnvoyes: number
   nonTraiterRate: number
   nonTraiterCount: number
   nonTraiterBase: number
@@ -52,6 +54,8 @@ type AnalyticsKpis = {
 }
 
 const EMPTY_KPIS: AnalyticsKpis = {
+  formulairesRemplis: 0,
+  devisEnvoyes: 0,
   nonTraiterRate: 0,
   nonTraiterCount: 0,
   nonTraiterBase: 0,
@@ -129,6 +133,8 @@ export default function AnalyticsPage() {
       setInterventionDistribution(res.interventionDistribution ?? [])
       setPaysDistribution(res.paysDistribution ?? [])
       setKpis({
+        formulairesRemplis: res.kpis.formulairesRemplis ?? 0,
+        devisEnvoyes: res.kpis.devisEnvoyes ?? 0,
         nonTraiterRate: res.kpis.nonTraiterRate ?? 0,
         nonTraiterCount: res.kpis.nonTraiterCount ?? 0,
         nonTraiterBase: res.kpis.nonTraiterBase ?? 0,
@@ -228,16 +234,31 @@ export default function AnalyticsPage() {
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-sm text-muted-foreground">Patients ayant rempli le formulaire</p>
+            <p className="text-2xl font-bold mt-1 tabular-nums">{kpis.formulairesRemplis}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-sm text-muted-foreground">Devis envoyés</p>
+            <p className="text-2xl font-bold mt-1 tabular-nums">{kpis.devisEnvoyes}</p>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Card>
           <CardContent className="pt-5">
-            <p className="text-sm text-muted-foreground">Taux devis non traiter</p>
+            <p className="text-sm text-muted-foreground">Taux devis non traités</p>
             <p className="text-2xl font-bold mt-1">{kpis.nonTraiterRate}%</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-5">
-            <p className="text-sm text-muted-foreground">Taux devis traité</p>
+            <p className="text-sm text-muted-foreground">Taux devis traités</p>
             <p className="text-2xl font-bold mt-1">{kpis.treatedRate}%</p>
           </CardContent>
         </Card>

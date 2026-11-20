@@ -1,17 +1,38 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CalendarDays, RefreshCw, FileText, Pencil, Trash2 } from 'lucide-react'
+import { CalendarDays, RefreshCw, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
-import { cn } from '@/lib/utils'
+import { StatusBadge } from '@/lib/statusUi'
+import { cn, formatDate } from '@/lib/utils'
 import { gestionnaireApi, type GestionnairePlanningSejourPatient } from '@/lib/api'
 import { LIST_PAGE_SIZE, PaginationBar, paginateSlice } from '@/components/PaginationBar'
 import { cachedFetch, hasCachedData } from '@/lib/cachedFetch'
 import { queryKeys } from '@/lib/queryKeys'
+import {
+  passageBucket,
+  passageDateRaw,
+  passageMonthMeta,
+  passageTimestamp,
+  PASSAGE_BUCKET_ORDER,
+  startOfTodayLocal,
+} from '@/lib/passageDates'
 
-function isFinalise(p: GestionnairePlanningSejourPatient) {
-  return p.planning?.statut === 'finalise'
+type PhaseKey = 'all' | 'accepte' | 'planning' | 'intervention' | 'post_op'
+
+const PHASE_STATUSES: Record<Exclude<PhaseKey, 'all'>, string[]> = {
+  accepte: ['devis_accepte'],
+  planning: ['date_reservee', 'logistique'],
+  intervention: ['intervention'],
+  post_op: ['post_op', 'suivi_termine'],
+}
+
+function phaseOf(status: string): Exclude<PhaseKey, 'all'> {
+  if (PHASE_STATUSES.post_op.includes(status)) return 'post_op'
+  if (PHASE_STATUSES.intervention.includes(status)) return 'intervention'
+  if (PHASE_STATUSES.planning.includes(status)) return 'planning'
+  return 'accepte'
 }
 
 export default function PlanningSejourPage() {
@@ -23,25 +44,47 @@ export default function PlanningSejourPage() {
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
+  const [phaseFilter, setPhaseFilter] = useState<PhaseKey>('all')
 
   const ordered = useMemo(() => {
+    const today = startOfTodayLocal()
     return [...patients].sort((a, b) => {
-      const af = isFinalise(a)
-      const bf = isFinalise(b)
-      if (af !== bf) return af ? 1 : -1
+      const ba = passageBucket(a, today)
+      const bb = passageBucket(b, today)
+      if (ba !== bb) return PASSAGE_BUCKET_ORDER[ba] - PASSAGE_BUCKET_ORDER[bb]
+      const ta = passageTimestamp(a)
+      const tb = passageTimestamp(b)
+      if (ba === 'upcoming' || ba === 'past') {
+        if (ta == null && tb == null) return a.user.fullName.localeCompare(b.user.fullName, 'fr')
+        if (ta == null) return 1
+        if (tb == null) return -1
+        return ta - tb
+      }
       return a.user.fullName.localeCompare(b.user.fullName, 'fr')
     })
   }, [patients])
 
-  const aTraiter = ordered.filter((p) => !isFinalise(p))
-  const finalises = ordered.filter((p) => isFinalise(p))
+  const phaseCounts = useMemo(() => {
+    const counts = { accepte: 0, planning: 0, intervention: 0, post_op: 0 }
+    for (const p of patients) {
+      counts[phaseOf(p.status)] += 1
+    }
+    return counts
+  }, [patients])
+
+  const filtered = useMemo(() => {
+    if (phaseFilter === 'all') return ordered
+    return ordered.filter((p) => phaseOf(p.status) === phaseFilter)
+  }, [ordered, phaseFilter])
 
   const { slice: pagePatients, totalPages, page: safePage, total: listTotal } = useMemo(
-    () => paginateSlice(ordered, page, LIST_PAGE_SIZE),
-    [ordered, page],
+    () => paginateSlice(filtered, page, LIST_PAGE_SIZE),
+    [filtered, page],
   )
-  const pageATraiter = pagePatients.filter((p) => !isFinalise(p))
-  const pageFinalises = pagePatients.filter((p) => isFinalise(p))
+
+  useEffect(() => {
+    setPage(1)
+  }, [patients.length, phaseFilter])
 
   const load = async (opts?: { useCache?: boolean }) => {
     const key = queryKeys.planningSejour()
@@ -94,14 +137,52 @@ export default function PlanningSejourPage() {
     }
   }
 
+  const kpiItems: Array<{
+    key: PhaseKey
+    label: string
+    value: number
+    tone: string
+  }> = [
+    {
+      key: 'all',
+      label: 'Total',
+      value: patients.length,
+      tone: 'border-slate-200 bg-slate-50 text-slate-700',
+    },
+    {
+      key: 'accepte',
+      label: 'Accepté',
+      value: phaseCounts.accepte,
+      tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    },
+    {
+      key: 'planning',
+      label: 'Planning',
+      value: phaseCounts.planning,
+      tone: 'border-sky-200 bg-sky-50 text-sky-800',
+    },
+    {
+      key: 'intervention',
+      label: 'Intervention',
+      value: phaseCounts.intervention,
+      tone: 'border-violet-200 bg-violet-50 text-violet-800',
+    },
+    {
+      key: 'post_op',
+      label: 'Post-op',
+      value: phaseCounts.post_op,
+      tone: 'border-brand-200 bg-brand-50 text-brand-800',
+    },
+  ]
+
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">Planning séjour</h2>
+            <h2 className="text-xl font-semibold text-slate-900">Patients Confirmés</h2>
             <p className="text-sm text-muted-foreground">
-              Ouvrez le dossier patient (logistique + planning) ou l’éditeur de planning
+              Dossiers avec devis accepté — classés par date de passage.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -109,52 +190,74 @@ export default function PlanningSejourPage() {
             Actualiser
           </Button>
         </div>
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-amber-700 font-semibold">À traiter</p>
-            <p className="text-2xl font-bold text-amber-800 mt-1">{aTraiter.length}</p>
-          </div>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Finalisés</p>
-            <p className="text-2xl font-bold text-emerald-800 mt-1">{finalises.length}</p>
-          </div>
-          <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-brand-700 font-semibold">Total</p>
-            <p className="text-2xl font-bold text-brand-800 mt-1">{patients.length}</p>
-          </div>
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {kpiItems.map((item) => {
+            const active = phaseFilter === item.key
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setPhaseFilter(item.key)}
+                className={cn(
+                  'rounded-xl border px-4 py-3 text-left transition-all',
+                  item.tone,
+                  active ? 'ring-2 ring-brand-400/40 shadow-sm' : 'hover:shadow-sm',
+                )}
+              >
+                <p className="text-xs uppercase tracking-wide font-semibold opacity-80">{item.label}</p>
+                <p className="text-2xl font-bold mt-1 tabular-nums">{item.value}</p>
+              </button>
+            )
+          })}
         </div>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      {patients.length === 0 ? (
+      {patients.length === 0 && !loading ? (
         <div className="rounded-2xl border border-slate-200 bg-white text-center py-16">
           <CalendarDays className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
           <p className="text-muted-foreground text-sm">Aucune patiente avec devis accepté pour le moment.</p>
         </div>
       ) : (
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="p-4 max-h-[75vh] overflow-y-auto space-y-4">
-            {pageATraiter.length > 0 && (
-              <PatientSection
-                title="À traiter"
-                titleClass="text-amber-700"
-                patients={pageATraiter}
-                onOpenDossier={openDossierPlanning}
-                onOpenEditor={openEditor}
-                onDelete={setDeleteTarget}
-              />
-            )}
-            {pageFinalises.length > 0 && (
-              <PatientSection
-                title="Finalisés"
-                titleClass="text-emerald-700"
-                patients={pageFinalises}
-                onOpenDossier={openDossierPlanning}
-                onOpenEditor={openEditor}
-                onDelete={setDeleteTarget}
-                done
-              />
+          <div className="px-4 py-2 bg-muted/10 border-b border-border/40">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{filtered.length}</span>
+              {' '}dossier{filtered.length > 1 ? 's' : ''}
+              {phaseFilter !== 'all' ? ' (filtrés)' : ''}
+            </p>
+          </div>
+          <div className="divide-y divide-border/40 max-h-[75vh] overflow-y-auto">
+            {pagePatients.map((p, idx) => {
+              const passage = passageDateRaw(p)
+              const month = passageMonthMeta(passage?.value)
+              const globalIndex = (safePage - 1) * LIST_PAGE_SIZE + idx
+              const prev = globalIndex > 0 ? filtered[globalIndex - 1] : null
+              const prevMonth = prev ? passageMonthMeta(passageDateRaw(prev)?.value) : null
+              const showMonthHeader = !!month && (prev == null || prevMonth?.key !== month.key)
+
+              return (
+                <div key={p.id}>
+                  {showMonthHeader && month && (
+                    <div className="px-4 sm:px-5 py-1.5 bg-slate-50/80 border-b border-border/40">
+                      <p className="text-[11px] font-medium text-slate-500">{month.label}</p>
+                    </div>
+                  )}
+                  <PatientRow
+                    patient={p}
+                    passage={passage}
+                    onOpenDossier={openDossierPlanning}
+                    onOpenEditor={openEditor}
+                    onDelete={setDeleteTarget}
+                  />
+                </div>
+              )
+            })}
+            {filtered.length === 0 && (
+              <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                Aucun dossier dans cette phase.
+              </div>
             )}
           </div>
           <PaginationBar
@@ -196,95 +299,96 @@ export default function PlanningSejourPage() {
   )
 }
 
-function PatientSection({
-  title,
-  titleClass,
-  patients,
+function PatientRow({
+  patient: p,
+  passage,
   onOpenDossier,
   onOpenEditor,
   onDelete,
-  done,
 }: {
-  title: string
-  titleClass: string
-  patients: GestionnairePlanningSejourPatient[]
+  patient: GestionnairePlanningSejourPatient
+  passage: { kind: 'intervention' | 'arrivee'; value: string } | null
   onOpenDossier: (id: string) => void
   onOpenEditor: (id: string) => void
   onDelete: (p: GestionnairePlanningSejourPatient) => void
-  done?: boolean
 }) {
-  return (
-    <div className="space-y-2">
-      <p className={cn('text-[11px] font-semibold uppercase tracking-wide', titleClass)}>{title}</p>
-      {patients.map((p) => (
-        <div
-          key={p.id}
-          className="flex items-center gap-3 rounded-xl border border-border p-3 hover:bg-muted/50 hover:border-brand-300 transition-all"
-        >
-          <button
-            type="button"
-            onClick={() => onOpenDossier(p.id)}
-            className="flex flex-1 items-center gap-3 min-w-0 text-left"
-          >
-            <Avatar className="h-9 w-9 shrink-0">
-              <AvatarFallback
-                className={cn(
-                  'text-sm font-semibold',
-                  done ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800',
-                )}
-              >
-                {p.user.fullName
-                  .split(' ')
-                  .map((n) => n[0])
-                  .join('')
-                  .slice(0, 2)
-                  .toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate">{p.user.fullName}</p>
-              <p className="text-xs text-muted-foreground">
-                {p.planning?.moisLabel ?? 'Planning non créé'}
-                {p.planning?.hasContent ? ' · brouillon enregistré' : ''}
-              </p>
-            </div>
-            {done ? (
-              <span className="text-[10px] font-semibold text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-full px-2 py-0.5 shrink-0">
-                Finalisé
-              </span>
-            ) : p.planning?.hasContent ? (
-              <FileText className="h-4 w-4 text-amber-600 shrink-0" />
-            ) : (
-              <span className="text-[10px] font-medium text-amber-700 shrink-0">À faire</span>
-            )}
-          </button>
+  const planningHint =
+    p.planning?.statut === 'finalise'
+      ? 'Planning finalisé'
+      : p.planning?.hasContent
+        ? 'Planning brouillon'
+        : null
 
-          <div className="flex items-center gap-1 shrink-0">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-slate-500 hover:text-brand-700"
-              title="Modifier le planning"
-              onClick={() => onOpenEditor(p.id)}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-            {p.planning && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-slate-400 hover:text-destructive hover:bg-destructive/10"
-                title="Supprimer le planning"
-                onClick={() => onDelete(p)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+  return (
+    <div className="flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-muted/20 transition-colors">
+      <button
+        type="button"
+        onClick={() => onOpenDossier(p.id)}
+        className="flex flex-1 items-center gap-3 min-w-0 text-left"
+      >
+        <Avatar className="h-9 w-9 shrink-0">
+          <AvatarFallback className="text-sm font-semibold bg-brand-50 text-brand-700">
+            {p.user.fullName
+              .split(' ')
+              .map((n) => n[0])
+              .join('')
+              .slice(0, 2)
+              .toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-slate-900 truncate">{p.user.fullName}</p>
+            <span className="text-[10px] font-mono text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">
+              {p.dossierNumber}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <StatusBadge kind="dossier" value={p.status} />
+            {planningHint && <span className="text-[11px] text-slate-400">{planningHint}</span>}
           </div>
         </div>
-      ))}
+
+        <div className="hidden sm:flex flex-col items-end gap-0.5 shrink-0 min-w-[140px]">
+          {passage ? (
+            <p className="text-sm font-semibold text-slate-900 tabular-nums">{formatDate(passage.value)}</p>
+          ) : (
+            <p className="text-sm text-slate-400">—</p>
+          )}
+          <p className="text-[11px] text-slate-500">
+            {passage?.kind === 'arrivee'
+              ? 'Date d’arrivée'
+              : passage
+                ? 'Date d’intervention'
+                : 'Date non renseignée'}
+          </p>
+        </div>
+      </button>
+
+      <div className="flex items-center gap-1 shrink-0">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-slate-500 hover:text-brand-700"
+          title="Modifier le planning"
+          onClick={() => onOpenEditor(p.id)}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+        {p.planning && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-slate-400 hover:text-destructive hover:bg-destructive/10"
+            title="Supprimer le planning"
+            onClick={() => onDelete(p)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

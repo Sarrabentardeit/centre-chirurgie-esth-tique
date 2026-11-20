@@ -44,8 +44,15 @@ import { supersedeOtherAcceptedDevis } from '../../lib/devisAccept.js'
 const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
 
 
-/** Liste planning séjour : uniquement dossiers « devis accepté » (pas les étapes suivantes). */
-const PLANNING_SEJOUR_STATUSES = ['devis_accepte', 'date_reservee', 'logistique', 'intervention', 'post_op'] as const
+/** Édition planning séjour : après acceptation du devis (parcours séjour). */
+const PLANNING_SEJOUR_STATUSES = [
+  'devis_accepte',
+  'date_reservee',
+  'logistique',
+  'intervention',
+  'post_op',
+  'suivi_termine',
+] as const
 
 const patientListInclude = {
   user: { select: { id: true, fullName: true, email: true, createdAt: true } },
@@ -2254,9 +2261,15 @@ async function loadPlanningSejourContext(patientId: string) {
 }
 
 export async function getPlanningSejourPatients() {
+  /** Patients Confirmés = dossiers avec devis accepté (pas « planning déjà édité »). */
   const patients = await prisma.patient.findMany({
-    where: { status: { in: [...PLANNING_SEJOUR_STATUSES] } },
-    include: { user: { select: { fullName: true, email: true } } },
+    where: {
+      devis: { some: { statut: 'accepte', deletedAt: null } },
+    },
+    include: {
+      user: { select: { fullName: true, email: true } },
+      logistique: { select: { dateIntervention: true, dateArrivee: true } },
+    },
     orderBy: { updatedAt: 'desc' },
   })
 
@@ -2275,6 +2288,12 @@ export async function getPlanningSejourPatients() {
         ville: p.ville,
         pays: p.pays,
         user: p.user,
+        logistique: p.logistique
+          ? {
+              dateIntervention: p.logistique.dateIntervention?.toISOString() ?? null,
+              dateArrivee: p.logistique.dateArrivee?.toISOString() ?? null,
+            }
+          : null,
         planning: pl
           ? {
               id: pl.id,
@@ -2660,6 +2679,8 @@ export async function getAnalytics() {
     patientsWithDevis,
     abstentionCount,
     sourceRows,
+    formulairesRemplis,
+    devisEnvoyes,
   ] = await Promise.all([
     prisma.patient.groupBy({
       by: ['status'],
@@ -2701,6 +2722,21 @@ export async function getAnalytics() {
             pays: true,
           },
         },
+      },
+    }),
+    // Patients uniques ayant soumis le formulaire (espace Patients)
+    prisma.patient.count({
+      where: {
+        creePar: 'patiente',
+        formulaires: { some: { status: 'submitted' } },
+      },
+    }),
+    // Devis effectivement envoyés (envoyés / acceptés / refusés), hors brouillon
+    prisma.devis.count({
+      where: {
+        deletedAt: null,
+        statut: { in: ['envoye', 'accepte', 'refuse'] },
+        patient: { creePar: 'patiente' },
       },
     }),
   ])
@@ -2756,9 +2792,9 @@ export async function getAnalytics() {
   const abstentionRate = totalBase > 0 ? Math.round((abstentionCount / totalBase) * 100) : 0
 
   const devisBuckets = [
-    { key: 'non_traiter', label: 'Non traiter', count: nonTraiter },
-    { key: 'traiter', label: 'Traiter', count: traiter },
-    { key: 'accepte', label: 'Accepté', count: accepte },
+    { key: 'non_traiter', label: 'Non traités', count: nonTraiter },
+    { key: 'traiter', label: 'Traités', count: traiter },
+    { key: 'accepte', label: 'Acceptés', count: accepte },
     { key: 'abstention', label: 'Abstention', count: abstentionCount },
   ]
 
@@ -2868,6 +2904,8 @@ export async function getAnalytics() {
     interventionDistribution,
     paysDistribution,
     kpis: {
+      formulairesRemplis,
+      devisEnvoyes,
       nonTraiterRate,
       nonTraiterCount: nonTraiter,
       nonTraiterBase: devisBase,

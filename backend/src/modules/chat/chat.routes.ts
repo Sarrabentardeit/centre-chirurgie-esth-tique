@@ -14,21 +14,17 @@ import {
 } from './chat.schema.js'
 import * as chatService from './chat.service.js'
 import { subscribeChatRealtime } from '../../lib/chatRealtime.js'
+import { createEncryptedDiskStorage } from '../../lib/uploadCrypto.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
 mkdirSync(UPLOADS_DIR, { recursive: true })
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `chat-${Date.now()}-${safe}`)
-  },
-})
-
 const upload = multer({
-  storage,
+  storage: createEncryptedDiskStorage(UPLOADS_DIR, (_req, file) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return `chat-${Date.now()}-${safe}`
+  }),
   limits: { fileSize: 12 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']

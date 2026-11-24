@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../middleware/errorHandler.js'
 import { logger } from '../../lib/logger.js'
 import bcrypt from 'bcryptjs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
@@ -40,6 +40,8 @@ import { publicDevisPdfUrl } from '../../lib/devisPdfPublic.js'
 import type { UpdatePatientStatusInput } from '../medecin/medecin.schema.js'
 import { softDeleteDevisPdfMessages, sendStaffOnlyMessage } from '../chat/chat.service.js'
 import { supersedeOtherAcceptedDevis } from '../../lib/devisAccept.js'
+import { persistUploadBytes } from '../../lib/uploadCrypto.js'
+import { blindIndex, normalizeEmail } from '../../lib/fieldCrypto.js'
 
 const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
 
@@ -430,28 +432,36 @@ export async function getPatients(
   creePar?: 'patiente' | 'medecin' | 'gestionnaire' | 'cabinet',
 ) {
   const statusWhere = buildPatientStatusWhere(status, 'gestionnaire')
-  const [patients, counts] = await Promise.all([
+  const [patientsRaw, counts] = await Promise.all([
     prisma.patient.findMany({
-    where: {
+      where: {
         ...statusWhere,
         ...creeParWhere(creePar),
-      ...(search
-        ? {
-            OR: [
-              { user: { fullName: { contains: search, mode: 'insensitive' } } },
-              { user: { email: { contains: search, mode: 'insensitive' } } },
-              { dossierNumber: { contains: search, mode: 'insensitive' } },
-              { phone: { contains: search, mode: 'insensitive' } },
-                { devis: { some: { deletedAt: null, numeroDevis: { contains: search, mode: 'insensitive' } } } },
-            ],
-          }
-        : {}),
-    },
-    include: patientListInclude,
-    orderBy: { updatedAt: 'desc' },
+      },
+      include: patientListInclude,
+      orderBy: { updatedAt: 'desc' },
     }),
     countDossierBuckets('gestionnaire', creePar),
   ])
+
+  // Champs identité chiffrés : filtre nom/email/tél après déchiffrement (extension Prisma).
+  const q = search?.trim().toLowerCase() ?? ''
+  const patients = !q
+    ? patientsRaw
+    : patientsRaw.filter((p) => {
+        const name = p.user.fullName?.toLowerCase() ?? ''
+        const email = p.user.email?.toLowerCase() ?? ''
+        const phone = p.phone?.toLowerCase() ?? ''
+        const dossier = p.dossierNumber?.toLowerCase() ?? ''
+        const devisHit = p.devis?.some((d) => (d.numeroDevis ?? '').toLowerCase().includes(q))
+        return (
+          name.includes(q)
+          || email.includes(q)
+          || phone.includes(q)
+          || dossier.includes(q)
+          || !!devisHit
+        )
+      })
 
   await Promise.all(
     patients
@@ -875,7 +885,7 @@ export async function sendDevis(gestionnaireId: string, devisId: string, html?: 
         .slice(0, 80)
       const filename = `chat-${Date.now()}-${diskSlug || 'Devis'}.pdf`
       await mkdir(UPLOADS_DIR, { recursive: true })
-      await writeFile(path.join(UPLOADS_DIR, filename), pdfBuffer)
+      await persistUploadBytes(path.join(UPLOADS_DIR, filename), pdfBuffer)
 
       const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
       pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
@@ -1122,7 +1132,7 @@ async function deliverDevisRappel(input: {
         .slice(0, 80)
       const filename = `chat-${Date.now()}-${diskSlug || 'Devis'}.pdf`
       await mkdir(UPLOADS_DIR, { recursive: true })
-      await writeFile(path.join(UPLOADS_DIR, filename), pdfBuffer)
+      await persistUploadBytes(path.join(UPLOADS_DIR, filename), pdfBuffer)
 
       const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000'
       pieceJointeUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`
@@ -1839,7 +1849,7 @@ export async function updatePatientFiche(actorId: string, patientId: string, inp
     const nextEmail = identity.email?.trim().toLowerCase()
     if (nextEmail && nextEmail !== patient.user.email.toLowerCase()) {
       const emailTaken = await prisma.user.findUnique({
-        where: { email: nextEmail },
+        where: { emailBlind: blindIndex(normalizeEmail(nextEmail)) },
         select: { id: true },
       })
       if (emailTaken) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
@@ -1855,7 +1865,9 @@ export async function updatePatientFiche(actorId: string, patientId: string, inp
         where: { id: patient.userId },
         data: {
           ...(identity.fullName !== undefined && { fullName: identity.fullName.trim() }),
-          ...(nextEmail ? { email: nextEmail } : {}),
+          ...(nextEmail
+            ? { email: nextEmail, emailBlind: blindIndex(normalizeEmail(nextEmail)) }
+            : {}),
         },
       })
     }
@@ -2471,7 +2483,7 @@ export async function sendPlanningSejour(
   const pdfBuffer = await renderHtmlToPdf(html)
   await mkdir(UPLOADS_DIR, { recursive: true })
   const filename = planningPdfFileName(patientId)
-  await writeFile(planningPdfDiskPath(patientId), pdfBuffer)
+  await persistUploadBytes(planningPdfDiskPath(patientId), pdfBuffer)
 
   const baseUrl = (process.env.API_BASE_URL ?? 'http://localhost:4000').replace(/\/$/, '')
   const pieceJointeUrl = `${baseUrl}/uploads/${filename}`
@@ -2930,23 +2942,13 @@ export async function listUsers(input?: {
   const page = Math.max(1, input?.page ?? 1)
   const pageSize = Math.min(50, Math.max(5, input?.pageSize ?? 12))
 
-  const where = {
+  const baseWhere = {
     ...(role ? { role } : {}),
-    ...(search
-      ? {
-          OR: [
-            { fullName: { contains: search, mode: 'insensitive' as const } },
-            { email: { contains: search, mode: 'insensitive' as const } },
-            { patient: { is: { dossierNumber: { contains: search, mode: 'insensitive' as const } } } },
-          ],
-        }
-      : {}),
   }
 
-  const [total, users, totalAll, totalPatients, totalMedecins, totalGestionnaires] = await Promise.all([
-    prisma.user.count({ where }),
+  const [usersRaw, totalAll, totalPatients, totalMedecins, totalGestionnaires] = await Promise.all([
     prisma.user.findMany({
-      where,
+      where: baseWhere,
       include: {
         patient: {
           select: {
@@ -2961,14 +2963,25 @@ export async function listUsers(input?: {
         },
       },
       orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
     }),
     prisma.user.count(),
     prisma.user.count({ where: { role: 'patient' } }),
     prisma.user.count({ where: { role: 'medecin' } }),
     prisma.user.count({ where: { role: 'gestionnaire' } }),
   ])
+
+  const q = search?.toLowerCase() ?? ''
+  const filtered = !q
+    ? usersRaw
+    : usersRaw.filter((u) => {
+        const name = u.fullName?.toLowerCase() ?? ''
+        const email = u.email?.toLowerCase() ?? ''
+        const dossier = u.patient?.dossierNumber?.toLowerCase() ?? ''
+        return name.includes(q) || email.includes(q) || dossier.includes(q)
+      })
+
+  const total = filtered.length
+  const users = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   return {
     users: users.map((u) => ({
@@ -3005,8 +3018,9 @@ export async function listUsers(input?: {
 }
 
 export async function createUserByGestionnaire(actorId: string, input: CreateUserByGestionnaireInput) {
+  const emailNorm = normalizeEmail(input.email)
   const existing = await prisma.user.findUnique({
-    where: { email: input.email.toLowerCase() },
+    where: { emailBlind: blindIndex(emailNorm) },
     select: { id: true },
   })
   if (existing) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
@@ -3015,7 +3029,8 @@ export async function createUserByGestionnaire(actorId: string, input: CreateUse
   const user = await prisma.user.create({
     data: {
       fullName: input.fullName,
-      email: input.email.toLowerCase(),
+      email: emailNorm,
+      emailBlind: blindIndex(emailNorm),
       passwordHash,
       role: input.role,
     },
@@ -3120,15 +3135,19 @@ export async function updateUserByGestionnaire(actorId: string, userId: string, 
 
   if (input.email && input.email.toLowerCase() !== existing.email.toLowerCase()) {
     const emailTaken = await prisma.user.findUnique({
-      where: { email: input.email.toLowerCase() },
+      where: { emailBlind: blindIndex(normalizeEmail(input.email)) },
       select: { id: true },
     })
     if (emailTaken) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
   }
 
-  const data: { fullName?: string; email?: string; passwordHash?: string } = {}
+  const data: { fullName?: string; email?: string; emailBlind?: string; passwordHash?: string } = {}
   if (input.fullName) data.fullName = input.fullName.trim()
-  if (input.email) data.email = input.email.trim().toLowerCase()
+  if (input.email) {
+    const emailNorm = normalizeEmail(input.email)
+    data.email = emailNorm
+    data.emailBlind = blindIndex(emailNorm)
+  }
   if (input.password) data.passwordHash = await bcrypt.hash(input.password, 12)
 
   const updated = await prisma.user.update({

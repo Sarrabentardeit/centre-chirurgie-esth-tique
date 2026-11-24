@@ -16,6 +16,22 @@ const envSchema = z.object({
 
   UPLOAD_DIR: z.string().default('uploads'),
   UPLOAD_MAX_FILE_SIZE_MB: z.coerce.number().default(10),
+  /**
+   * Clé AES-256 (64 hex = 32 octets) pour chiffrer les fichiers dans uploads/.
+   * Si absente : dérivée de JWT_ACCESS_SECRET (OK, mais mieux de fixer une clé dédiée en prod).
+   */
+  UPLOAD_ENCRYPTION_KEY: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined)),
+  /**
+   * Clé AES-256 (64 hex) pour chiffrer les champs sensibles en base (identité, formulaires…).
+   * Si absente : UPLOAD_ENCRYPTION_KEY puis dérivée de JWT_ACCESS_SECRET.
+   */
+  FIELD_ENCRYPTION_KEY: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined)),
   CORS_ORIGINS: z.string().optional(),
 
   /** Synchro Google Calendar */

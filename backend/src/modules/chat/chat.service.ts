@@ -600,23 +600,24 @@ async function notifyPatientNewStaffMessage(input: {
 }
 
 export async function searchChatPatients(search?: string) {
-  const q = search?.trim()
-  const patients = await prisma.patient.findMany({
-    where: q
-      ? {
-          OR: [
-            { dossierNumber: { contains: q, mode: 'insensitive' } },
-            { user: { fullName: { contains: q, mode: 'insensitive' } } },
-            { user: { email: { contains: q, mode: 'insensitive' } } },
-          ],
-        }
-      : undefined,
-    take: q ? 50 : 40,
+  const q = search?.trim().toLowerCase() ?? ''
+  const patientsRaw = await prisma.patient.findMany({
+    take: q ? 200 : 40,
     orderBy: { updatedAt: 'desc' },
     include: {
       user: { select: { fullName: true, email: true } },
     },
   })
+  const patients = !q
+    ? patientsRaw
+    : patientsRaw
+        .filter((p) => {
+          const name = p.user.fullName?.toLowerCase() ?? ''
+          const email = p.user.email?.toLowerCase() ?? ''
+          const dossier = p.dossierNumber?.toLowerCase() ?? ''
+          return name.includes(q) || email.includes(q) || dossier.includes(q)
+        })
+        .slice(0, 50)
 
   if (patients.length === 0) return { patients: [] }
 

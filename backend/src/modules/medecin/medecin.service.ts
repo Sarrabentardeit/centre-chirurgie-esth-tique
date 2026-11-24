@@ -21,6 +21,7 @@ import { buildPatientStatusWhere, countDossierBuckets, creeParWhere } from '../.
 import { formatAgendaSlot } from '../../lib/agendaTime.js'
 import { getDashboardInterventions } from '../../lib/interventionsDashboard.js'
 import { sendStaffOnlyMessage } from '../chat/chat.service.js'
+import { blindIndex, normalizeEmail } from '../../lib/fieldCrypto.js'
 
 function notifyGestionnaires(input: {
   titre: string
@@ -458,8 +459,11 @@ export async function createPreDossier(
   input: CreatePreDossierInput,
   actorRole: 'medecin' | 'gestionnaire' = 'medecin',
 ) {
-  const email = input.email?.trim().toLowerCase() || buildPlaceholderEmail()
-  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } })
+  const email = normalizeEmail(input.email?.trim() || buildPlaceholderEmail())
+  const existing = await prisma.user.findUnique({
+    where: { emailBlind: blindIndex(email) },
+    select: { id: true },
+  })
   if (existing) throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
 
   const passwordHash = await bcrypt.hash(`pre-dossier-${Date.now()}-${Math.random()}`, 12)
@@ -482,6 +486,7 @@ export async function createPreDossier(
           data: {
             fullName: input.fullName.trim(),
             email,
+            emailBlind: blindIndex(email),
             passwordHash,
             role: 'patient',
           },

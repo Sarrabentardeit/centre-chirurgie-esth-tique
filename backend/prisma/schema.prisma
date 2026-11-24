@@ -90,9 +90,13 @@ enum AuditAction {
 
 model User {
   id           String   @id @default(uuid())
-  email        String   @unique
+  /// Email chiffré at-rest (AES). Ne plus utiliser pour findUnique — passer par emailBlind.
+  email        String
+  /// HMAC de l’email normalisé — login / unicité / recherche exacte.
+  emailBlind   String   @unique @map("email_blind")
   passwordHash String   @map("password_hash")
   role         UserRole
+  /// Nom chiffré at-rest.
   fullName     String   @map("full_name")
   avatar       String?
   createdAt    DateTime @default(now()) @map("created_at")

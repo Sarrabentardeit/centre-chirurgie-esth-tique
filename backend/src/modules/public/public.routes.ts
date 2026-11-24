@@ -7,20 +7,16 @@ import { rateLimit } from 'express-rate-limit'
 import { resolveDevisPdfPath, verifyDevisPdfToken } from '../../lib/devisPdfPublic.js'
 import { resolvePlanningPdfPath, verifyPlanningPdfToken } from '../../lib/planningPdfPublic.js'
 import { signGuestUploadToken } from '../../lib/uploadAccess.js'
+import { createEncryptedDiskStorage, readDecryptedUpload } from '../../lib/uploadCrypto.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `guest-${Date.now()}-${safe}`)
-  },
-})
-
 const upload = multer({
-  storage,
+  storage: createEncryptedDiskStorage(UPLOADS_DIR, (_req, file) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return `guest-${Date.now()}-${safe}`
+  }),
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
@@ -81,15 +77,14 @@ publicRouter.get(
         )
         return
       }
+      const buf = await readDecryptedUpload(found.filePath)
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
       res.setHeader('Content-Type', 'application/pdf')
       res.setHeader(
         'Content-Disposition',
         `inline; filename="${found.downloadName.replace(/"/g, '')}"`,
       )
-      res.sendFile(found.filePath, (err) => {
-        if (err) next(err)
-      })
+      res.send(buf)
     } catch (e) {
       next(e)
     }
@@ -116,15 +111,14 @@ publicRouter.get(
         )
         return
       }
+      const buf = await readDecryptedUpload(found.filePath)
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
       res.setHeader('Content-Type', 'application/pdf')
       res.setHeader(
         'Content-Disposition',
         `inline; filename="${found.downloadName.replace(/"/g, '')}"`,
       )
-      res.sendFile(found.filePath, (err) => {
-        if (err) next(err)
-      })
+      res.send(buf)
     } catch (e) {
       next(e)
     }

@@ -17,35 +17,27 @@ import * as patientService from './patient.service.js'
 import * as postOpService from '../../lib/postOp.js'
 import { toPatientSuivi } from '../../lib/postOp.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
+import { createEncryptedDiskStorage } from '../../lib/uploadCrypto.js'
 
-const storagePostOp = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `postop-${Date.now()}-${safe}`)
-  },
-})
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
+
 const uploadPostOp = multer({
-  storage: storagePostOp,
+  storage: createEncryptedDiskStorage(UPLOADS_DIR, (_req, file) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return `postop-${Date.now()}-${safe}`
+  }),
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     cb(null, file.mimetype.startsWith('image/'))
   },
 })
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `${Date.now()}-${safe}`)
-  },
-})
-
 const upload = multer({
-  storage,
+  storage: createEncryptedDiskStorage(UPLOADS_DIR, (_req, file) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return `${Date.now()}-${safe}`
+  }),
   limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB max
   fileFilter: (_req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']

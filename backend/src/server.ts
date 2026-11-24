@@ -23,6 +23,7 @@ import { startPlanningJ7RappelScheduler } from './modules/gestionnaire/planning-
 import { logMailerStatus } from './lib/mailer.js'
 import jwt from 'jsonwebtoken'
 import { verifyGuestUploadToken } from './lib/uploadAccess.js'
+import { guessContentType, readDecryptedUpload } from './lib/uploadCrypto.js'
 import type { JwtPayload } from './modules/auth/auth.types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -93,20 +94,24 @@ function canAccessUpload(req: express.Request, filename: string): boolean {
   return verifyGuestUploadToken(filename, k)
 }
 
-function sendUploadFile(
+async function sendUploadFile(
   res: express.Response,
   next: express.NextFunction,
   filePath: string,
 ) {
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
-  res.setHeader('Cache-Control', 'private, no-store')
-  if (filePath.toLowerCase().endsWith('.pdf')) {
-    res.setHeader('Content-Type', 'application/pdf')
-    res.setHeader('Content-Disposition', 'inline')
+  try {
+    const buf = await readDecryptedUpload(filePath)
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+    res.setHeader('Cache-Control', 'private, no-store')
+    const ct = guessContentType(filePath)
+    if (ct) res.setHeader('Content-Type', ct)
+    if (filePath.toLowerCase().endsWith('.pdf')) {
+      res.setHeader('Content-Disposition', 'inline')
+    }
+    res.send(buf)
+  } catch (err) {
+    next(err)
   }
-  res.sendFile(filePath, (err) => {
-    if (err) next(err)
-  })
 }
 
 // Express 5 : wildcard obligatoire pour `fichier.pdf`
@@ -131,7 +136,7 @@ app.get('/uploads/*file', async (req, res, next) => {
 
     const directPath = path.join(uploadsDir, safeRequested)
     if (existsSync(directPath)) {
-      sendUploadFile(res, next, directPath)
+      await sendUploadFile(res, next, directPath)
       return
     }
 
@@ -149,7 +154,7 @@ app.get('/uploads/*file', async (req, res, next) => {
         )
         return
       }
-      sendUploadFile(res, next, path.join(uploadsDir, candidate))
+      await sendUploadFile(res, next, path.join(uploadsDir, candidate))
     } catch (scanErr) {
       if (scanErr && typeof scanErr === 'object' && 'code' in scanErr && (scanErr as { code?: string }).code === 'ENOENT') {
         res.status(404).type('html').send(

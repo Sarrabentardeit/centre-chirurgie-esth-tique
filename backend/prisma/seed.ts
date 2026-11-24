@@ -1,62 +1,77 @@
-import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+import { prisma } from '../src/lib/prisma.js'
+import { blindIndex, normalizeEmail } from '../src/lib/fieldCrypto.js'
 
-const prisma = new PrismaClient()
+async function ensureUser(input: {
+  email: string
+  fullName: string
+  role: 'medecin' | 'gestionnaire' | 'patient'
+  passwordHash: string
+}) {
+  const email = normalizeEmail(input.email)
+  const existing = await prisma.user.findUnique({
+    where: { emailBlind: blindIndex(email) },
+  })
+  if (existing) {
+    return prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        fullName: input.fullName,
+        passwordHash: input.passwordHash,
+      },
+    })
+  }
+  return prisma.user.create({
+    data: {
+      email,
+      emailBlind: blindIndex(email),
+      fullName: input.fullName,
+      role: input.role,
+      passwordHash: input.passwordHash,
+    },
+  })
+}
 
 async function main() {
   const password = await bcrypt.hash('demo1234', 12)
 
-  // Médecin
-  const medecin = await prisma.user.upsert({
-    where: { email: 'medecin@demo.com' },
-    update: {},
-    create: {
-      email: 'medecin@demo.com',
-      passwordHash: password,
-      role: 'medecin',
-      fullName: 'Dr. Mehdi Chennoufi',
-    },
+  const medecin = await ensureUser({
+    email: 'medecin@demo.com',
+    fullName: 'Dr. Mehdi Chennoufi',
+    role: 'medecin',
+    passwordHash: password,
   })
   console.log(`✅ Médecin : ${medecin.email}`)
 
-  // Gestionnaire
-  const gestionnaire = await prisma.user.upsert({
-    where: { email: 'gestionnaire@demo.com' },
-    update: {},
-    create: {
-      email: 'gestionnaire@demo.com',
-      passwordHash: password,
-      role: 'gestionnaire',
-      fullName: 'Sarah Gestionnaire',
-    },
+  const gestionnaire = await ensureUser({
+    email: 'gestionnaire@demo.com',
+    fullName: 'Sarah Gestionnaire',
+    role: 'gestionnaire',
+    passwordHash: password,
   })
   console.log(`✅ Gestionnaire : ${gestionnaire.email}`)
 
-  // Patient démo
-  const patientUser = await prisma.user.upsert({
-    where: { email: 'patient@demo.com' },
-    update: {},
-    create: {
-      email: 'patient@demo.com',
-      passwordHash: password,
-      role: 'patient',
-      fullName: 'Yasmine Ben Ali',
-    },
+  const patientUser = await ensureUser({
+    email: 'patient@demo.com',
+    fullName: 'Yasmine Ben Ali',
+    role: 'patient',
+    passwordHash: password,
   })
 
-  await prisma.patient.upsert({
-    where: { userId: patientUser.id },
-    update: {},
-    create: {
-      userId: patientUser.id,
-      dossierNumber: 'DOS-2026-000001',
-      phone: '+21698765432',
-      ville: 'Tunis',
-      pays: 'Tunisie',
-      sourceContact: 'instagram',
-      status: 'formulaire_complete',
-    },
-  })
+  const patient = await prisma.patient.findUnique({ where: { userId: patientUser.id } })
+  if (!patient) {
+    await prisma.patient.create({
+      data: {
+        userId: patientUser.id,
+        dossierNumber: 'DOS-2026-000001',
+        phone: '+21698765432',
+        ville: 'Tunis',
+        pays: 'Tunisie',
+        sourceContact: 'instagram',
+        status: 'formulaire_complete',
+      },
+    })
+  }
   console.log(`✅ Patient démo : ${patientUser.email}`)
 
   console.log('\n🎉 Seed terminé — mot de passe démo : demo1234')

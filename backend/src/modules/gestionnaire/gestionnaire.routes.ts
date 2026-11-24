@@ -41,6 +41,7 @@ import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { getTndEurRate } from '../../lib/exchangeRate.js'
 import { parseCreePar } from '../../lib/dossierFilters.js'
 import { renderHtmlToPdf } from '../../lib/htmlPdf.js'
+import { createEncryptedDiskStorage } from '../../lib/uploadCrypto.js'
 
 function pid(v: string | string[] | undefined): string {
   const s = Array.isArray(v) ? v[0] : v
@@ -49,13 +50,11 @@ function pid(v: string | string[] | undefined): string {
 }
 
 const UPLOADS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../uploads')
+
 const uploadPostOp = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-    filename: (_req, file, cb) => {
-      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-      cb(null, `postop-${Date.now()}-${safe}`)
-    },
+  storage: createEncryptedDiskStorage(UPLOADS_DIR, (_req, file) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return `postop-${Date.now()}-${safe}`
   }),
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
@@ -64,12 +63,9 @@ const uploadPostOp = multer({
 })
 
 const uploadCompteRendu = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-    filename: (_req, file, cb) => {
-      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-      cb(null, `cr-${Date.now()}-${safe}`)
-    },
+  storage: createEncryptedDiskStorage(UPLOADS_DIR, (_req, file) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return `cr-${Date.now()}-${safe}`
   }),
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {

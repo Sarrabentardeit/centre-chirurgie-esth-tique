@@ -26,6 +26,7 @@ import * as postOpService from '../../lib/postOp.js'
 import * as googleCalendar from '../google-calendar/google-calendar.service.js'
 import { googleCalendarCallbackRouter } from '../google-calendar/google-calendar.routes.js'
 import { parseCreePar } from '../../lib/dossierFilters.js'
+import { createEncryptedDiskStorage } from '../../lib/uploadCrypto.js'
 
 const renderDevisPdfSchema = z.object({
   html: z.string().min(1),
@@ -34,15 +35,11 @@ const renderDevisPdfSchema = z.object({
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS_DIR = path.join(__dirname, '../../../uploads')
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `${Date.now()}-${safe}`)
-  },
-})
 const upload = multer({
-  storage,
+  storage: createEncryptedDiskStorage(UPLOADS_DIR, (_req, file) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return `${Date.now()}-${safe}`
+  }),
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']

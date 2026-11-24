@@ -9,6 +9,7 @@ import type { UserRole, JwtPayload, RefreshPayload } from './auth.types.js'
 import { generateNextMcReference } from '../../lib/devisNumber.js'
 import { notifyStaff } from '../../lib/staffNotifications.js'
 import { isTunisianPhone, TUNISIA_PHONE_BLOCK_MESSAGE } from '../../lib/phonePolicy.js'
+import { blindIndex, normalizeEmail } from '../../lib/fieldCrypto.js'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,8 +72,9 @@ export async function register(
     throw new AppError(400, 'TUNISIA_NOT_ALLOWED', TUNISIA_PHONE_BLOCK_MESSAGE)
   }
 
+  const email = normalizeEmail(input.email)
   const existing = await prisma.user.findUnique({
-    where: { email: input.email.toLowerCase() },
+    where: { emailBlind: blindIndex(email) },
   })
   if (existing) {
     throw new AppError(409, 'EMAIL_TAKEN', 'Un compte existe déjà avec cet email.')
@@ -82,7 +84,8 @@ export async function register(
 
   const user = await prisma.user.create({
     data: {
-      email: input.email.toLowerCase(),
+      email,
+      emailBlind: blindIndex(email),
       passwordHash,
       role: 'patient',
       fullName: input.fullName,
@@ -142,7 +145,7 @@ export async function login(
   meta: { userAgent?: string; ip?: string }
 ) {
   const user = await prisma.user.findUnique({
-    where: { email: input.email.toLowerCase() },
+    where: { emailBlind: blindIndex(normalizeEmail(input.email)) },
     include: { patient: { select: { dossierNumber: true } } },
   })
 
